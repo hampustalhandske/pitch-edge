@@ -1,0 +1,81 @@
+kind,question,expected,rank,hit@1,hit@5,rr
+match_result,Who won Sassuolo vs Como on 2026-04-17?,match:cfmd_I1_20260417_Sassuolo_Como,1,1,1,1.0
+match_stats,Sassuolo Como 2026-04-17 shots corners referee,match:cfmd_I1_20260417_Sassuolo_Como,1,1,1,1.0
+match_result,Who won Burgos vs Sp Gijon on 2026-04-11?,match:cfmd_SP2_20260411_Burgos_SpGijon,1,1,1,1.0
+match_stats,Burgos Sp Gijon 2026-04-11 shots corners referee,match:cfmd_SP2_20260411_Burgos_SpGijon,1,1,1,1.0
+match_result,Who won Union Berlin vs Ein Frankfurt on 2026-08-29?,match:cfmd_D1_20260829_UnionBerlin_EinFrankfurt,1,1,1,1.0
+match_stats,Union Berlin Ein Frankfurt 2026-08-29 shots corners referee,match:cfmd_D1_20260829_UnionBerlin_EinFrankfurt,1,1,1,1.0
+match_result,Who won Leverkusen vs RB Leipzig on 2026-05-02?,match:cfmd_D1_20260502_Leverkusen_RBLeipzig,1,1,1,1.0
+match_stats,Leverkusen RB Leipzig 2026-05-02 shots corners referee,match:cfmd_D1_20260502_Leverkusen_RBLeipzig,1,1,1,1.0
+match_result,Who won Truro vs Boreham Wood on 2026-03-28?,match:cfmd_EC_20260328_Truro_BorehamWood,1,1,1,1.0
+match_stats,Truro Boreham Wood 2026-03-28 shots corners referee,match:cfmd_EC_20260328_Truro_BorehamWood,4,0,1,0.25
+match_result,Who won Barnet vs Bromley on 2026-04-03?,match:cfmd_E3_20260403_Barnet_Bromley,1,1,1,1.0
+match_stats,Barnet Bromley 2026-04-03 shots corners referee,match:cfmd_E3_20260403_Barnet_Bromley,1,1,1,1.0
+match_result,Who won Mainz vs Freiburg on 2026-04-12?,match:cfmd_D1_20260412_Mainz_Freiburg,1,1,1,1.0
+match_stats,Mainz Freiburg 2026-04-12 shots corners referee,match:cfmd_D1_20260412_Mainz_Freiburg,1,1,1,1.0
+match_result,Who won Newport County vs Oldham on 2026-04-25?,match:cfmd_E3_20260425_NewportCounty_Oldham,1,1,1,1.0
+match_stats,Newport County Oldham 2026-04-25 shots corners referee,match:cfmd_E3_20260425_NewportCounty_Oldham,1,1,1,1.0
+match_result,Who won Betis vs Espanol on 2026-04-04?,match:cfmd_SP1_20260404_Betis_Espanol,1,1,1,1.0
+match_stats,Betis Espanol 2026-04-04 shots corners referee,match:cfmd_SP1_20260404_Betis_Espanol,1,1,1,1.0
+match_result,Who won Pisa vs Genoa on 2026-04-19?,match:cfmd_I1_20260419_Pisa_Genoa,1,1,1,1.0
+match_stats,Pisa Genoa 2026-04-19 shots corners referee,match:cfmd_I1_20260419_Pisa_Genoa,1,1,1,1.0
+match_result,Who won AVS vs Santa Clara on 2026-03-15?,match:cfmd_P1_20260315_AVS_SantaClara,1,1,1,1.0
+match_stats,AVS Santa Clara 2026-03-15 shots corners referee,match:cfmd_P1_20260315_AVS_SantaClara,1,1,1,1.0
+match_result,Who won Nott'm Forest vs Newcastle on 2026-05-10?,match:cfmd_E0_20260510_NottmForest_Newcastle,1,1,1,1.0
+match_stats,Nott'm Forest Newcastle 2026-05-10 shots corners referee,match:cfmd_E0_20260510_NottmForest_Newcastle,1,1,1,1.0
+match_result,Who won Swindon vs Fleetwood Town on 2026-03-28?,match:cfmd_E3_20260328_Swindon_FleetwoodTown,1,1,1,1.0
+match_stats,Swindon Fleetwood Town 2026-03-28 shots corners referee,match:cfmd_E3_20260328_Swindon_FleetwoodTown,1,1,1,1.0
+match_result,Who won Benfica vs Academico Viseu on 2026-08-09?,match:cfmd_P1_20260809_Benfica_AcademicoViseu,1,1,1,1.0
+match_stats,Benfica Academico Viseu 2026-08-09 shots corners referee,match:cfmd_P1_20260809_Benfica_AcademicoViseu,1,1,1,1.0
+match_result,Who won Portsmouth vs Birmingham on 2026-05-02?,match:cfmd_E1_20260502_Portsmouth_Birmingham,1,1,1,1.0
+match_stats,Portsmouth Birmingham 2026-05-02 shots corners referee,match:cfmd_E1_20260502_Portsmouth_Birmingham,1,1,1,1.0
+match_result,Who won Porto vs Alverca on 2026-08-09?,match:cfmd_P1_20260809_Porto_Alverca,1,1,1,1.0
+match_stats,Porto Alverca 2026-08-09 shots corners referee,match:cfmd_P1_20260809_Porto_Alverca,1,1,1,1.0
+match_result,Who won Leicester vs Burton on 2026-08-22?,match:cfmd_E2_20260822_Leicester_Burton,1,1,1,1.0
+match_stats,Leicester Burton 2026-08-22 shots corners referee,match:cfmd_E2_20260822_Leicester_Burton,1,1,1,1.0
+match_result,Who won Nancy vs Le Mans on 2026-03-13?,match:cfmd_F2_20260313_Nancy_LeMans,1,1,1,1.0
+match_stats,Nancy Le Mans 2026-03-13 shots corners referee,match:cfmd_F2_20260313_Nancy_LeMans,1,1,1,1.0
+match_result,Who won AZ Alkmaar vs Twente on 2026-05-03?,match:cfmd_N1_20260503_AZAlkmaar_Twente,1,1,1,1.0
+match_stats,AZ Alkmaar Twente 2026-05-03 shots corners referee,match:cfmd_N1_20260503_AZAlkmaar_Twente,1,1,1,1.0
+match_result,Who won Dumbarton vs Annan Athletic on 2026-03-21?,match:cfmd_SC3_20260321_Dumbarton_AnnanAthletic,1,1,1,1.0
+match_stats,Dumbarton Annan Athletic 2026-03-21 shots corners referee,match:cfmd_SC3_20260321_Dumbarton_AnnanAthletic,1,1,1,1.0
+match_result,Who won Crewe vs Tranmere on 2026-02-28?,match:cfmd_E3_20260228_Crewe_Tranmere,1,1,1,1.0
+match_stats,Crewe Tranmere 2026-02-28 shots corners referee,match:cfmd_E3_20260228_Crewe_Tranmere,1,1,1,1.0
+match_result,Who won Napoli vs Lecce on 2026-03-14?,match:cfmd_I1_20260314_Napoli_Lecce,1,1,1,1.0
+match_stats,Napoli Lecce 2026-03-14 shots corners referee,match:cfmd_I1_20260314_Napoli_Lecce,1,1,1,1.0
+match_result,Who won Ross County vs Montrose on 2026-08-08?,match:cfmd_SC2_20260808_RossCounty_Montrose,1,1,1,1.0
+match_stats,Ross County Montrose 2026-08-08 shots corners referee,match:cfmd_SC2_20260808_RossCounty_Montrose,1,1,1,1.0
+match_result,Who won Goztep vs Antalyaspor on 2026-04-25?,match:cfmd_T1_20260425_Goztep_Antalyaspor,1,1,1,1.0
+match_stats,Goztep Antalyaspor 2026-04-25 shots corners referee,match:cfmd_T1_20260425_Goztep_Antalyaspor,1,1,1,1.0
+match_result,Who won Airdrie Utd vs Ross County on 2026-08-22?,match:cfmd_SC2_20260822_AirdrieUtd_RossCounty,1,1,1,1.0
+match_stats,Airdrie Utd Ross County 2026-08-22 shots corners referee,match:cfmd_SC2_20260822_AirdrieUtd_RossCounty,1,1,1,1.0
+match_result,Who won Bastia vs Annecy on 2026-02-27?,match:cfmd_F2_20260227_Bastia_Annecy,1,1,1,1.0
+match_stats,Bastia Annecy 2026-02-27 shots corners referee,match:cfmd_F2_20260227_Bastia_Annecy,1,1,1,1.0
+match_result,Who won PAOK vs Levadeiakos on 2026-08-23?,match:cfmd_G1_20260823_PAOK_Levadeiakos,1,1,1,1.0
+match_stats,PAOK Levadeiakos 2026-08-23 shots corners referee,match:cfmd_G1_20260823_PAOK_Levadeiakos,1,1,1,1.0
+match_result,Who won Hamilton vs Stenhousemuir on 2026-03-03?,match:cfmd_SC2_20260303_Hamilton_Stenhousemuir,1,1,1,1.0
+match_stats,Hamilton Stenhousemuir 2026-03-03 shots corners referee,match:cfmd_SC2_20260303_Hamilton_Stenhousemuir,1,1,1,1.0
+match_result,Who won Albacete vs Eibar on 2026-04-24?,match:cfmd_SP2_20260424_Albacete_Eibar,1,1,1,1.0
+match_stats,Albacete Eibar 2026-04-24 shots corners referee,match:cfmd_SP2_20260424_Albacete_Eibar,1,1,1,1.0
+match_result,Who won Albacete vs Burgos on 2026-04-04?,match:cfmd_SP2_20260404_Albacete_Burgos,1,1,1,1.0
+match_stats,Albacete Burgos 2026-04-04 shots corners referee,match:cfmd_SP2_20260404_Albacete_Burgos,1,1,1,1.0
+match_result,Who won Cagliari vs Napoli on 2026-03-20?,match:cfmd_I1_20260320_Cagliari_Napoli,1,1,1,1.0
+match_stats,Cagliari Napoli 2026-03-20 shots corners referee,match:cfmd_I1_20260320_Cagliari_Napoli,1,1,1,1.0
+match_result,Who won Queen of Sth vs Alloa on 2026-08-22?,match:cfmd_SC2_20260822_QueenofSth_Alloa,1,1,1,1.0
+match_stats,Queen of Sth Alloa 2026-08-22 shots corners referee,match:cfmd_SC2_20260822_QueenofSth_Alloa,1,1,1,1.0
+match_result,Who won AEK vs PAOK on 2026-04-19?,match:cfmd_G1_20260419_AEK_PAOK,1,1,1,1.0
+match_stats,AEK PAOK 2026-04-19 shots corners referee,match:cfmd_G1_20260419_AEK_PAOK,1,1,1,1.0
+match_result,Who won Grimsby vs Crewe on 2026-04-11?,match:cfmd_E3_20260411_Grimsby_Crewe,1,1,1,1.0
+match_stats,Grimsby Crewe 2026-04-11 shots corners referee,match:cfmd_E3_20260411_Grimsby_Crewe,1,1,1,1.0
+match_result,Who won Grenoble vs Le Mans on 2026-04-25?,match:cfmd_F2_20260425_Grenoble_LeMans,1,1,1,1.0
+match_stats,Grenoble Le Mans 2026-04-25 shots corners referee,match:cfmd_F2_20260425_Grenoble_LeMans,1,1,1,1.0
+match_result,Who won Braunschweig vs Fortuna Dusseldorf on 2026-03-14?,match:cfmd_D2_20260314_Braunschweig_FortunaDusseldorf,1,1,1,1.0
+match_stats,Braunschweig Fortuna Dusseldorf 2026-03-14 shots corners referee,match:cfmd_D2_20260314_Braunschweig_FortunaDusseldorf,1,1,1,1.0
+match_result,Who won Santa Clara vs Guimaraes on 2026-03-08?,match:cfmd_P1_20260308_SantaClara_Guimaraes,1,1,1,1.0
+match_stats,Santa Clara Guimaraes 2026-03-08 shots corners referee,match:cfmd_P1_20260308_SantaClara_Guimaraes,1,1,1,1.0
+match_result,Who won Girona vs Sociedad on 2026-05-14?,match:cfmd_SP1_20260514_Girona_Sociedad,1,1,1,1.0
+match_stats,Girona Sociedad 2026-05-14 shots corners referee,match:cfmd_SP1_20260514_Girona_Sociedad,1,1,1,1.0
+match_result,Who won Stevenage vs Reading on 2026-03-21?,match:cfmd_E2_20260321_Stevenage_Reading,1,1,1,1.0
+match_stats,Stevenage Reading 2026-03-21 shots corners referee,match:cfmd_E2_20260321_Stevenage_Reading,1,1,1,1.0
+match_result,Who won Cultural Leonesa vs Valladolid on 2026-04-04?,match:cfmd_SP2_20260404_CulturalLeonesa_Valladolid,1,1,1,1.0
+match_stats,Cultural Leonesa Valladolid 2026-04-04 shots corners referee,match:cfmd_SP2_20260404_CulturalLeonesa_Valladolid,1,1,1,1.0

@@ -1,0 +1,16 @@
+.venv/
+__pycache__/
+*.pyc
+data/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+*.duckdb
+.DS_Store
+.coverage
+.env
+.env.*
+*.log
+reports/*/bets_*.parquet
+reports/*/predictions_*.parquet
+logs/

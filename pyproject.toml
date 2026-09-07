@@ -1,0 +1,94 @@
+[project]
+name = "pitch-edge"
+version = "0.2.0"
+description = "Agentic football intelligence & market-edge platform (signals only, never auto-bets)"
+readme = "README.md"
+authors = [
+    { name = "hampusstalhandske", email = "hampus.stalhandske@gmail.com" }
+]
+requires-python = ">=3.11,<3.13"
+dependencies = [
+    "pandas>=2.2",
+    "numpy>=1.26,<3",
+    "duckdb>=1.0",
+    "pyarrow>=17.0",
+    "requests>=2.32",
+    "scipy>=1.13",
+    "scikit-learn>=1.5",
+    "torch>=2.3",
+    "torch-geometric>=2.5",
+    "pandera>=0.20",
+    "pydantic>=2.8",
+    "streamlit>=1.38",
+    "plotly>=5.24",
+    "chromadb>=0.5",
+    "sentence-transformers>=3.0",
+    "langgraph>=0.2",
+    "langgraph-checkpoint-sqlite>=1.0",
+    "anthropic>=0.40",
+    "apscheduler>=3.10",
+    "vaderSentiment>=3.3",
+    "feedparser>=6.0",
+    "librosa>=0.10",
+    "soundfile>=0.12",
+    "statsbombpy>=1.14",
+    "typer>=0.12",
+    "langchain>=0.3",
+    "langchain-community>=0.3",
+    "langchain-chroma>=0.2",
+    "langchain-huggingface>=0.1",
+    "langchain-text-splitters>=0.3",
+    "rank-bm25>=0.2",
+    "lightning>=2.4",
+    "torchmetrics>=1.4",
+    "rich>=13.0",
+]
+
+[project.optional-dependencies]
+lgbm = ["lightgbm>=4.3"]
+cloud = [
+    "google-cloud-storage>=2.16",
+    "google-cloud-bigquery>=3.25",
+    "google-cloud-secret-manager>=2.20",
+]
+dev = [
+    "pytest>=8.3",
+    "pytest-cov>=5.0",
+    "pytest-mock>=3.14",
+    "ruff>=0.6",
+    "mypy>=1.11",
+    "responses>=0.25",
+    "pre-commit>=3.7",
+]
+
+[project.scripts]
+pitch-edge = "pitch_edge.cli:app"
+
+[build-system]
+requires = ["uv_build>=0.11.19,<0.12.0"]
+build-backend = "uv_build"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "unit: fast, isolated unit tests",
+    "integration: slower tests exercising multiple components (network is always mocked)",
+    "network: tests that hit real external endpoints (opt-in: pytest -m network)",
+]
+addopts = "-ra -m 'not network'"
+filterwarnings = ["ignore::DeprecationWarning", "ignore::FutureWarning"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "C4"]
+ignore = ["E501"]  # ruff-format governs code width; remaining hits are prompts/docstrings
+
+[tool.ruff.lint.per-file-ignores]
+"scripts/*" = ["E402", "E702"]  # run scripts configure logging before importing the library
+
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true

@@ -1,0 +1,2 @@
+fixture_key,outcome,venue_a,venue_b,n_obs,best_lag,peak_xcorr,p_a_leads_b,p_b_leads_a,verdict
+ALL,ALL,polymarket,kalshi,0,0,,,,"insufficient (0 shared fixture-outcomes, max 0 aligned steps, need 24)"

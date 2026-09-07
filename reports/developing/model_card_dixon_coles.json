@@ -1,0 +1,37 @@
+{
+  "name": "dixon_coles",
+  "uses_market_features": false,
+  "family": "bivariate Poisson (Dixon & Coles 1997) with tau low-score correction, one fit per league",
+  "time_decay_xi": 0.0018,
+  "lookback_days": 730,
+  "leagues_fitted": [
+    "ARG",
+    "AUT",
+    "BRA",
+    "CHN",
+    "DEN",
+    "FIN",
+    "IRL",
+    "JAP",
+    "MEX",
+    "NOR",
+    "POL",
+    "ROM",
+    "RUS",
+    "SUI",
+    "SWE",
+    "USA"
+  ],
+  "train_rows_last_fit": 9161,
+  "features": [
+    "home_team",
+    "away_team",
+    "home_goals",
+    "away_goals",
+    "date",
+    "league_code"
+  ],
+  "leakage_checks": [
+    "fit uses matches strictly before the prediction date (enforced by backtester)"
+  ]
+}
