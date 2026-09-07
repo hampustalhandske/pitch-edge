@@ -1,12 +1,10 @@
-"""Derived artifacts the dashboard shows beyond the backtest: player embeddings (GNN),
-in-play win-probability paths, per-league Dixon-Coles team strengths, GBDT feature
-importances, and a data-universe summary. All computed from warehouse tables; all
-persisted back so the app never trains anything at render time."""
+"""Derived artifacts the dashboard shows beyond the backtest: per-league Dixon-Coles team
+strengths, GBDT feature importances, and a data-universe summary. All computed from
+warehouse tables; all persisted back so the app never trains anything at render time."""
 
 from __future__ import annotations
 
 import json
-import logging
 from datetime import UTC, datetime
 
 import pandas as pd
@@ -14,82 +12,13 @@ import pandas as pd
 from pitch_edge.config import get_settings
 from pitch_edge.data.storage import Warehouse
 from pitch_edge.models.gbdt import GBDTMatchModel
-from pitch_edge.models.gnn import PlayerEmbeddingGNN, build_passing_graphs
-from pitch_edge.models.inplay import InPlayWinProbabilityModel, minute_states
 from pitch_edge.models.poisson import DixonColesMatchModel
-
-logger = logging.getLogger(__name__)
 
 
 def _write_artifact(name: str, text: str) -> None:
     path = get_settings().artifacts_dir / name
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text)
-
-
-def build_player_embeddings(wh: Warehouse, epochs: int = 40) -> int:
-    if not wh.table_exists("statsbomb_events"):
-        return 0
-    events = wh.read("statsbomb_events")
-    if events.empty:
-        return 0
-    graphs = build_passing_graphs(events)
-    if len(graphs) < 4:
-        return 0
-    gnn = PlayerEmbeddingGNN(epochs=epochs).fit(graphs)
-    emb = gnn.embeddings_.copy()
-    version = datetime.now(UTC).strftime("%Y%m%dT%H%M%S")
-    emb["model_version"] = version
-    emb["player_id"] = emb["player_id"].astype(int)
-    wh.replace("player_embeddings", emb)
-    # cache a similarity table for the top-N by appearances so the app has instant "find similar"
-    top = emb.sort_values("n_matches", ascending=False).head(150)
-    rows = []
-    for p in top["player"]:
-        sim = gnn.most_similar(str(p), k=5)
-        for _, r in sim.iterrows():
-            rows.append(
-                {
-                    "player": p,
-                    "similar_player": r["player"],
-                    "similar_team": r["team"],
-                    "similarity": float(r["similarity"]),
-                }
-            )
-    if rows:
-        wh.replace("player_similarity", pd.DataFrame(rows))
-    _write_artifact("gnn_card.json", json.dumps(gnn.card(), indent=2))
-    return len(emb)
-
-
-def build_inplay_paths(wh: Warehouse, epochs: int = 40, max_matches: int = 400) -> int:
-    if not wh.table_exists("statsbomb_events"):
-        return 0
-    events = wh.read("statsbomb_events")
-    if events.empty:
-        return 0
-    frames = []
-    for _mid, ev in events.groupby("statsbomb_match_id"):
-        st = minute_states(ev, pre_exp_home=0.46, step=5)
-        if len(st) >= 10:
-            frames.append(st)
-        if len(frames) >= max_matches:
-            break
-    if len(frames) < 6:
-        return 0
-    states = pd.concat(frames, ignore_index=True)
-    model = InPlayWinProbabilityModel(epochs=epochs).fit(states)
-    paths = pd.concat([model.predict_path(s) for s in frames], ignore_index=True)
-    meta = wh.read("statsbomb_matches") if wh.table_exists("statsbomb_matches") else pd.DataFrame()
-    if not meta.empty:
-        paths = paths.merge(
-            meta[["statsbomb_match_id", "home_team", "away_team", "home_goals", "away_goals", "league", "date"]],
-            on="statsbomb_match_id",
-            how="left",
-        )
-    wh.replace("inplay_paths", paths)
-    _write_artifact("inplay_card.json", json.dumps(model.card(), indent=2))
-    return len(paths)
 
 
 def build_team_strengths(wh: Warehouse, features: pd.DataFrame) -> int:
@@ -171,8 +100,6 @@ def build_data_universe(wh: Warehouse) -> dict:
         "model_predictions",
         "backtest_bets",
         "paper_trades",
-        "player_embeddings",
-        "inplay_paths",
     ):
         out[t] = int(wh.count(t))
     if wh.table_exists("odds"):
@@ -192,13 +119,5 @@ def build_all_artifacts(wh: Warehouse, features: pd.DataFrame | None = None) -> 
     if features is not None and not features.empty:
         report["team_strength"] = build_team_strengths(wh, features)
         report["feature_importance"] = build_feature_importance(wh, features)
-    try:
-        report["player_embeddings"] = build_player_embeddings(wh)
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("player embeddings failed: %s", exc)
-    try:
-        report["inplay_paths"] = build_inplay_paths(wh)
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("in-play paths failed: %s", exc)
     report["universe_matches"] = int(build_data_universe(wh).get("matches", 0))
     return report

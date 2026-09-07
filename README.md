@@ -6,14 +6,14 @@
 ~2 M odds quotes and 7 M player-level rows from free, ToS-clean sources, models them with classical and
 deep-learning methods, compares its own probabilities to bookmaker and prediction-market prices, and
 **surfaces — never places —** signals behind walk-forward, closing-line-value backtests, in a dark-mode
-single-page dashboard with a grounded RAG explainer (Claude Fable 5.1).
+five-view dashboard (NiceGUI) with a grounded RAG explainer (Claude Fable 5.1).
 
 > **Hard guardrails.** No automated bet placement under any flag. No real-money movement. No scraping of any
 > source whose robots.txt or ToS forbids it (Understat, FotMob, Sofascore, Flashscore are excluded for exactly
 > that reason). Every number on the dashboard traces back to a walk-forward backtest at real, vig-inclusive prices.
 
 ```bash
-uv sync --extra dev            # Python 3.11; torch, torch-geometric, lightning, langchain, chromadb, langgraph, streamlit …
+uv sync --extra dev            # Python 3.11; torch, torch-geometric, lightning, langchain, chromadb, langgraph, nicegui …
 uv run pitch-edge serve        # dark-mode dashboard on :8501 (data is already on disk after a refresh)
 uv run pitch-edge refresh      # ingest → features → backtests → RAG index → artifacts (first run: 30–90 min)
 uv run pytest                  # 233 unit + integration tests, all network mocked
@@ -40,7 +40,7 @@ uv run pitch-edge lead-lag && uv run pitch-edge referee-study   # the two Phase-
 | Backtests | walk-forward, isotonic-calibrated, ¼/½-Kelly + flat, CLV-ready; `main` (11 European divisions, 2015→) and `developing` (16 under-covered leagues, 2013→) slices; feature-group ablation |
 | RAG | LangChain hybrid retrieval (Chroma dense ∪ BM25, RRF, cross-encoder rerank) over 10.5 k docs · hit@1 0.99 / MRR 0.99 on synthetic QA · Claude Fable 5.1 generation with citation verification, template fallback offline |
 | Agents | LangGraph pipeline with a structural human-approval interrupt; risk manager (fractional Kelly, per-bet/match/day caps, drawdown breaker); paper-trade log |
-| Dashboard | Streamlit, one page, 10 sections (Match Intel added), dark validated palette, one Plotly template, short-lived read-only warehouse connections; optional-key nudge, never a key form |
+| Dashboard | NiceGUI (Python-native, FastAPI + Vue/Quasar), five views — Overview, Data universe, Backtest & calibration, Suggestions & approval, Ask the system — dark validated palette, one Plotly template, short-lived read-only warehouse connections |
 | Quality | 233 tests · ruff · mypy clean · CI workflow · pre-commit |
 | Known gaps | football-data.co.uk & Club Elo were 503/502 for the whole build (a watcher re-ingests on return → real early/closing Pinnacle prices, referee names, Swedish odds); no live odds feed without a key; stadium audio and charter tracking are stubs |
 
@@ -52,7 +52,7 @@ documented training bug, in `CASE_STUDY.md`, `MODEL_CARDS.md` and `reports/*/REP
 
 ## Match Intel — the pre-match dossier (Phase 5)
 
-`pitch-edge intel <home> <away> [--date …]` (and the **Match Intel** dashboard tab) turns any fixture — played,
+`pitch-edge intel <home> <away> [--date …]` turns any fixture — played,
 scheduled, or typed in — into a nine-section dossier: **the number** (a walk-forward prediction from a backtest
 fold, or a prediction fitted at dossier time and *labelled raw*, always next to the backtest evidence for that
 model, the per-league gap to the closing price, an empirical calibration band and the model card) · **form &
@@ -69,7 +69,8 @@ is missing (no confirmed XI, referee not assigned, no early price, no structured
 Every line is rendered from the same values that are serialised as its source document, and the dossier is run
 through the RAG layer's `verify_citations` — a figure that cannot be found in a source fails the command (exit
 code 2) instead of shipping. Dossiers are versioned warehouse rows, so a re-run prints *what changed since the
-previous version*. The dashboard only renders stored dossiers; it never builds one.
+previous version*. `intel/` is unaffected by the dashboard rebuild (Phase 5) and can be re-surfaced in a future
+view; the current five-view dashboard does not render dossiers.
 
 ## The one genuinely novel thing
 
@@ -124,7 +125,7 @@ flowchart LR
   BT --> LG[LangGraph pipeline<br/>scout→features→inference→odds→edge→risk]
   LG --> GATE{{HUMAN APPROVAL GATE<br/>interrupt_before}}
   GATE --> PT[Paper-trade log]
-  WH & BT & RAG & GNN & IP & PT --> UI[Streamlit dashboard · 9 sections · dark]
+  WH & BT & RAG & PT --> UI[NiceGUI dashboard · 5 views · dark]
   WH -. Phase 3 .-> GCP[GCS · BigQuery · Cloud Run]
 ```
 
@@ -185,12 +186,27 @@ without a human identifier. Tested in `tests/integration/test_graph_pipeline.py`
 
 ## Dashboard
 
-`uv run pitch-edge serve` — one page, ten sections: Overview (verdict + model race), **Match Intel** (stored dossiers, gaps, version diff, market sparkline), Data universe (coverage,
-odds, venue map), Backtest & calibration (bankroll paths, monthly P&L, division heat-map, reliability, ablation),
-Models & players (feature importance, Dixon-Coles strengths, model cards, GNN explorer, Transfermarkt player
-history, substitution profiles), In-play, Signals & approval (the human gate), Ask the system (hybrid RAG with
-provenance and citation check), Alt data & Sweden, Pipeline health. Dark theme on the validated palette
-(`dashboard/theme.py`); the app holds no persistent warehouse connection so it never blocks the pipeline.
+`uv run pitch-edge serve` launches a [NiceGUI](https://nicegui.io) app (`src/pitch_edge/dashboard/web.py`) —
+Python-native, built on FastAPI + Vue/Quasar, chosen over a separate JS frontend because every view here is a
+straight read of a warehouse table or a `reports/`/`artifacts/` file (see `dashboard/data.py`, the only module
+that touches those paths): there's no API contract worth its own service, no client-side build step, and no
+second language to keep in sync for a single maintainer. Five views, nothing else:
+
+1. **Overview** — the headline verdict: is any model beating the market's closing price, by how much (bits),
+   on how many out-of-sample predictions.
+2. **Data universe** — match/odds counts, date ranges, per-source row counts and last-ingested timestamps
+   (`pipeline_runs` health).
+3. **Backtest & calibration** — walk-forward results per model: log-loss vs market, calibration reliability
+   curves, feature importance, division × model ablation heat-map.
+4. **Suggestions & approval** — today's fixture proposals (model probability vs market no-vig probability, edge,
+   stake) from the LangGraph pipeline's pending-proposals file, gated on a human who types their name and
+   explicitly picks which proposals to approve; writes `approved_paper` / `rejected` rows to the `paper_trades`
+   warehouse table. **This step cannot be skipped or automated — nothing here can place a real bet.**
+5. **Ask the system** — grounded, cited Q&A over the hybrid RAG index; the layout is identical whether the
+   answer comes from the offline template or Claude Fable 5.1.
+
+Dark theme on the validated palette (`dashboard/theme.py`, reused as-is for the Plotly figures); the app holds
+no persistent warehouse connection so it never blocks the pipeline.
 
 ## Layout
 
@@ -207,7 +223,7 @@ src/pitch_edge/
   intel/               Match Intel: fixture resolver, dossier builder (9 sections, citation-verified, versioned), fixture predictor
   odds/leadlag.py      cross-venue lead-lag (x-corr + Granger), fixture-key parser for prediction-market questions
   backtest/event_study.py  referee tendency table + pre-registered announcement event study
-  keys.py              optional-key registry behind `pitch-edge setup` and the dashboard nudge
+  keys.py              optional-key registry behind `pitch-edge setup`
   data/storage.py      DuckDB warehouse (idempotent upserts, schema widening, Parquet export)
   data/ingest.py       orchestrator with per-source health logging and order-independent spine replacement
   features/build.py    pre-match feature store (leakage-safe)
@@ -221,7 +237,7 @@ src/pitch_edge/
   pipeline.py          one code path from raw data to every dashboard number
   scheduler.py         APScheduler (hourly news/markets, nightly refresh)
   cloud/sync.py        GCS + BigQuery mirror (optional extra)
-  dashboard/           app.py (10 sections incl. Match Intel) · theme.py (dark palette + Plotly template)
+  dashboard/           web.py (NiceGUI, 5 views) · data.py (read-only warehouse/artifact access) · theme.py (dark palette + Plotly template)
   cli.py               setup | intel | ingest | features | backtest | ablation | lead-lag | referee-study | artifacts | rag | rag-eval | signals | health | export | refresh | serve | schedule
 scripts/               restartable stage scripts used for the recorded runs
 deploy/                Dockerfile, Cloud Run / Scheduler commands

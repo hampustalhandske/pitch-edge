@@ -181,7 +181,9 @@ def signals(model: str = "gbdt", min_date: str = "2018-07-01") -> None:
 def ablation(
     min_date: str = "2015-07-01",
     leagues: str = "",
-    groups: str = typer.Option("referee,weather,travel_fatigue,elo,rolling_form,wiki_attention,rotation_load"),
+    groups: str = typer.Option(
+        "referee,weather,travel_fatigue,elo,rolling_form,wiki_attention,rotation_load,squad_value"
+    ),
     edge: float = 0.03,
     retrain_days: int = 30,
 ) -> None:
@@ -264,90 +266,8 @@ def setup(
 
 
 @app.command()
-def intel(
-    home: str = typer.Argument(..., help="home team (fuzzy, e.g. 'Brighton')"),
-    away: str = typer.Argument(..., help="away team (fuzzy, e.g. 'Forest')"),
-    date: str = typer.Option("", help="YYYY-MM-DD; omit to pick the next scheduled meeting (or the last played one)"),
-    model: str = typer.Option("gbdt", help="model whose number leads section 1"),
-    no_fit: bool = typer.Option(
-        False, "--no-fit", help="never fit a model at dossier time (section 1 then only quotes backtest folds)"
-    ),
-    no_fetch: bool = typer.Option(
-        False, "--no-fetch", help="offline: no openfootball fixture lookup, no weather forecast"
-    ),
-    json_out: bool = typer.Option(False, "--json", help="print the dossier JSON instead of the text"),
-) -> None:
-    """Pre-match dossier: the number, form, who's playing, referee, conditions, market, narrative,
-    similar matches and — explicitly — what is missing for THIS fixture. Every figure is cited to a
-    warehouse table or RAG document and checked by `verify_citations`; the dossier is versioned so a
-    re-run prints what changed. Nothing here is a betting instruction."""
-    from pitch_edge.intel import DossierBuilder, diff_dossiers, find_fixture, load_dossier_versions, save_dossier
-    from pitch_edge.intel.dossier import render_diff
-    from pitch_edge.intel.predict import predict_fixture
-    from pitch_edge.rag.generate import GroundedGenerator
-
-    with _wh() as wh:
-        fx = find_fixture(wh, home, away, date or None, fetch_upcoming=not no_fetch)
-        prediction = None
-        if not fx.played and not no_fit:
-            rprint(
-                f"[dim]fitting {model} on the feature store for {fx.home_team} vs {fx.away_team} ({fx.date.date() if fx.date is not None else 'n/a'})…[/dim]"
-            )
-            prediction = predict_fixture(wh, fx, model_name=model)
-        builder = DossierBuilder(wh, model_name=model, generator=GroundedGenerator(), fetch=not no_fetch)
-        d = builder.build(fx.home_team, fx.away_team, fixture=fx, prediction=prediction)
-        prev = load_dossier_versions(wh, d.fixture_key)
-        row = save_dossier(wh, d)
-        if json_out:
-            print(d.to_json())
-        else:
-            print(d.markdown())
-        ok, missing = d.verify()
-        rprint(
-            f"[bold]{'✅ every figure traced to a source' if ok else '❌ UNVERIFIED figures: ' + ', '.join(missing)}[/bold] · {row['n_claims']} claims · {row['n_gaps']} gaps · stored as v{d.version}"
-        )
-        if not prev.empty:
-            print(render_diff(diff_dossiers(prev.iloc[0]["json"], d)))
-        if not ok:
-            raise typer.Exit(2)
-
-
-@app.command("lead-lag")
-def lead_lag(venue_a: str = "polymarket", venue_b: str = "kalshi", min_obs: int = 24) -> None:
-    """Cross-venue lead-lag test on the stored prediction-market snapshot history (writes reports/lead_lag.csv)."""
-    from pitch_edge.odds.leadlag import cross_venue_lead_lag
-
-    with _wh() as wh:
-        snaps = wh.read("market_snapshots")
-    table = cross_venue_lead_lag(snaps, venue_a=venue_a, venue_b=venue_b, min_obs=min_obs)
-    out = get_settings().reports_dir / "lead_lag.csv"
-    out.parent.mkdir(parents=True, exist_ok=True)
-    table.to_csv(out, index=False)
-    _print_df(table.tail(12).round(4), f"Lead-lag {venue_a} vs {venue_b} — {len(table) - 1} shared fixture-outcomes")
-
-
-@app.command("referee-study")
-def referee_study() -> None:
-    """Referee-announcement event study (pre-registered in CASE_STUDY.md); writes reports/referee_lag.csv."""
-    from pitch_edge.backtest.event_study import referee_announcement_study, referee_tendency_table
-
-    with _wh() as wh:
-        feats = wh.read("features") if wh.table_exists("features") else pd.DataFrame()
-        tend = referee_tendency_table(feats) if not feats.empty and "referee" in feats else pd.DataFrame()
-        if not tend.empty:
-            wh.replace("referee_tendency", tend)
-        moves = wh.read("referee_announcement_moves")
-    table = referee_announcement_study(moves, tend)
-    out = get_settings().reports_dir / "referee_lag.csv"
-    out.parent.mkdir(parents=True, exist_ok=True)
-    table.to_csv(out, index=False)
-    rprint(f"[dim]{len(tend)} referees with ≥ 20 matches of tendency data · {len(moves)} paired announcements[/dim]")
-    _print_df(table.round(4), "Referee-announcement event study")
-
-
-@app.command()
 def artifacts() -> None:
-    """Build dashboard artifacts: team strengths, feature importance, GNN player embeddings, in-play paths, data universe."""
+    """Build dashboard artifacts: team strengths, feature importance, data universe."""
     from pitch_edge.artifacts import build_all_artifacts
 
     with _wh() as wh:
@@ -380,14 +300,13 @@ def refresh(fast: bool = typer.Option(False, help="skip weather + GRU for a quic
 
 @app.command()
 def serve(port: int = 8501) -> None:  # pragma: no cover
-    """Launch the Streamlit dashboard."""
-    import subprocess
-    import sys
+    """Launch the dashboard (NiceGUI) — reads warehouse tables/artifacts only, never computes new numbers."""
+    import os
 
-    subprocess.run(
-        [sys.executable, "-m", "streamlit", "run", "src/pitch_edge/dashboard/app.py", "--server.port", str(port)],
-        check=False,
-    )
+    os.environ["PITCH_EDGE_DASHBOARD_PORT"] = str(port)
+    from pitch_edge.dashboard.web import main as run_dashboard
+
+    run_dashboard()
 
 
 @app.command()

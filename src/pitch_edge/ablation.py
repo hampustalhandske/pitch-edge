@@ -30,6 +30,8 @@ FEATURE_GROUPS: dict[str, tuple[str, ...]] = {
     # Phase 5 signals — pre-registered in CASE_STUDY.md (Result 7)
     "wiki_attention": ("pv_",),
     "rotation_load": ("rot_",),
+    # Phase 6 — pre-registered in CASE_STUDY.md Result 8
+    "squad_value": ("sv_",),
 }
 
 

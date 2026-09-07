@@ -31,6 +31,13 @@ except Exception:  # noqa: BLE001
 # default production model does not read them. Pass exclude_prefixes=() to include everything.
 DEFAULT_EXCLUDED_PREFIXES: tuple[str, ...] = ("pv_", "rot_")
 
+# Feature groups that are new and NOT yet ablated against the pre-registered criterion (CASE_STUDY.md
+# Result 8: squad-value / confirmed-lineup signal, Phase 6). Excluded from the default `gbdt`/`gbdt_mkt`
+# instances so those two models' inputs — and every historical number reported for them — stay byte-for-
+# byte reproducible while the new group is being tested through a separate, explicitly-named candidate
+# model (`models/__init__.py::available_models`).
+PENDING_EXCLUDED_PREFIXES: tuple[str, ...] = ("sv_",)
+
 
 class GBDTMatchModel(MatchModel):
     def __init__(
@@ -46,7 +53,9 @@ class GBDTMatchModel(MatchModel):
     ):
         self.include_market = include_market
         self.uses_market_features = include_market
-        self.exclude_prefixes = tuple(DEFAULT_EXCLUDED_PREFIXES if exclude_prefixes is None else exclude_prefixes)
+        self.exclude_prefixes = tuple(
+            (*DEFAULT_EXCLUDED_PREFIXES, *PENDING_EXCLUDED_PREFIXES) if exclude_prefixes is None else exclude_prefixes
+        )
         self.name = ("gbdt_mkt" if include_market else "gbdt") + name_suffix
         self.n_estimators = n_estimators
         self.learning_rate = learning_rate

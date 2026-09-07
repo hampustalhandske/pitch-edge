@@ -49,6 +49,13 @@ BASE_FEATURES = [
     "pv_home_z",
     "pv_away_z",
     "pv_diff",
+    # Phase 6 context (features/squad_value.py) — confirmed-lineup value + injury-absence proxy
+    "sv_home_xi_value",
+    "sv_away_xi_value",
+    "sv_xi_value_diff",
+    "sv_home_missing_pct",
+    "sv_away_missing_pct",
+    "sv_missing_pct_diff",
 ]
 MARKET_FEATURES = ["mkt_home_p", "mkt_draw_p", "mkt_away_p", "mkt_overround"]
 

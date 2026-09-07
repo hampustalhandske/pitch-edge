@@ -7,6 +7,16 @@ from scipy.stats import poisson
 
 from pitch_edge.data.storage import Warehouse
 
+# NiceGUI's browser-less `user` fixture (tests/integration/test_dashboard.py) — a pure ASGI
+# simulation (httpx + starlette transport), no real browser/websocket, so it stays fast and
+# network-free like the rest of the suite. Must be declared in the top-level conftest.
+pytest_plugins = ["nicegui.testing.user_plugin"]
+
+
+@pytest.fixture(scope="session")
+def anyio_backend() -> str:
+    return "asyncio"
+
 
 @pytest.fixture(autouse=True)
 def _isolated_data_dir(tmp_path, monkeypatch):

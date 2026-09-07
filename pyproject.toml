@@ -19,7 +19,6 @@ dependencies = [
     "torch-geometric>=2.5",
     "pandera>=0.20",
     "pydantic>=2.8",
-    "streamlit>=1.38",
     "plotly>=5.24",
     "chromadb>=0.5",
     "sentence-transformers>=3.0",
@@ -42,6 +41,7 @@ dependencies = [
     "lightning>=2.4",
     "torchmetrics>=1.4",
     "rich>=13.0",
+    "nicegui>=3.16.0",
 ]
 
 [project.optional-dependencies]

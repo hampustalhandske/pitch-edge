@@ -1,0 +1,44 @@
+[
+  {
+    "tag": "no_market",
+    "model_a": "gbdt",
+    "model_b": "gbdt_squadval",
+    "n_matches": 40357,
+    "n_folds": 44,
+    "mean_logloss_a": 0.9988044149581861,
+    "mean_logloss_b": 0.997280746150872,
+    "observed_diff_a_minus_b": 0.0015236688073140038,
+    "observed_diff_bits": 0.0021981894322691147,
+    "bootstrap_ci95_diff": [
+      -0.0024893142946830595,
+      0.00558690122768311
+    ],
+    "bootstrap_ci95_diff_bits": [
+      -0.0035913213881532575,
+      0.008060194695114885
+    ],
+    "bootstrap_p_two_sided": 0.454,
+    "fraction_boot_gt_0": 0.773
+  },
+  {
+    "tag": "with_market",
+    "model_a": "gbdt_mkt",
+    "model_b": "gbdt_mkt_squadval",
+    "n_matches": 40357,
+    "n_folds": 44,
+    "mean_logloss_a": 0.9900074623374227,
+    "mean_logloss_b": 0.9895326559430071,
+    "observed_diff_a_minus_b": 0.0004748063944156153,
+    "observed_diff_bits": 0.0006850008306057774,
+    "bootstrap_ci95_diff": [
+      -0.0033100458566636213,
+      0.003322634987771877
+    ],
+    "bootstrap_ci95_diff_bits": [
+      -0.004775386742523667,
+      0.004793549019542649
+    ],
+    "bootstrap_p_two_sided": 0.7244,
+    "fraction_boot_gt_0": 0.6378
+  }
+]

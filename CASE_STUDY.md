@@ -189,6 +189,85 @@ is verified on synthetic series where one venue leads by one step.
 Net: Phase 5 added three real signals and two real tests and **moved the headline result by zero** — which is
 exactly what the pre-registration was for.
 
+## Result 8 — pre-registered: does confirmed-lineup squad value close the gap? (Phase 6)
+
+**Pre-registration.** Result 7 rejected two feature groups built from the open Transfermarkt extract
+(attention velocity, rotation *minutes*) without ever looking at *who* is in the confirmed lineup or how
+good they are — exactly the gap Result 4 and the "what changes the answer" section (below) call out as
+untested: player-level information. `src/pitch_edge/features/squad_value.py` builds two new, genuinely
+different signals from the same extract, both strictly pre-match (Transfermarkt's confirmed lineup is
+recorded at the same pre-kickoff timing a bookmaker's closing price reflects, and valuations are joined
+`ASOF` on or before the match date):
+
+* `sv_home_xi_value` / `sv_away_xi_value` / `sv_xi_value_diff` — log1p summed market value of the eleven
+  players Transfermarkt lists as `starting_lineup`, i.e. the confirmed XI's raw quality.
+* `sv_home_missing_pct` / `sv_away_missing_pct` / `sv_missing_pct_diff` — the value-weighted share of each
+  side's "usual XI" (the eleven players with the most total minutes for that club in the trailing 365
+  days) who are absent from *today's* confirmed lineup — a direct injury/suspension/ban proxy, deliberately
+  independent of the fatigue/minutes signal Result 7 already rejected.
+
+**Hypothesis H1.** Confirmed-lineup value and missing-star value carry information about squad strength
+and absences that Elo, rolling form and the (rejected) rotation-load group do not — because they are the
+first signals in the feature store built from the *actual XI*, not team aggregates. Test: the same
+walk-forward GBDT comparison as Result 1 (11 European divisions, 2015-07 →, 90-day retrain, 3% edge),
+`gbdt_squadval` vs `gbdt` and `gbdt_mkt_squadval` vs `gbdt_mkt`, exclude_prefixes limited to the Result-7
+rejected groups (`pv_`, `rot_`) so `sv_` is the only difference from the two production baselines. What we
+expect if H0: like `wiki_attention` and `rotation_load`, the signal is already implicit in Elo/form and in
+the closing price, and the new group changes nothing or hurts (Result 7's pattern).
+
+**Coverage caveat (checked before reading the numbers as real).** Of the 41,939 matches in the slice, the
+Transfermarkt club-name resolver maps **54.9%** to a club id (identical to Result 7's `rotation_load`
+coverage — it is the same club-id map); of those, **89.1%** also match a specific Transfermarkt game by
+(date, home club, away club). Net: `sv_home_xi_value` is non-null (a real starting-XI join, not a
+zero-fallback) for **48.9%** of the 41,939 matches, and the missing-star baseline (`sv_home_missing_pct`,
+which additionally needs 365 days of trailing appearance history for both sides) is available for
+**44.0%**. So this signal can only possibly move ~half the sample — the other half sees imputed
+(training-fold-median) values, the same mechanism as `gbdt`'s existing NaN handling. `n_predictions` in
+`reports/squad_value/summary.json` is
+40,357 versus Result 1's 40,894 (537 fewer, 1.3%). This is **not** the squad-value join dropping rows —
+`features/context.py::load_context` and `FeatureBuilder.build` only ever `LEFT JOIN`/merge the `sv_`
+columns, and `GBDTMatchModel` imputes missing values with the training-fold median, so a match with no
+Transfermarkt lineup simply gets a neutral value, not a dropped row. The feature frame itself has exactly
+41,939 rows, identical to Result 1. The discrepancy in walk-forward test-fold membership instead comes
+from the (documented, one-directional) upgrade of warehouse rows since Result 1 was produced — the 90-day
+fold boundaries are computed from the *400th row's date* after sorting by date, so any churn in exactly
+which rows compose the same 41,939-row count shifts fold edges and the size of the last partial fold. It
+is a real, checkable side effect of the standing daily ingest loop, not an artefact of this feature.
+
+**Result** (`reports/squad_value/REPORT.md`, `reports/squad_value/summary.json`, same 90-day-retrain
+walk-forward protocol as Result 1, run on the 40,357 shared predictions):
+
+| model | log-loss | market log-loss | Δ (bits) |
+|---|---|---|---|
+| `gbdt` (baseline, no market) | 0.9988 | 0.9713 | −0.0396 |
+| `gbdt_squadval` (+ `sv_` group) | 0.9973 | 0.9713 | −0.0374 |
+| `gbdt_mkt` (baseline, + early market) | 0.9900 | 0.9713 | −0.0269 |
+| `gbdt_mkt_squadval` (+ `sv_` group) | 0.9895 | 0.9713 | −0.0262 |
+
+Reading honestly. Both squad-value variants move in the *right* direction — the first Phase-6+ feature
+group to do so, after `wiki_attention` and `rotation_load` both made things worse in Result 7. Without the
+market feature, adding `sv_` closes 0.0022 bits of a 0.0396-bit gap (~5.5% of it); with the early market
+probability already in the model, it closes only 0.0007 bits of a 0.0269-bit gap (~2.6%). For scale: Elo
+(Result 2) is worth 0.0188 log-loss (~0.027 bits) on its own, so the no-market squad-value effect is
+roughly a tenth of Elo's, and the market-aware effect is small enough that it is not clearly distinguishable
+from the kind of fold-boundary noise documented in the coverage caveat above — the same data churn that
+moved `gbdt`'s own gap from −0.037 (Result 1) to −0.040 bits here, a swing three times the size of the
+`gbdt_mkt_squadval` improvement. **Verdict: directionally consistent with H1, not decisively confirmed.**
+The no-market result (0.0022 bits, ~5.5% of the gap) is the more credible of the two because it is larger
+than the observed noise floor; the market-aware result (0.0007 bits) is not, on this sample, distinguishable
+from noise. A formal significance test (paired bootstrap over folds) and the full pre-registered ablation
+(`squad_value` group in `ablation.py::FEATURE_GROUPS`, `pitch-edge ablation --groups ...,squad_value`)
+against the ≥0.001 log-loss criterion used in Result 7 are the natural next steps and were not completed in
+this run.
+
+Decision: `_squadval` is added to `available_models()` as a **named, separately-reported candidate**
+(`gbdt_squadval`, `gbdt_mkt_squadval` in `src/pitch_edge/models/__init__.py`) — it does **not** replace the
+default `gbdt`/`gbdt_mkt` production models. `sv_` is listed in `PENDING_EXCLUDED_PREFIXES`
+(`models/gbdt.py`) precisely so the two headline models stay byte-for-byte reproducible against every prior
+result in this document while the new group accumulates more walk-forward evidence (and, ideally, better
+coverage — StatsBomb-quality lineup confirmation for the ~51% of matches Transfermarkt does not currently
+link).
+
 ## What changes the answer
 
 1. **Early vs closing prices** (football-data.co.uk Pinnacle `PS*`/`PSC*`): the only way to measure CLV

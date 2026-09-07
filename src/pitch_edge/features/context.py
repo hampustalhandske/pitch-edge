@@ -168,11 +168,15 @@ def load_context(wh: Warehouse, matches: pd.DataFrame) -> pd.DataFrame | None:
     """Everything `FeatureBuilder.build(context=...)` accepts: Transfermarkt rotation/referee context
     plus Wikipedia attention anomalies when the `wiki_pageviews` table exists. None if nothing applies."""
     from pitch_edge.data.alt.wikipedia_attention import attention_features
+    from pitch_edge.features.squad_value import squad_value_context
 
     frames = []
     tm = transfermarkt_context(wh, matches)
     if not tm.empty:
         frames.append(tm)
+        sv = squad_value_context(wh, tm)
+        if not sv.empty:
+            frames.append(sv)
     if wh.table_exists("wiki_pageviews"):
         pv = wh.read("wiki_pageviews")
         if not pv.empty:
