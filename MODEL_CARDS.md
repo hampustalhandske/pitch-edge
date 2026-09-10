@@ -1,7 +1,8 @@
 # Model cards
 
-Machine-readable cards are written on every run to `reports/main/model_card_<model>.json` (and
-`data/artifacts/gnn_card.json`, `inplay_card.json`); this page is the human summary of the 2026-09-06 run.
+Machine-readable cards are written on every run to `data/backtest/main/model_card_<model>.json` (local,
+gitignored — `reports/main/CASE_STUDY.md` is the public write-up); this page is the human summary of the
+2026-09-06 run and predates the removal of the GNN/in-play models from the registry.
 All match-outcome models share the same walk-forward folds, the same isotonic post-calibration (fitted on
 realised past folds only) and the same staking rules, so their numbers are directly comparable.
 

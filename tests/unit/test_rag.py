@@ -185,6 +185,57 @@ def _fake_anthropic(monkeypatch, text: str, stop_reason: str = "end_turn"):
     return calls
 
 
+class _FakeLocalLLM:
+    model = "llama3.1:8b"
+
+    def __init__(self, text):
+        self._text = text
+
+    def invoke(self, messages):
+        class _Msg:
+            def __init__(self, content):
+                self.content = content
+
+        return _Msg(self._text)
+
+
+def test_local_llm_is_tried_before_claude(monkeypatch):
+    """Backend precedence is local-first: a reachable local model must win even when a Claude
+    key is also configured, and Claude's client must never be constructed/called in that case."""
+    monkeypatch.setattr(
+        "pitch_edge.agents.llm.get_local_llm",
+        lambda model=None: _FakeLocalLLM("Home is favoured at 55.0% [pred:gbdt:m1]."),
+    )
+
+    def _boom(*a, **k):
+        raise AssertionError("Claude client must not be constructed when the local LLM succeeds")
+
+    import anthropic
+
+    monkeypatch.setattr(anthropic, "Anthropic", _boom)
+    gen = GroundedGenerator(api_key="test-key")
+    assert gen.backend == "local"
+    docs = [Document("pred:gbdt:m1", "Model gbdt: P(home)=55.0%.", {"type": "prediction"})]
+    ans = gen.answer("why?", docs)
+    assert ans.backend == "local" and ans.citations == ["pred:gbdt:m1"] and ans.verified
+
+
+def test_local_llm_failure_falls_back_to_claude(monkeypatch):
+    calls = _fake_anthropic(monkeypatch, "Home is favoured [pred:gbdt:m1].")
+
+    class _RaisingLLM:
+        model = "llama3.1:8b"
+
+        def invoke(self, messages):
+            raise RuntimeError("ollama not running")
+
+    monkeypatch.setattr("pitch_edge.agents.llm.get_local_llm", lambda model=None: _RaisingLLM())
+    gen = GroundedGenerator(api_key="test-key")
+    docs = [Document("pred:gbdt:m1", "Model gbdt: P(home)=55.0%.", {"type": "prediction"})]
+    ans = gen.answer("why?", docs)
+    assert ans.backend == "claude" and calls  # local failed silently, Claude still ran
+
+
 def test_fable_path_uses_beta_fallbacks_no_thinking_param_and_verifies(monkeypatch):
     calls = _fake_anthropic(monkeypatch, "Home is favoured at 55.0% [pred:gbdt:m1]; the draw sits at 30%.")
     gen = GroundedGenerator(api_key="test-key")  # default model is claude-fable-5-1

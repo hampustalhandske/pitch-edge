@@ -6,6 +6,7 @@ import pytest
 import responses
 
 from pitch_edge.data.alt.api_football import APIFootballSource
+from pitch_edge.data.alt.odds_api import OddsApiSource
 from pitch_edge.data.sources.everysport import EverysportSource
 
 pytestmark = pytest.mark.unit
@@ -69,6 +70,60 @@ def test_api_football_parses_injuries_lineups_subs(tmp_path):
     subs = src.substitutions(10)
     assert subs.iloc[0]["player_in"] == "Nwaneri" and subs.iloc[0]["minute"] == 63
     assert responses.calls[0].request.headers["x-apisports-key"] == "k"
+
+
+def test_odds_api_disabled_without_key(tmp_path, monkeypatch):
+    monkeypatch.delenv("ODDS_API_KEY", raising=False)
+    src = OddsApiSource(cache_dir=tmp_path)
+    assert not src.enabled and src.live_odds().empty
+
+
+@responses.activate
+def test_odds_api_parses_live_odds():
+    base = "https://api.the-odds-api.com/v4"
+    responses.add(
+        responses.GET,
+        f"{base}/sports/soccer_epl/odds",
+        json=[
+            {
+                "id": "evt1",
+                "home_team": "Arsenal",
+                "away_team": "Chelsea",
+                "bookmakers": [
+                    {
+                        "key": "pinnacle",
+                        "markets": [
+                            {
+                                "key": "h2h",
+                                "outcomes": [
+                                    {"name": "Arsenal", "price": 1.9},
+                                    {"name": "Draw", "price": 3.6},
+                                    {"name": "Chelsea", "price": 4.2},
+                                ],
+                            }
+                        ],
+                    }
+                ],
+            }
+        ],
+    )
+    src = OddsApiSource(api_key="k")
+    df = src.live_odds(sport_key="soccer_epl")
+    assert len(df) == 3
+    assert {
+        "match_id",
+        "bookmaker",
+        "market",
+        "side",
+        "price",
+        "snapshot_ts",
+        "source",
+        "home_team",
+        "away_team",
+    } <= set(df.columns)
+    assert df.iloc[0]["match_id"] == "evt1" and df.iloc[0]["bookmaker"] == "pinnacle"
+    assert df.iloc[0]["home_team"] == "Arsenal" and df.iloc[0]["away_team"] == "Chelsea"
+    assert responses.calls[0].request.params["apiKey"] == "k"
 
 
 def test_everysport_disabled_without_key(tmp_path, monkeypatch):

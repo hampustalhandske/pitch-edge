@@ -95,9 +95,10 @@ def test_compare_models_and_report(features, tmp_path):
     table = results_table(results)
     assert set(table["model"]) == {"dixon_coles", "gbdt"}
     assert set(calibration_table(results)["model"]) == {"dixon_coles", "gbdt"}
-    path = write_report(results, tmp_path / "rep", title="t")
+    path = write_report(results, tmp_path / "data", tmp_path / "rep", title="t")
     text = path.read_text()
-    assert "including the losers" in text and (tmp_path / "rep" / "bets_gbdt.parquet").exists()
+    assert "Model vs market" in text and (tmp_path / "data" / "by_league.csv").exists()
+    assert path.name == "CASE_STUDY.md" and path.parent == tmp_path / "rep"
 
 
 def test_custom_strategy_and_no_calibration(features):

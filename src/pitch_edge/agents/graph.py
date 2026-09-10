@@ -41,6 +41,11 @@ class SignalState(TypedDict, total=False):
     alerts: list[dict]
     log: list[str]
     errors: list[str]
+    # Additive keys for the agentic orchestrator (agents/orchestrator.py) — the deterministic graph
+    # in this module never reads or writes them.
+    selected_fixtures: list[dict]  # per-fixture FixtureReadiness verdicts from agents/selection.py
+    context_docs: dict[str, list[dict]]  # match_id -> [{doc_id, text, metadata}] gathered for it
+    reviews: list[dict]  # per-proposal EdgeReview verdicts from agents/reviewer.py
 
 
 class GraphDependencies:
@@ -106,6 +111,11 @@ def make_nodes(deps: GraphDependencies) -> dict[str, Callable[[SignalState], dic
                         "edge": float(p[f"p_{o}"]) - mkt[o],
                         "decimal_odds": float(q[o]),
                         "bookmaker": q.get("bookmaker", ""),
+                        # The router-based agentic `inference` node stamps each prediction with the
+                        # actual per-fixture model it used (`p["model"]`); the deterministic pipeline's
+                        # single-model `inference` node doesn't, so this falls back to deps.model_name
+                        # — same value it always carried, no behaviour change there.
+                        "model_name": p.get("model", deps.model_name),
                     }
                 )
         return {

@@ -1,1 +1,0 @@
-Walk-forward, no shuffling. Bets priced at early Pinnacle odds (`PS`), CLV measured vs Pinnacle closing (`PSC`), edge threshold 3%, retrain every 90 days.

@@ -52,6 +52,11 @@ class Settings:
     gcp_project: str | None = field(default_factory=lambda: os.environ.get("PITCH_EDGE_GCP_PROJECT"))
     gcs_bucket: str | None = field(default_factory=lambda: os.environ.get("PITCH_EDGE_GCS_BUCKET"))
     bigquery_dataset: str = field(default_factory=lambda: _env("PITCH_EDGE_BQ_DATASET", "pitch_edge"))
+    fd_archive_dir: str | None = field(default_factory=lambda: os.environ.get("PITCH_EDGE_FD_ARCHIVE_DIR"))
+    local_llm_model: str = field(default_factory=lambda: _env("PITCH_EDGE_LOCAL_LLM_MODEL", "llama3.1:8b"))
+    local_llm_base_url: str = field(
+        default_factory=lambda: _env("PITCH_EDGE_LOCAL_LLM_BASE_URL", "http://localhost:11434")
+    )
 
     @property
     def raw_dir(self) -> Path:
@@ -70,11 +75,18 @@ class Settings:
         return self.data_dir / "artifacts"
 
     @property
+    def backtest_dir(self) -> Path:
+        """Local, machine-readable backtest output (CSVs, model cards) — one subdir per label.
+        Not `reports_dir`: that directory is public and holds only the generated case-study
+        write-ups, so nothing here is committed."""
+        return self.data_dir / "backtest"
+
+    @property
     def reports_dir(self) -> Path:
         return Path(_env("PITCH_EDGE_REPORTS_DIR", "reports"))
 
     def ensure_dirs(self) -> None:
-        for p in (self.raw_dir, self.vector_dir, self.artifacts_dir, self.reports_dir):
+        for p in (self.raw_dir, self.vector_dir, self.artifacts_dir, self.backtest_dir, self.reports_dir):
             p.mkdir(parents=True, exist_ok=True)
 
 

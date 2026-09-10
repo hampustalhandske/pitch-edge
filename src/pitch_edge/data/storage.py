@@ -59,6 +59,7 @@ TABLE_KEYS: dict[str, list[str]] = {
     "api_football_lineups": ["fixture_id", "team", "player", "slot"],
     "fixture_predictions": ["fixture_key", "model_name", "version"],
     "dossiers": ["fixture_key", "version"],
+    "live_odds": ["match_id", "bookmaker", "market", "side", "snapshot_ts"],
 }
 
 
@@ -119,9 +120,7 @@ class Warehouse:
         self._ensure_table(table, df)
         self._conn.register("incoming_df", df)
         before = self.count(table)
-        key_expr = " AND ".join(
-            f'(t."{k}" = i."{k}" OR (t."{k}" IS NULL AND i."{k}" IS NULL))' for k in keys
-        )
+        key_expr = " AND ".join(f'(t."{k}" = i."{k}" OR (t."{k}" IS NULL AND i."{k}" IS NULL))' for k in keys)
         self._conn.execute(
             f"""
             INSERT INTO {table} BY NAME
@@ -174,15 +173,23 @@ class Warehouse:
         return matches.merge(wide, left_on="match_id", right_index=True, how="left")
 
     # ----------------------------------------------------------- ops logging
-    def log_run(self, source: str, status: str, rows: int = 0, error: str | None = None,
-                started_at: datetime | None = None) -> str:
+    def log_run(
+        self, source: str, status: str, rows: int = 0, error: str | None = None, started_at: datetime | None = None
+    ) -> str:
         run_id = uuid.uuid4().hex
         now = datetime.now(UTC).replace(tzinfo=None)
         df = pd.DataFrame(
-            [{
-                "run_id": run_id, "source": source, "started_at": started_at or now, "finished_at": now,
-                "status": status, "rows": int(rows), "error": (error or "")[:2000],
-            }]
+            [
+                {
+                    "run_id": run_id,
+                    "source": source,
+                    "started_at": started_at or now,
+                    "finished_at": now,
+                    "status": status,
+                    "rows": int(rows),
+                    "error": (error or "")[:2000],
+                }
+            ]
         )
         self.upsert("pipeline_runs", df)
         return run_id

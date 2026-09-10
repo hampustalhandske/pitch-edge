@@ -11,6 +11,4 @@ __pycache__/
 .env
 .env.*
 *.log
-reports/*/bets_*.parquet
-reports/*/predictions_*.parquet
 logs/

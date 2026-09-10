@@ -25,7 +25,9 @@ LEAGUE_IDS = {"E0": 39, "D1": 78, "SP1": 140, "I1": 135, "F1": 61, "SWE1": 113, 
 class APIFootballSource:
     name = "api_football"
 
-    def __init__(self, api_key: str | None = None, cache_dir: str | Path | None = None, http: CachedHttpClient | None = None):
+    def __init__(
+        self, api_key: str | None = None, cache_dir: str | Path | None = None, http: CachedHttpClient | None = None
+    ):
         settings = get_settings()
         self.api_key = api_key or os.environ.get("API_FOOTBALL_KEY")
         self.cache_dir = Path(cache_dir) if cache_dir else settings.raw_dir / "api_football"
@@ -56,6 +58,27 @@ class APIFootballSource:
                     "player": (r.get("player") or {}).get("name"),
                     "type": (r.get("player") or {}).get("type"),
                     "reason": (r.get("player") or {}).get("reason"),
+                    "league_code": league_code,
+                    "source": self.name,
+                }
+            )
+        return pd.DataFrame(rows)
+
+    def fixtures(self, league_code: str, season: int, next_n: int = 30) -> pd.DataFrame:
+        """Upcoming fixtures for a league/season — used to resolve a `fixture_id` for lineup/injury
+        lookups on fixtures that haven't happened yet."""
+        rows = []
+        for r in self._get(
+            "fixtures", {"league": LEAGUE_IDS.get(league_code, league_code), "season": season, "next": next_n}
+        ):
+            fixture = r.get("fixture") or {}
+            teams = r.get("teams") or {}
+            rows.append(
+                {
+                    "fixture_id": fixture.get("id"),
+                    "date": pd.to_datetime(fixture.get("date"), errors="coerce", utc=True),
+                    "home_team": (teams.get("home") or {}).get("name"),
+                    "away_team": (teams.get("away") or {}).get("name"),
                     "league_code": league_code,
                     "source": self.name,
                 }

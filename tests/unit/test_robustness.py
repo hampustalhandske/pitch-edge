@@ -7,7 +7,7 @@ import pandas as pd
 import pytest
 
 from pitch_edge.backtest.engine import WalkForwardBacktester, WalkForwardConfig
-from pitch_edge.models.base import MatchModel, to_frame
+from pitch_edge.models.base import MatchModel, normalise_probs, to_frame
 from pitch_edge.models.dixon_coles import DixonColesModel
 from pitch_edge.models.poisson import DixonColesMatchModel
 
@@ -74,3 +74,26 @@ def test_per_league_adapter_survives_a_bad_league(synthetic_league_matches):
     model = DixonColesMatchModel(min_league_rows=10).fit(both)
     p = model.predict_proba(both.tail(5))
     assert np.isfinite(p.to_numpy()).all()
+
+
+def test_normalise_probs_replaces_non_finite_rows_with_uniform(caplog):
+    """`to_frame` (used by every MatchModel's predict_proba: GBDT, Dixon-Coles, Transformer, GRU) must
+    never let a NaN/inf row reach a live signal or the dashboard — the backtester has its own guard
+    (test_engine_replaces_non_finite_probabilities above), but the live `signals`/`agentic-signals`
+    path calls `predict_proba` directly, with no engine in between."""
+    arr = np.array([[0.2, 0.5, 0.3], [np.nan, 0.5, 0.3], [1.0, np.inf, 0.0]])
+    with caplog.at_level("WARNING"):
+        out = normalise_probs(arr)
+    assert np.isfinite(out).all()
+    assert np.allclose(out.sum(axis=1), 1.0)
+    assert np.allclose(out[0], [0.2, 0.5, 0.3])  # a healthy row is untouched (beyond renormalizing)
+    assert np.allclose(out[1], [1 / 3, 1 / 3, 1 / 3])  # NaN row -> uniform
+    assert np.allclose(out[2], [1 / 3, 1 / 3, 1 / 3])  # inf row -> uniform
+    assert "non-finite" in caplog.text
+
+
+def test_normalise_probs_all_finite_input_unaffected():
+    arr = np.array([[1.0, 2.0, 3.0]])
+    out = normalise_probs(arr)
+    assert np.isfinite(out).all()
+    assert np.allclose(out, [[1 / 6, 2 / 6, 3 / 6]])

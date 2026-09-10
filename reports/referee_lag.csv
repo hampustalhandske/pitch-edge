@@ -1,2 +1,0 @@
-group,n,mean_abs_move,median_abs_move,mean_signed_move,t_stat,p_one_sided,verdict
-ALL,0,,,,,,insufficient: 0 paired announcements (need ≥ 15 per group)

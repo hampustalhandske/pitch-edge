@@ -10,6 +10,7 @@ import typer
 from rich import print as rprint
 from rich.table import Table
 
+from pitch_edge.agents.graph import SignalState
 from pitch_edge.config import get_settings
 from pitch_edge.data.storage import Warehouse
 
@@ -101,14 +102,18 @@ def backtest(
 
 @app.command()
 def rag(question: str = typer.Argument(..., help="Ask the system a grounded question")) -> None:
-    """Query the RAG layer (retrieval + grounded explanation)."""
+    """Query the RAG layer (local-LLM query parsing -> retrieval -> grounded explanation)."""
     from pitch_edge.rag.generate import GroundedGenerator
     from pitch_edge.rag.index import VectorIndex
+    from pitch_edge.rag.query_parser import parse_query, retrieval_query_text
 
     idx = VectorIndex()
-    docs = [d for d, _ in idx.query(question, k=6)]
+    parsed = parse_query(question)
+    query_text = retrieval_query_text(parsed)
+    docs = [d for d, _ in idx.query(query_text, k=6)]
     ans = GroundedGenerator().answer(question, docs)
-    rprint(f"[dim]backend={ans.backend}, index={idx.backend}, docs={idx.count()}[/dim]\n")
+    parsed_note = f", parsed_teams={parsed.home_team!r} vs {parsed.away_team!r}" if parsed.home_team else ""
+    rprint(f"[dim]backend={ans.backend}, index={idx.backend}, docs={idx.count()}{parsed_note}[/dim]\n")
     rprint(ans.text)
 
 
@@ -132,7 +137,7 @@ def rag_eval(n: int = 80, k: int = 5) -> None:
     idx = VectorIndex()
     items = synthetic_questions(docs, n=n)
     results = evaluate_retrieval(idx, items, k=k)
-    out = get_settings().reports_dir / "rag_eval.csv"
+    out = get_settings().artifacts_dir / "rag_eval.csv"
     results.to_csv(out, index=False)
     _print_df(summarize_eval(results, k=k).round(3), f"Retrieval eval — index={idx.backend}, {idx.count():,} docs")
 
@@ -177,6 +182,184 @@ def signals(model: str = "gbdt", min_date: str = "2018-07-01") -> None:
         rprint(f"[dim]{len(pending)} paper trades logged historically[/dim]")
 
 
+def _run_agentic_pipeline(wh: Warehouse, model: str, min_date: str) -> tuple[str, SignalState]:
+    """Shared by `agentic-signals` and `predict`: build deps, fit models, run the fully
+    deterministic agentic graph to the human-approval gate. No LLM involved anywhere in here —
+    routing, edge detection and risk sizing all run on real resources already in the warehouse."""
+    from pitch_edge.agents.graph import GraphDependencies
+    from pitch_edge.agents.orchestrator import AgenticSignalPipeline
+    from pitch_edge.agents.risk import RiskLimits, RiskManager
+    from pitch_edge.models import available_models, default_models
+    from pitch_edge.pipeline import (
+        build_rag_index,
+        live_quotes_from_odds_api,
+        load_feature_frame,
+        synthetic_quotes_from_elo,
+        upcoming_fixture_frame,
+    )
+
+    f = load_feature_frame(wh, min_date=min_date)
+    if f.empty:
+        rprint("[red]no features — run `pitch-edge ingest` and `pitch-edge features` first[/red]")
+        raise typer.Exit(1)
+    fallback_model = next(x for x in default_models() if x.name == model)
+    fitted = available_models()
+    for m in fitted:
+        m.fit(f)
+    fallback_model.fit(f)
+    fixtures_df = upcoming_fixture_frame(wh, f)
+
+    def scout() -> list[dict]:
+        return (
+            fixtures_df.assign(date=fixtures_df["date"].astype(str)).to_dict(orient="records")
+            if not fixtures_df.empty
+            else []
+        )
+
+    def fetch_odds(rows: list[dict]) -> list[dict]:
+        if not rows:
+            return []
+        rows_df = pd.DataFrame(rows)
+        live = live_quotes_from_odds_api(wh, rows_df)
+        synthetic = synthetic_quotes_from_elo(rows_df)
+        return [live.get(q["match_id"], q) for q in synthetic]
+
+    def sink(alerts: list[dict]) -> None:
+        if alerts:
+            wh.upsert("paper_trades", pd.DataFrame(alerts))
+
+    deps = GraphDependencies(
+        scout=scout,
+        featurize=lambda rows: rows,
+        infer=lambda rows: [],  # replaced by the per-league router inside build_agentic_graph
+        fetch_odds=fetch_odds,
+        risk=RiskManager(RiskLimits()),
+        sink=sink,
+        model_name=fallback_model.name,
+    )
+    reports_dir = get_settings().backtest_dir / "main"
+    index = build_rag_index(wh)
+    pipe = AgenticSignalPipeline(deps, reports_dir=reports_dir, index=index, wh=wh, available_models=fitted)
+    thread_id, state = pipe.run_to_gate()
+    return thread_id, state
+
+
+def _print_proposals(state: SignalState, title: str) -> None:
+    reviews_by_key = {(r["match_id"], r["outcome"]): r for r in state.get("reviews", [])}
+    props = state.get("proposals", [])
+    if not props:
+        rprint("no proposals passed the risk manager")
+        return
+    table = pd.DataFrame(props)
+    table["verdict"] = [reviews_by_key.get((p["match_id"], p["outcome"]), {}).get("verdict", "") for p in props]
+    table["reasons"] = [
+        "; ".join(reviews_by_key.get((p["match_id"], p["outcome"]), {}).get("reasons", [])) for p in props
+    ]
+    table["real_odds"] = table["bookmaker"] != "synthetic_elo_book"
+    _print_df(
+        table[
+            [
+                "match_id",
+                "home_team",
+                "away_team",
+                "outcome",
+                "model_probability",
+                "market_probability",
+                "edge",
+                "decimal_odds",
+                "stake",
+                "real_odds",
+                "verdict",
+                "reasons",
+            ]
+        ].round(3),
+        title,
+    )
+
+
+@app.command("agentic-signals")
+def agentic_signals(
+    model: str = typer.Option("gbdt", help="Default/fallback model — the per-league router picks the real one"),
+    min_date: str = "2018-07-01",
+) -> None:
+    """Genuinely agentic signals pipeline: data-quality screening, per-league model routing,
+    deterministic edge review — same human-approval gate as `signals`. Fully deterministic, no LLM
+    involved — for a plain-language explanation of the resulting proposals, run `pitch-edge predict`
+    instead, which calls the LLM exactly once over the whole batch."""
+    with _wh() as wh:
+        thread_id, state = _run_agentic_pipeline(wh, model, min_date)
+        rprint(f"[bold]thread:[/bold] {thread_id}  (paused at HUMAN APPROVAL GATE)")
+        rprint(f"[dim]screened: {len(state.get('selected_fixtures', []))} fixtures scouted[/dim]")
+        _print_proposals(state, "Pending proposals (agentic)")
+        (get_settings().artifacts_dir / "pending_agentic_signals.json").write_text(
+            json.dumps(
+                {
+                    "thread_id": thread_id,
+                    "proposals": state.get("proposals", []),
+                    "selected_fixtures": state.get("selected_fixtures", []),
+                    "reviews": state.get("reviews", []),
+                },
+                default=str,
+                indent=2,
+            )
+        )
+
+
+@app.command()
+def predict(
+    model: str = typer.Option("gbdt", help="Default/fallback model — the per-league router picks the real one"),
+    min_date: str = "2018-07-01",
+    llm_model: str | None = typer.Option(
+        None, help="Override the local Ollama model (default: settings.local_llm_model)"
+    ),
+) -> None:
+    """Run the deterministic agentic pipeline, then ask the LLM once — a single call over the
+    whole batch of proposals, not one per fixture — to explain the results in plain language. This
+    is the ONLY command that touches an LLM; everything it explains was already computed
+    deterministically before this call happens. Falls back to a plain-text template if Ollama isn't
+    running, so you can always see your proposals."""
+    from pitch_edge.agents.explainer import explain_signals
+
+    with _wh() as wh:
+        thread_id, state = _run_agentic_pipeline(wh, model, min_date)
+        rprint(f"[bold]thread:[/bold] {thread_id}  (paused at HUMAN APPROVAL GATE)")
+        _print_proposals(state, "Pending proposals")
+        explanation = explain_signals(state.get("proposals", []), state.get("reviews", []), llm_model=llm_model)
+        rprint(f"\n[bold]explanation[/bold] [dim](backend={explanation.backend})[/dim]\n{explanation.overview}\n")
+        for note in explanation.notes:
+            rprint(f"  [dim]{note.match_id} {note.outcome}:[/dim] {note.take}")
+
+
+@app.command("replay-eval")
+def replay_eval(
+    as_of: str | None = typer.Option(
+        None, help="Override T0 (YYYY-MM-DD); default: auto-computed from real closing odds"
+    ),
+    window_days: int = 30,
+) -> None:
+    """T0 replay-simulation: train on data strictly before T0, run the agentic pipeline on the next
+    `window_days` as if they were upcoming fixtures, then reveal real closing odds/results and check
+    whether the reviewer's deterministic trust/distrust verdicts actually correlate with realized
+    edge. No LLM involved — the reviewer's verdict is a real-edge_bits/real-odds rule, so this is
+    validating that rule, not an LLM's judgment."""
+    from pitch_edge.backtest.replay import run_replay_eval
+
+    with _wh() as wh:
+        result = run_replay_eval(wh, get_settings().backtest_dir / "replay", as_of=as_of, window_days=window_days)
+        rprint(
+            f"[bold]T0:[/bold] {result['t0'].date()}  [bold]window:[/bold] {result['t0'].date()} -> {result['window_end'].date()}"
+        )
+        rprint(
+            f"[dim]{result['n_fixtures']} fixtures in window, {result['n_proposals']} proposals, {result['n_scored']} scored[/dim]"
+        )
+        if result["summary"].empty:
+            rprint(
+                "[yellow]no proposals could be scored (no real closing odds in this window, or nothing proposed)[/yellow]"
+            )
+        else:
+            _print_df(result["summary"].round(4), "Realized edge by reviewer verdict")
+
+
 @app.command()
 def ablation(
     min_date: str = "2015-07-01",
@@ -200,7 +383,7 @@ def ablation(
             [g.strip() for g in groups.split(",")],
             WalkForwardConfig(edge_threshold=edge, retrain_every_days=retrain_days),
         )
-        out = get_settings().reports_dir / "ablation.csv"
+        out = get_settings().artifacts_dir / "ablation.csv"
         out.parent.mkdir(parents=True, exist_ok=True)
         table.to_csv(out, index=False)
         _print_df(table.round(4), "Feature-group ablation (GBDT, ¼-Kelly)")

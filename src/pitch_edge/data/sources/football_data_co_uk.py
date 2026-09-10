@@ -61,19 +61,45 @@ LEAGUE_CODES: dict[str, tuple[str, str]] = {  # code -> (country, league name)
 
 # Division codes used by the xgabora compilation for the same "extra" leagues (a few differ from the file stems).
 EXTRA_DIVISION_COUNTRIES: dict[str, tuple[str, str]] = {
-    "ARG": ("Argentina", "Liga Profesional"), "AUT": ("Austria", "Bundesliga"), "BRA": ("Brazil", "Serie A"),
-    "CHN": ("China", "Super League"), "DEN": ("Denmark", "Superliga"), "DNK": ("Denmark", "Superliga"),
-    "FIN": ("Finland", "Veikkausliiga"), "IRL": ("Ireland", "Premier Division"), "JAP": ("Japan", "J1 League"),
-    "JPN": ("Japan", "J1 League"), "MEX": ("Mexico", "Liga MX"), "NOR": ("Norway", "Eliteserien"),
-    "POL": ("Poland", "Ekstraklasa"), "ROM": ("Romania", "Liga I"), "ROU": ("Romania", "Liga I"),
-    "RUS": ("Russia", "Premier League"), "SWE": ("Sweden", "Allsvenskan"), "SUI": ("Switzerland", "Super League"),
-    "SWZ": ("Switzerland", "Super League"), "USA": ("USA", "MLS"),
+    "ARG": ("Argentina", "Liga Profesional"),
+    "AUT": ("Austria", "Bundesliga"),
+    "BRA": ("Brazil", "Serie A"),
+    "CHN": ("China", "Super League"),
+    "DEN": ("Denmark", "Superliga"),
+    "DNK": ("Denmark", "Superliga"),
+    "FIN": ("Finland", "Veikkausliiga"),
+    "IRL": ("Ireland", "Premier Division"),
+    "JAP": ("Japan", "J1 League"),
+    "JPN": ("Japan", "J1 League"),
+    "MEX": ("Mexico", "Liga MX"),
+    "NOR": ("Norway", "Eliteserien"),
+    "POL": ("Poland", "Ekstraklasa"),
+    "ROM": ("Romania", "Liga I"),
+    "ROU": ("Romania", "Liga I"),
+    "RUS": ("Russia", "Premier League"),
+    "SWE": ("Sweden", "Allsvenskan"),
+    "SUI": ("Switzerland", "Super League"),
+    "SWZ": ("Switzerland", "Super League"),
+    "USA": ("USA", "MLS"),
 }
 
 EXTRA_LEAGUE_FILES: dict[str, str] = {  # file stem -> country
-    "ARG": "Argentina", "AUT": "Austria", "BRA": "Brazil", "CHN": "China", "DNK": "Denmark",
-    "FIN": "Finland", "IRL": "Ireland", "JPN": "Japan", "MEX": "Mexico", "NOR": "Norway",
-    "POL": "Poland", "ROU": "Romania", "RUS": "Russia", "SWE": "Sweden", "SWZ": "Switzerland", "USA": "USA",
+    "ARG": "Argentina",
+    "AUT": "Austria",
+    "BRA": "Brazil",
+    "CHN": "China",
+    "DNK": "Denmark",
+    "FIN": "Finland",
+    "IRL": "Ireland",
+    "JPN": "Japan",
+    "MEX": "Mexico",
+    "NOR": "Norway",
+    "POL": "Poland",
+    "ROU": "Romania",
+    "RUS": "Russia",
+    "SWE": "Sweden",
+    "SWZ": "Switzerland",
+    "USA": "USA",
 }
 
 # 1X2 odds columns: <bookmaker><C?><H|D|A>. "C" marks a closing price.
@@ -82,11 +108,23 @@ _ODDS_1X2_RE = re.compile(r"^(B365|BW|IW|PS|WH|VC|Max|Avg|Mkt|BFE|BF|BS|GB|LB|SB
 _ODDS_OU_RE = re.compile(r"^(B365|P|Max|Avg|Mkt|BFE|PC|MaxC|AvgC|B365C|BFEC|GB|BW|IW|LB|SB|SJ|WH|VC)([<>])2\.5$")
 
 STAT_COLUMNS = {
-    "HTHG": "ht_home_goals", "HTAG": "ht_away_goals",
-    "HS": "home_shots", "AS": "away_shots", "HST": "home_shots_on_target", "AST": "away_shots_on_target",
-    "HF": "home_fouls", "AF": "away_fouls", "HC": "home_corners", "AC": "away_corners",
-    "HY": "home_yellows", "AY": "away_yellows", "HR": "home_reds", "AR": "away_reds",
-    "Referee": "referee", "Attendance": "attendance", "Time": "kickoff_time",
+    "HTHG": "ht_home_goals",
+    "HTAG": "ht_away_goals",
+    "HS": "home_shots",
+    "AS": "away_shots",
+    "HST": "home_shots_on_target",
+    "AST": "away_shots_on_target",
+    "HF": "home_fouls",
+    "AF": "away_fouls",
+    "HC": "home_corners",
+    "AC": "away_corners",
+    "HY": "home_yellows",
+    "AY": "away_yellows",
+    "HR": "home_reds",
+    "AR": "away_reds",
+    "Referee": "referee",
+    "Attendance": "attendance",
+    "Time": "kickoff_time",
 }
 
 
@@ -106,10 +144,35 @@ def _slug(text: str) -> str:
 class FootballDataCoUkSource(MatchDataSource):
     name = "football_data_co_uk"
 
-    def __init__(self, cache_dir: str | Path | None = None, http: CachedHttpClient | None = None):
+    def __init__(
+        self,
+        cache_dir: str | Path | None = None,
+        http: CachedHttpClient | None = None,
+        archive_dir: str | Path | None = None,
+    ):
         settings = get_settings()
         self.cache_dir = Path(cache_dir) if cache_dir else settings.raw_dir / "football_data_co_uk"
         self.http = http or CachedHttpClient(self.cache_dir, min_interval_s=settings.http_min_interval_s)
+        if archive_dir is not None:
+            self.archive_dir: Path | None = Path(archive_dir)
+        elif settings.fd_archive_dir:
+            self.archive_dir = Path(settings.fd_archive_dir)
+        else:
+            default_archive = settings.data_dir / "archive"
+            self.archive_dir = default_archive if default_archive.exists() else None
+
+    def _archive_main_path(self, league: str, start_year: int) -> Path | None:
+        if self.archive_dir is None:
+            return None
+        season_folder = f"{start_year % 100:02d}_{(start_year + 1) % 100:02d}"
+        path = self.archive_dir / "main" / "main" / season_folder / f"{league}.csv"
+        return path if path.exists() else None
+
+    def _archive_extra_path(self, country_file: str) -> Path | None:
+        if self.archive_dir is None:
+            return None
+        path = self.archive_dir / "extra" / f"{country_file}.csv"
+        return path if path.exists() else None
 
     # ------------------------------------------------------------- main files
     def fetch_matches(  # type: ignore[override]
@@ -123,12 +186,16 @@ class FootballDataCoUkSource(MatchDataSource):
         seasons = seasons or [2022, 2023, 2024]
         frames = []
         for start_year in seasons:
-            url = f"{BASE_URL}/mmz4281/{season_code(start_year)}/{league}.csv"
-            try:
-                raw_bytes = self.http.get_bytes(url, force=force_refresh)
-            except Exception as exc:  # 404 for seasons/leagues that don't exist yet
-                logger.warning("Skipping %s: %s", url, exc)
-                continue
+            archive_path = self._archive_main_path(league, start_year)
+            if archive_path is not None:
+                raw_bytes = archive_path.read_bytes()
+            else:
+                url = f"{BASE_URL}/mmz4281/{season_code(start_year)}/{league}.csv"
+                try:
+                    raw_bytes = self.http.get_bytes(url, force=force_refresh)
+                except Exception as exc:  # 404 for seasons/leagues that don't exist yet
+                    logger.warning("Skipping %s: %s", url, exc)
+                    continue
             raw = _read_csv(raw_bytes)
             if raw.empty:
                 continue
@@ -157,8 +224,16 @@ class FootballDataCoUkSource(MatchDataSource):
         out = _attach_extras(out, raw)
         out = out.dropna(subset=["date", "home_goals", "away_goals"]).reset_index(drop=True)
         out["match_id"] = (
-            "fd_" + league + "_" + season_code(start_year) + "_" + out["date"].dt.strftime("%Y%m%d")
-            + "_" + out["home_team"].map(_slug) + "_" + out["away_team"].map(_slug)
+            "fd_"
+            + league
+            + "_"
+            + season_code(start_year)
+            + "_"
+            + out["date"].dt.strftime("%Y%m%d")
+            + "_"
+            + out["home_team"].map(_slug)
+            + "_"
+            + out["away_team"].map(_slug)
         )
         return out
 
@@ -167,8 +242,13 @@ class FootballDataCoUkSource(MatchDataSource):
         """One of the `/new/<COUNTRY>.csv` developing-market files (all seasons)."""
         if country_file not in EXTRA_LEAGUE_FILES:
             raise ValueError(f"Unknown extra-league file {country_file!r}; options: {sorted(EXTRA_LEAGUE_FILES)}")
-        url = f"{BASE_URL}/new/{country_file}.csv"
-        raw = _read_csv(self.http.get_bytes(url, force=force_refresh))
+        archive_path = self._archive_extra_path(country_file)
+        if archive_path is not None:
+            raw_bytes = archive_path.read_bytes()
+        else:
+            url = f"{BASE_URL}/new/{country_file}.csv"
+            raw_bytes = self.http.get_bytes(url, force=force_refresh)
+        raw = _read_csv(raw_bytes)
         raw = raw.dropna(how="all").dropna(subset=["Date", "Home", "Away"])
         country = EXTRA_LEAGUE_FILES[country_file]
         league_name = raw["League"].astype(str).str.strip() if "League" in raw else pd.Series(country, index=raw.index)
@@ -189,8 +269,14 @@ class FootballDataCoUkSource(MatchDataSource):
         out = _attach_extras(out, raw)
         out = out.dropna(subset=["date", "home_goals", "away_goals"]).reset_index(drop=True)
         out["match_id"] = (
-            "fdx_" + country_file + "_" + out["date"].dt.strftime("%Y%m%d")
-            + "_" + out["home_team"].map(_slug) + "_" + out["away_team"].map(_slug)
+            "fdx_"
+            + country_file
+            + "_"
+            + out["date"].dt.strftime("%Y%m%d")
+            + "_"
+            + out["home_team"].map(_slug)
+            + "_"
+            + out["away_team"].map(_slug)
         )
         out = out.drop_duplicates(subset="match_id").reset_index(drop=True)
         return self.validate(out)

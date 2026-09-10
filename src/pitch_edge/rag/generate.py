@@ -1,15 +1,17 @@
-"""Grounded answer generation — Claude Fable 5.1 explains; the quant models decide.
+"""Grounded answer generation — an LLM explains; the quant models decide.
 
 Contract:
 * Only the retrieved documents may be used; every number must appear verbatim in a source and
   every claim must carry a `[doc_id]` citation. `verify_citations` checks both mechanically,
   so a hallucinated figure is flagged (`Answer.verified == False`) rather than trusted.
 * The LLM never produces a probability. Nothing it writes is a betting instruction.
-* Fable 5.1 specifics (per the Anthropic SDK guidance): thinking is always on, so no
-  `thinking` parameter is sent; server-side refusal fallbacks are enabled by default; a
-  `refusal` stop reason falls back to the deterministic template.
-* No credential → deterministic template with the same grounded structure, so the feature
-  works offline and in CI.
+* Backend precedence is local-first: the local Ollama model (`agents/llm.py`, same one the
+  agentic-signals selection/reviewer agents use) is tried first — free, no key needed. Claude
+  Fable 5.1 is used only if a local attempt fails/isn't reachable and `ANTHROPIC_API_KEY` is set
+  (Fable specifics per the Anthropic SDK guidance: thinking is always on, so no `thinking`
+  parameter is sent; server-side refusal fallbacks are enabled by default; a `refusal` stop
+  reason falls through too). Neither reachable → deterministic template with the same grounded
+  structure, so the feature works fully offline and in CI.
 """
 
 from __future__ import annotations
@@ -68,38 +70,79 @@ def verify_citations(text: str, docs: list[Document]) -> tuple[bool, list[str], 
 
 
 class GroundedGenerator:
-    def __init__(self, api_key: str | None = None, model: str | None = None, force_template: bool = False):
+    def __init__(
+        self,
+        api_key: str | None = None,
+        model: str | None = None,
+        local_model: str | None = None,
+        force_template: bool = False,
+    ):
         settings = get_settings()
         self.model = model or settings.anthropic_model
         self._client = None
-        if not force_template and (api_key or settings.anthropic_api_key):
+        self._local_llm = None
+        if not force_template:
             try:
-                import anthropic
+                from pitch_edge.agents.llm import get_local_llm
 
-                self._client = anthropic.Anthropic(api_key=api_key) if api_key else anthropic.Anthropic()
+                self._local_llm = get_local_llm(model=local_model)
             except Exception as exc:  # noqa: BLE001
-                logger.info("Anthropic client unavailable (%s); template generator active", exc)
-                self._client = None
+                logger.info("Local LLM unavailable (%s); will try Claude/template", exc)
+            if api_key or settings.anthropic_api_key:
+                try:
+                    import anthropic
+
+                    self._client = anthropic.Anthropic(api_key=api_key) if api_key else anthropic.Anthropic()
+                except Exception as exc:  # noqa: BLE001
+                    logger.info("Anthropic client unavailable (%s)", exc)
+                    self._client = None
 
     @property
     def backend(self) -> str:
-        return "claude" if self._client is not None else "template"
+        if self._local_llm is not None:
+            return "local"
+        if self._client is not None:
+            return "claude"
+        return "template"
 
     def answer(self, question: str, docs: list[Document]) -> Answer:
         if not docs:
             return Answer(
                 "No relevant documents were retrieved for that question, so I can't answer it from the system's data.",
                 [],
-                self.backend,
+                "template",
                 [],
                 verified=True,
             )
+        if self._local_llm is not None:
+            try:
+                return self._answer_local(question, docs)
+            except Exception as exc:  # noqa: BLE001 - Ollama unreachable must never break the dashboard
+                logger.info("Local LLM generation failed (%s); trying Claude/template", exc)
         if self._client is not None:
             try:
                 return self._answer_claude(question, docs)
             except Exception as exc:  # noqa: BLE001 - never break the dashboard on an API error
                 logger.warning("Claude generation failed (%s); using template", exc)
         return self._answer_template(question, docs)
+
+    # ------------------------------------------------------------------ local
+    def _answer_local(self, question: str, docs: list[Document]) -> Answer:
+        from langchain_core.messages import HumanMessage, SystemMessage
+
+        assert self._local_llm is not None
+        context = "\n\n".join(f"[{d.doc_id}] ({d.metadata.get('type', 'doc')}) {d.text}" for d in docs)
+        response = self._local_llm.invoke(
+            [
+                SystemMessage(content=SYSTEM_PROMPT),
+                HumanMessage(content=f"Retrieved documents:\n\n{context}\n\nQuestion: {question}"),
+            ]
+        )
+        text = str(response.content).strip()
+        ok, cited, missing = verify_citations(text, docs)
+        if missing:
+            text += f"\n\n_Note: the figure(s) {', '.join(missing)} could not be matched to a retrieved document and should not be relied on._"
+        return Answer(text, cited, "local", docs, verified=ok, unverified_numbers=missing, model=self._local_llm.model)
 
     # ----------------------------------------------------------------- claude
     def _answer_claude(self, question: str, docs: list[Document]) -> Answer:

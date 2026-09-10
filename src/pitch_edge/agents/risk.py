@@ -63,7 +63,10 @@ class RiskManager:
 
     def size(self, edges: pd.DataFrame, model_name: str, bookmaker: str = "PS") -> list[Proposal]:
         """edges columns: match_id, date, home_team, away_team, outcome, model_probability,
-        market_probability, edge, decimal_odds."""
+        market_probability, edge, decimal_odds. `model_name` is the fallback label for a proposal
+        when `edges` has no per-row `model_name` column (the deterministic single-model pipeline);
+        the router-based agentic pipeline stamps a real per-fixture model name onto each edge, which
+        takes priority so a proposal is always attributed to the model that actually produced it."""
         lim, st = self.limits, self.state
         proposals: list[Proposal] = []
         if self.halted() or edges.empty:
@@ -101,7 +104,7 @@ class RiskManager:
                     float(r["decimal_odds"]),
                     stake,
                     bookmaker,
-                    model_name,
+                    str(r.get("model_name", model_name)),
                     f"model {r['model_probability']:.1%} vs no-vig market {r['market_probability']:.1%} "
                     f"(edge {r['edge']:+.1%}); {lim.kelly_fraction:g}-Kelly stake capped at {lim.max_stake_pct:.0%} of paper bankroll",
                 )

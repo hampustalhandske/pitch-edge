@@ -526,7 +526,7 @@ def build_backtest() -> None:
                                 if models:
                                     render_reliability(models[0])
 
-                by_lg_path = D.SETTINGS.reports_dir / label / "by_league.csv"
+                by_lg_path = D.SETTINGS.backtest_dir / label / "by_league.csv"
                 if by_lg_path.exists():
                     bl = pd.read_csv(by_lg_path)
                     piv = bl.pivot_table(index="league_code", columns="model", values="edge_bits")
@@ -558,7 +558,7 @@ def build_backtest() -> None:
                         )
                         plot(f, 560)
 
-                abl_path = D.SETTINGS.reports_dir / "ablation.csv"
+                abl_path = D.SETTINGS.artifacts_dir / "ablation.csv"
                 if abl_path.exists():
                     a = pd.read_csv(abl_path)
                     with card():

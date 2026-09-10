@@ -7,10 +7,13 @@ sequence model are interchangeable and compared on identical footing.
 
 from __future__ import annotations
 
+import logging
 from abc import ABC, abstractmethod
 
 import numpy as np
 import pandas as pd
+
+logger = logging.getLogger(__name__)
 
 OUTCOMES = ("home", "draw", "away")
 
@@ -37,7 +40,25 @@ class MatchModel(ABC):
 
 
 def normalise_probs(arr: np.ndarray, eps: float = 1e-6) -> np.ndarray:
-    arr = np.clip(np.asarray(arr, dtype=float), eps, None)
+    """Clip to `eps` and renormalize each row to sum to 1.
+
+    `np.clip` does not touch `NaN` (a `NaN` compared to anything is `False`), so a row with any
+    non-finite raw score — degenerate optimizer output, an unseen-team edge case, whatever a model
+    produced — would otherwise pass through as `NaN/NaN/NaN` and silently reach the caller (the
+    dashboard, the backtester, a paper-trade proposal), violating "no unvalidated number reaches the
+    UI." Any such row is replaced with the uniform distribution and logged, never silently passed on.
+    """
+    arr = np.asarray(arr, dtype=float)
+    bad_rows = ~np.isfinite(arr).all(axis=1)
+    if bad_rows.any():
+        logger.warning(
+            "normalise_probs: %d/%d row(s) had a non-finite probability — replaced with uniform (1/3, 1/3, 1/3)",
+            int(bad_rows.sum()),
+            len(arr),
+        )
+        arr = arr.copy()
+        arr[bad_rows] = 1.0
+    arr = np.clip(arr, eps, None)
     return arr / arr.sum(axis=1, keepdims=True)
 
 

@@ -37,11 +37,15 @@ dependencies = [
     "langchain-chroma>=0.2",
     "langchain-huggingface>=0.1",
     "langchain-text-splitters>=0.3",
+    "langchain-ollama>=0.2",
     "rank-bm25>=0.2",
     "lightning>=2.4",
     "torchmetrics>=1.4",
     "rich>=13.0",
     "nicegui>=3.16.0",
+    "beautifulsoup4>=4.11",  # vendored whoscored fixture-discovery connector
+    "lxml>=4.9",             # vendored whoscored fixture-discovery connector
+    "selenium>=4.10",        # vendored whoscored fixture-discovery connector (needs geckodriver+Firefox at runtime)
 ]
 
 [project.optional-dependencies]
@@ -81,6 +85,7 @@ filterwarnings = ["ignore::DeprecationWarning", "ignore::FutureWarning"]
 [tool.ruff]
 line-length = 120
 target-version = "py311"
+extend-exclude = ["src/pitch_edge/vendor"]  # third-party source, see vendor/NOTICE.md
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "C4"]
@@ -92,3 +97,4 @@ ignore = ["E501"]  # ruff-format governs code width; remaining hits are prompts/
 [tool.mypy]
 python_version = "3.11"
 ignore_missing_imports = true
+exclude = ["src/pitch_edge/vendor"]  # third-party source, see vendor/NOTICE.md

@@ -27,6 +27,7 @@ from pitch_edge.features.context import load_context
 from pitch_edge.models import default_models
 from pitch_edge.models.base import MatchModel
 from pitch_edge.rag.documents import (
+    espn_documents,
     match_documents,
     news_documents,
     prediction_documents,
@@ -93,15 +94,22 @@ def run_backtests(
     models: list[MatchModel] | None = None,
     config: WalkForwardConfig | None = None,
     wh: Warehouse | None = None,
+    data_dir: str | Path | None = None,
     report_dir: str | Path | None = None,
     label: str = "main",
     run_id: str | None = None,
 ) -> dict[str, BacktestResult]:
+    """Local, machine-readable output (CSVs, model cards) goes to `data_dir` (default
+    `Settings.backtest_dir/<label>`, never committed); the public one-page case study goes to
+    `report_dir` (default `Settings.reports_dir/<label>`) — pass an explicit `report_dir` under
+    `Settings.backtest_dir` for internal-only passes (e.g. the replay evaluator's train-only fold)
+    that should never land a file in the public `reports/` tree."""
     settings = get_settings()
     models = models or default_models()
     results = compare_models(features, models, config)
-    report_dir = Path(report_dir) if report_dir else settings.reports_dir / label
-    write_report(results, report_dir, title=f"Walk-forward backtest — {label}")
+    data = Path(data_dir) if data_dir else settings.backtest_dir / label
+    report = Path(report_dir) if report_dir else settings.reports_dir / label
+    write_report(results, data, report, title=f"Walk-forward backtest — {label}")
     if wh is not None:
         run_id = run_id or datetime.now(UTC).strftime("%Y%m%dT%H%M%S")
         for name, r in results.items():
@@ -118,7 +126,7 @@ def run_backtests(
             preds = r.predictions.assign(model_name=name, run_id=run_id)
             wh.upsert("model_predictions", preds)
         for name, m in zip(results, models, strict=True):
-            (report_dir / f"model_card_{name}.json").write_text(json.dumps(m.card(), indent=2, default=str))
+            (data / f"model_card_{name}.json").write_text(json.dumps(m.card(), indent=2, default=str))
     return results
 
 
@@ -155,6 +163,23 @@ def build_rag_index(wh: Warehouse, index: VectorIndex | None = None, max_matches
         sbm = wh.read("statsbomb_matches")
         if not ev.empty:
             index.add(statsbomb_documents(ev, sbm))
+    if wh.table_exists("espn_fixtures_mapped"):
+        fx = wh.query(
+            """
+            SELECT eventId, matched_match_id, date, home_team, away_team, league_code,
+                   homeTeamScore, awayTeamScore, homeTeamId, awayTeamId
+            FROM espn_fixtures_mapped
+            WHERE matched_match_id IS NOT NULL AND statusId = 28
+            ORDER BY date DESC LIMIT ?
+            """,
+            [max_matches],
+        )
+        if not fx.empty:
+            ids = fx["eventId"].tolist()
+            placeholders = ",".join("?" * len(ids))
+            stats = wh.query(f"SELECT * FROM espn_team_stats WHERE eventId IN ({placeholders})", ids)
+            key_events = wh.query(f"SELECT * FROM espn_key_events WHERE eventId IN ({placeholders})", ids)
+            index.add(espn_documents(fx, stats, key_events))
     return index
 
 
@@ -229,11 +254,30 @@ def upcoming_fixture_frame(wh: Warehouse, features: pd.DataFrame, leagues: list[
         "mkt_away_p",
         "mkt_overround",
         "league_id",
-        *[c for c in BASE_FEATURES if c.startswith(("rot_", "pv_"))],
+        *[c for c in BASE_FEATURES if c.startswith(("rot_", "pv_", "sv_"))],
     ):
         if c not in fx:
             fx[c] = float("nan")
+    fx["lineup_source"] = "provisional"
+    fx = _apply_confirmed_lineups(wh, fx)
     return fx.reset_index(drop=True)
+
+
+def _apply_confirmed_lineups(wh: Warehouse, fx: pd.DataFrame) -> pd.DataFrame:
+    """Overlay `features.live_lineups.confirmed_lineup_features` where a starting XI has been
+    published; leaves the last-used-XI carry-forward (and `lineup_source="provisional"`) for
+    everything else. No-op with zero keys/no confirmed lineups yet."""
+    from pitch_edge.features.live_lineups import LIVE_LINEUP_FEATURES, confirmed_lineup_features
+
+    confirmed = confirmed_lineup_features(wh, fx)
+    if confirmed.empty:
+        return fx
+    fx = fx.set_index("match_id")
+    confirmed = confirmed.set_index("match_id")
+    for col in ("lineup_source", *LIVE_LINEUP_FEATURES):
+        if col in confirmed.columns:
+            fx.loc[confirmed.index, col] = confirmed[col]
+    return fx.reset_index()
 
 
 def synthetic_quotes_from_elo(fixtures: pd.DataFrame, margin: float = 1.05) -> list[dict]:
@@ -253,6 +297,59 @@ def synthetic_quotes_from_elo(fixtures: pd.DataFrame, margin: float = 1.05) -> l
                 "away": round(margin / p_away, 2),
             }
         )
+    return quotes
+
+
+def live_quotes_from_odds_api(wh: Warehouse, fixtures: pd.DataFrame) -> dict[str, dict]:
+    """Real bookmaker quotes keyed by our internal `match_id`, matched by team name since the Odds
+    API's own event id doesn't correspond to ours. Returns {} entries only for fixtures with a
+    genuine live h2h quote; callers fall back to synthetic for everything else.
+
+    `side` is resolved against the *event's own* (unresolved) `home_team`/`away_team` on the same
+    row, not against our canonical team names — the Odds API always spells an outcome exactly like
+    the event's own team name, but that spelling may still differ from our canonical form (e.g.
+    "Tottenham Hotspur" vs "Tottenham"), so resolving `side` through `TeamNameResolver` the same way
+    we resolve the join key would silently fail to match it back up."""
+    if fixtures.empty or not wh.table_exists("live_odds"):
+        return {}
+    live = wh.read("live_odds")
+    live = live[live["market"] == "h2h"] if "market" in live else live
+    if live.empty or "home_team" not in live.columns:
+        return {}
+    live = live.assign(raw_home_team=live["home_team"], raw_away_team=live["away_team"])
+    outcome = pd.Series(pd.NA, index=live.index, dtype="object")
+    outcome[live["side"].str.lower() == live["raw_home_team"].str.lower()] = "home"
+    outcome[live["side"].str.lower() == live["raw_away_team"].str.lower()] = "away"
+    outcome[live["side"].str.lower() == "draw"] = "draw"
+    live = live.assign(outcome=outcome).dropna(subset=["outcome"])
+    teams = sorted(set(fixtures["home_team"]) | set(fixtures["away_team"]))
+    resolver = TeamNameResolver(teams)
+    live = live.assign(
+        home_team=live["raw_home_team"].map(lambda n: resolver.resolve(str(n)) or n),
+        away_team=live["raw_away_team"].map(lambda n: resolver.resolve(str(n)) or n),
+    )
+    quotes: dict[str, dict] = {}
+    for _, fx in fixtures.iterrows():
+        rows = live[(live["home_team"] == fx["home_team"]) & (live["away_team"] == fx["away_team"])]
+        if rows.empty:
+            continue
+        latest_ts = rows["snapshot_ts"].max()
+        rows = rows[rows["snapshot_ts"] == latest_ts]
+        bookmaker = rows["bookmaker"].iloc[0]
+        rows = rows[rows["bookmaker"] == bookmaker]
+        outcome_price = dict(zip(rows["outcome"], rows["price"], strict=True))
+        home_price = outcome_price.get("home")
+        away_price = outcome_price.get("away")
+        draw_price = outcome_price.get("draw")
+        if home_price is None or draw_price is None or away_price is None:
+            continue
+        quotes[fx["match_id"]] = {
+            "match_id": fx["match_id"],
+            "bookmaker": bookmaker,
+            "home": float(home_price),
+            "draw": float(draw_price),
+            "away": float(away_price),
+        }
     return quotes
 
 
@@ -290,7 +387,12 @@ def build_signal_pipeline(
     def fetch_odds(rows: list[dict]) -> list[dict]:
         if quotes is not None:
             return quotes
-        return synthetic_quotes_from_elo(pd.DataFrame(rows)) if rows else []
+        if not rows:
+            return []
+        rows_df = pd.DataFrame(rows)
+        live = live_quotes_from_odds_api(wh, rows_df)
+        synthetic = synthetic_quotes_from_elo(rows_df)
+        return [live.get(q["match_id"], q) for q in synthetic]
 
     def sink(alerts: list[dict]) -> None:
         if alerts:

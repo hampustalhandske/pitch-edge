@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pandas as pd
@@ -55,6 +54,28 @@ def league_table(results: dict[str, BacktestResult]) -> pd.DataFrame:
     )
 
 
+def model_league_performance(data_dir: str | Path, league_code: str) -> dict[str, dict] | None:
+    """Read `data_dir/by_league.csv` (the local backtest data dir, `Settings.backtest_dir/<label>`),
+    return {model_name: {edge_bits, log_loss, n}} for this league, or None if the file/league has
+    no rows. Real walk-forward evidence for the model router
+    (`agents/router.py::select_model_for_league`) — never a hardcoded model choice."""
+    path = Path(data_dir) / "by_league.csv"
+    if not path.exists():
+        return None
+    df = pd.read_csv(path)
+    df = df[df["league_code"] == league_code]
+    if df.empty:
+        return None
+    return {
+        str(row["model"]): {
+            "edge_bits": float(row["edge_bits"]),
+            "log_loss": float(row["log_loss"]),
+            "n": int(row["n"]),
+        }
+        for _, row in df.iterrows()
+    }
+
+
 def _merge_existing(out: Path, name: str, new: pd.DataFrame, models: list[str]) -> pd.DataFrame:
     """Keep rows from earlier passes for models not in this run (e.g. GRU run in a second pass)."""
     path = out / name
@@ -66,28 +87,53 @@ def _merge_existing(out: Path, name: str, new: pd.DataFrame, models: list[str]) 
     return pd.concat([old, new], ignore_index=True) if not old.empty else new
 
 
+def _overall_edge(calib: pd.DataFrame) -> pd.DataFrame:
+    """One row per model: log-loss vs the market's, combined across all test predictions —
+    the headline number. Positive `edge_bits` means the model beats the closing/market price."""
+    import numpy as np
+
+    if calib.empty:
+        return pd.DataFrame(columns=["model", "n", "log_loss", "market_log_loss", "edge_bits"])
+    df = calib.rename(columns={"multiclass_log_loss": "log_loss", "market_multiclass_log_loss": "market_log_loss"})
+    df["edge_bits"] = (df["market_log_loss"] - df["log_loss"]) / np.log(2)
+    return df[["model", "n_predictions", "log_loss", "market_log_loss", "edge_bits"]].rename(
+        columns={"n_predictions": "n"}
+    )
+
+
+def _best_strategy(summary: pd.DataFrame) -> pd.DataFrame:
+    """One row per model: the staking strategy with the best CLV (the edge evidence), not the
+    best ROI (noise over a few hundred bets)."""
+    if summary.empty:
+        return summary
+    return summary.loc[summary.groupby("model")["mean_clv_pct"].idxmax()].reset_index(drop=True)
+
+
 def write_report(
     results: dict[str, BacktestResult],
-    out_dir: str | Path,
+    data_dir: str | Path,
+    report_dir: str | Path,
     title: str = "Walk-forward backtest",
     merge_existing: bool = True,
 ) -> Path:
-    out = Path(out_dir)
-    out.mkdir(parents=True, exist_ok=True)
+    """Write the local, machine-readable CSVs (`data_dir` — used by the dashboard and the
+    agentic model router, never committed) plus one public, one-page `CASE_STUDY.md`
+    (`report_dir` — this is the only thing that belongs under `reports/`). No raw
+    bets/predictions are written here — those already live in the warehouse (`backtest_bets`,
+    read via `Warehouse`)."""
+    data = Path(data_dir)
+    data.mkdir(parents=True, exist_ok=True)
     models = list(results)
     summary = results_table(results)
     calib = calibration_table(results)
     leagues = league_table(results)
     if merge_existing:
-        summary = _merge_existing(out, "backtest_summary.csv", summary, models)
-        calib = _merge_existing(out, "calibration.csv", calib, models)
-        leagues = _merge_existing(out, "by_league.csv", leagues, models)
-    summary.to_csv(out / "backtest_summary.csv", index=False)
-    calib.to_csv(out / "calibration.csv", index=False)
-    leagues.to_csv(out / "by_league.csv", index=False)
-    for name, r in results.items():
-        r.bets.to_parquet(out / f"bets_{name}.parquet", index=False)
-        r.predictions.to_parquet(out / f"predictions_{name}.parquet", index=False)
+        summary = _merge_existing(data, "backtest_summary.csv", summary, models)
+        calib = _merge_existing(data, "calibration.csv", calib, models)
+        leagues = _merge_existing(data, "by_league.csv", leagues, models)
+    summary.to_csv(data / "backtest_summary.csv", index=False)
+    calib.to_csv(data / "calibration.csv", index=False)
+    leagues.to_csv(data / "by_league.csv", index=False)
 
     any_cfg = next(iter(results.values())).config
     preamble = (
@@ -95,52 +141,46 @@ def write_report(
         f"(`{any_cfg.bet_prefix}`), CLV measured vs Pinnacle closing (`{any_cfg.closing_prefix}`), "
         f"edge threshold {any_cfg.edge_threshold:.0%}, retrain every {any_cfg.retrain_every_days} days."
     )
-    (out / "preamble.txt").write_text(preamble)
-    return render_report(out, title, preamble)
+    (data / "preamble.txt").write_text(preamble)
+    return render_report(data, report_dir, title, preamble)
 
 
-def render_report(out_dir: str | Path, title: str = "Walk-forward backtest", preamble: str | None = None) -> Path:
-    """Render REPORT.md from the CSVs in `out_dir` (lets multi-pass runs produce one combined report)."""
-    out = Path(out_dir)
-    summary = pd.read_csv(out / "backtest_summary.csv") if (out / "backtest_summary.csv").exists() else pd.DataFrame()
-    calib = pd.read_csv(out / "calibration.csv") if (out / "calibration.csv").exists() else pd.DataFrame()
-    leagues = pd.read_csv(out / "by_league.csv") if (out / "by_league.csv").exists() else pd.DataFrame()
+def render_report(
+    data_dir: str | Path, report_dir: str | Path, title: str = "Walk-forward backtest", preamble: str | None = None
+) -> Path:
+    """Render a one-page `CASE_STUDY.md` in `report_dir` from the CSVs in `data_dir` — headline
+    edge vs market and best staking result per model, nothing per-division or per-strategy (that
+    detail lives in the local CSVs, not in the public report). Lets multi-pass runs produce one
+    combined report."""
+    data = Path(data_dir)
+    report = Path(report_dir)
+    report.mkdir(parents=True, exist_ok=True)
+    summary = pd.read_csv(data / "backtest_summary.csv") if (data / "backtest_summary.csv").exists() else pd.DataFrame()
+    calib = pd.read_csv(data / "calibration.csv") if (data / "calibration.csv").exists() else pd.DataFrame()
     if preamble is None:
-        preamble = (out / "preamble.txt").read_text() if (out / "preamble.txt").exists() else ""
-    lines = [f"# {title}", ""]
-    lines += [
+        preamble = (data / "preamble.txt").read_text() if (data / "preamble.txt").exists() else ""
+    headline = _overall_edge(calib)
+    staking = _best_strategy(summary)
+    keep_cols = ["model", "strategy", "n_bets", "mean_clv_pct", "roi", "sharpe"]
+    staking = staking[[c for c in keep_cols if c in staking.columns]]
+    lines = [
+        f"# {title}",
+        "",
         preamble,
         "",
-        "## Calibration (all test predictions)",
+        "## Model vs market (all divisions combined)",
         "",
-        _md(calib.round(4)),
+        _md(headline.round(4)),
         "",
-        "## Model vs market by division (where is the information gap?)",
+        "## Best staking result per model (ranked by CLV, not ROI)",
         "",
-        _md(leagues.round(4)),
+        _md(staking.round(4)),
         "",
-        "## Staking results (including the losers)",
-        "",
-        _md(summary.round(4)),
-        "",
-        "## Reading this honestly",
-        "",
-        "- `mean_clv_pct` and `clv_t_stat` are the evidence of edge; `roi` over a few hundred bets is mostly noise.",
-        "- A model whose `multiclass_log_loss` is worse than `market_multiclass_log_loss` is *less* informative than the closing line on its own.",
-        "- Fractional Kelly vs flat: Kelly compounds edge *and* error — compare drawdowns, not just final bankroll.",
+        "_`mean_clv_pct` is the evidence of edge; `roi` over a few hundred bets is mostly noise. "
+        "Negative `edge_bits` means the model is less informative than the closing price._",
     ]
-    (out / "REPORT.md").write_text("\n".join(lines))
-    (out / "summary.json").write_text(
-        json.dumps(
-            {
-                "summaries": summary.to_dict(orient="records"),
-                "calibration": calib.to_dict(orient="records"),
-            },
-            default=str,
-            indent=2,
-        )
-    )
-    return out / "REPORT.md"
+    (report / "CASE_STUDY.md").write_text("\n".join(lines))
+    return report / "CASE_STUDY.md"
 
 
 def _md(df: pd.DataFrame) -> str:

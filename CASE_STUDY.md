@@ -1,284 +1,41 @@
-# Case study — can public data beat the closing line? (First full run, 2026-09-06)
+# Case studies
 
-**Question.** Using only free, ToS-clean data, do our models add information beyond the bookmaker's
-closing price — and does any of the "alternative" data (referee tendencies, kickoff weather,
-travel/fatigue, Elo, rolling form) earn its place?
+This file is an index, not a report. Each test PITCH-EDGE runs — a walk-forward backtest, a
+feature-group ablation, the agentic replay-eval — gets its own one-page, honest write-up at
+`reports/<label>/CASE_STUDY.md`: the question being tested, the setup, the headline result read
+plainly (a model that loses to the closing price is reported as losing to it), the caveats that
+matter, and a verdict. `reports/` holds nothing else — no raw CSVs, parquet or per-match data.
+The supporting machine-readable numbers behind every write-up live locally under
+`data/backtest/<label>/` and `data/artifacts/` (gitignored, not published).
 
-**Setup.** 41,939 matches from 11 European divisions (E0, E1, D1, SP1, I1, F1, N1, P1, B1, SC0, T1),
-July 2015 → September 2026, from the open Club-Football-Match-Data spine. Walk-forward: train on
-everything before each 45-day fold, predict the fold, roll (90 folds, 40,894 out-of-sample predictions
-per model). Isotonic calibration fitted only on realised past folds. Bets priced at the market-average
-price with a 3 % edge threshold; ¼-Kelly, ½-Kelly and flat 1 % staking, hard per-bet caps.
+Case studies are produced by the `case-study` Claude Code skill
+(`.claude/skills/case-study/SKILL.md`): it runs the relevant `pitch-edge` command, reads only the
+resulting local data, and writes (or refreshes) that test's `CASE_STUDY.md` — never inventing a
+number that isn't traceable to a file on disk.
 
-**A caveat that matters.** football-data.co.uk (which carries Pinnacle *early* and *closing* prices) was
-returning HTTP 503 for the whole run, so the only price available was the market-average **closing**
-price. That makes two things true by construction: CLV is exactly zero, and any bet is placed *against
-the closing line* — the sharpest number in the market. The results below should be read as "how far are
-we from the closing line", not as a P&L claim.
+## Available case studies
 
-## Result 1 — every model is less informative than the closing price
+_None yet under this system._ The previous version of this file described a run from
+2026-09-06 with hardcoded numbers that no longer match the current model registry (the GRU
+sequence model, GNN player embeddings and the in-play model were since removed;
+`odds/leadlag.py` and `backtest/event_study.py`, the two modules behind the old lead-lag and
+referee-lag results, no longer exist in the codebase) — rather than leave stale figures in place,
+this index was reset. Run the `case-study` skill against a label below to regenerate a real one:
 
-| model | log-loss | market log-loss | Δ (bits) |
-|---|---|---|---|
-| Dixon-Coles (per league, 2-yr decay) | 1.0084 | 0.9716 | −0.053 |
-| GBDT (feature store, no market input) | 0.9975 | 0.9716 | −0.037 |
-| GBDT + early market probs | 0.9885 | 0.9716 | −0.024 |
-
-Multiclass Brier follows the same order (0.596 / 0.594 / 0.587 vs 0.578). Betting anything with a "3 %
-edge" against a price that is better than the model produces the expected outcome: −5 % to −8 % ROI on
-24-30k bets, bankroll exhausted under every staking rule. That is the honest baseline, and it is what a
-recruiter at a trading desk *should* expect from a public-data model marked against the close.
-
-The interesting part is the gap ordering: adding the market's own (early) probability as a feature
-closes ~40 % of the gap, which says the remaining information is mostly *in the price*, not in our
-features.
-
-## Result 2 — feature-group ablation (GBDT, ¼-Kelly, 90-day retrain)
-
-| group removed | log-loss without | Δ log-loss | verdict |
-|---|---|---|---|
-| Elo (ours + CFMD at kickoff) | 1.0167 | **+0.0188** | the only group that clearly matters |
-| travel / fatigue | 0.9980 | +0.0001 | noise |
-| rolling form (5/10-match) | 0.9979 | −0.0000 | redundant given Elo |
-| weather at kickoff | 0.9968 | **−0.0011** | slightly *hurts* out of sample |
-| referee home-bias | 0.9979 | 0.0000 | no effect — the spine has no referee data |
-
-So: of the three "real" alternative-data features, weather is mildly harmful (over-fitting a weak
-signal), travel is neutral, and referee bias could not be tested at all because the fallback spine lacks
-referee names. That last point is exactly why the football-data.co.uk spine matters — it has the referee
-column for the English divisions.
-
-## Result 3 — where is the model *closest* to the market?
-
-`reports/main/by_league.csv` (regenerated every run) breaks Result 1 down by division for the
-market-aware GBDT:
-
-| division | n | model − market (bits) |
+| Label | Command | Status |
 |---|---|---|
-| D1 Bundesliga | 3,285 | −0.011 |
-| T1 Süper Lig | 3,585 | −0.012 |
-| E1 Championship | 5,961 | −0.017 |
-| N1 Eredivisie | 3,235 | −0.020 |
-| SP1 La Liga | 4,121 | −0.024 |
-| P1 Primeira Liga | 3,328 | −0.024 |
-| B1 Pro League | 2,985 | −0.030 |
-| E0 Premier League | 4,100 | −0.030 |
-| F1 Ligue 1 | 3,765 | −0.032 |
-| SC0 Premiership | 2,384 | −0.035 |
-| I1 Serie A | 4,109 | −0.039 |
+| `main` | `pitch-edge backtest --label main` | not yet regenerated |
+| `developing` | `pitch-edge backtest --label developing --leagues <16 under-covered divisions>` | not yet regenerated |
+| `squad_value` | `pitch-edge backtest --label squad_value --models gbdt,gbdt_mkt,gbdt_squadval,gbdt_mkt_squadval` | not yet regenerated |
+| `ablation` | `pitch-edge ablation` | not yet regenerated |
+| `replay` | `pitch-edge replay-eval` | not yet regenerated |
 
-The gap is smallest in the Bundesliga, the Turkish Süper Lig and the Championship and largest in Serie A,
-Scotland and the Premier League. That is **not** a clean "under-covered markets are softer" pattern —
-the Bundesliga is as well-covered as any league — so the information-asymmetry thesis is *not supported*
-by this run. The honest reading is that these differences (0.01–0.04 bits on 2–6k matches) are mostly
-about how predictable each league is, not about market softness, and the thesis needs the developing-
-market divisions (ARG, BRA, MEX, JPN, Scandinavia — loaded, not yet in the backtest set) and an early
-price to be tested properly.
+## What's still true regardless of specific numbers
 
-## Result 4 — the developing-market slice (the thesis test proper)
-
-Same protocol on 51,481 matches from the 16 under-covered divisions (ARG, BRA, MEX, JAP, USA, NOR, SWE,
-DEN, POL, ROM, RUS, CHN, IRL, FIN, AUT, SUI), 2013 → 2024, 60-day retrain, 50,309 out-of-sample predictions:
-
-| model | log-loss | market log-loss | Δ (bits) |
-|---|---|---|---|
-| Dixon-Coles | 1.0518 | 1.0044 | −0.068 |
-| GBDT | 1.0401 | 1.0044 | −0.052 |
-| GBDT + early market | 1.0213 | 1.0044 | −0.024 |
-
-The market itself is less certain here (log-loss 1.004 vs 0.972 in Europe — these leagues are harder to
-predict), but our models are **further** behind it, not closer. Per division the gap is smallest in Mexico
-and MLS (−0.03 bits) and largest in Norway, Romania and Austria (−0.07 to −0.08). So the naive version of the
-thesis — "public models do better against soft-market prices" — is rejected on this data. What the thesis
-actually needs is information the price doesn't have yet (lineups, injuries, local news), which is what the
-Transfermarkt, Swedish-feed and API-Football layers are for; the aggregate spine alone doesn't provide it.
-
-## Result 5 — the deep-learning entries (PyTorch Lightning)
-
-GRU and Transformer sequence encoders on the European slice from 2018 (29,240 predictions, 90-day retrain,
-time-ordered validation split, early stopping, temperature scaling):
-
-| model | log-loss | market log-loss | Δ (bits) |
-|---|---|---|---|
-| gru_sequence | 1.0418 | 0.9743 | −0.097 |
-| transformer_sequence | 1.0364 | 0.9743 | −0.090 |
-| (GBDT on the same era) | ≈ 0.998 | 0.9743 | ≈ −0.034 |
-
-Both deep models are calibrated and sane, both lose to gradient boosting on aggregate features, and attention
-edges recurrence by a hair. Ten matches of team-centric history is simply thin evidence next to Elo and
-long-window form. Reported as such; they stay in the comparison because "we tried the deep models and they
-lost to trees" is more useful than a deleted row.
-
-*Method note.* The first Lightning run produced log-loss 1.15 — worse than uniform. Cause: temperature
-scaling fitted on 64-row validation slices in the early walk-forward folds picked a sharpening temperature
-(T≈0.5), making already-uncertain predictions over-confident. Fix: temperature ≥ 1 only, fitted only when the
-validation slice has ≥ 300 rows; early stopping only with ≥ 200 validation rows; lower learning rate. The
-bug and the fix are in `MODEL_CARDS.md` because that is exactly the kind of thing a reviewer should see.
-
-## Result 6 — does the RAG layer actually retrieve the right document?
-
-Hybrid retrieval (Chroma dense ∪ BM25, reciprocal-rank fusion, cross-encoder rerank) over 10,541 documents,
-scored on 80 synthetic questions generated from the corpus itself ("Who won X vs Y on <date>?", "What does
-the gbdt model say about A against B?", news headlines): **hit@1 0.99, hit@5 1.00, MRR 0.99**
-(`reports/rag_eval.csv`, `pitch-edge rag-eval`). The questions are templated, so this is an upper bound
-on real usage; it does establish that the answer layer is grounded in the document it should be, and the
-citation verifier flags any figure in an answer that does not appear in a retrieved source.
-
-## Result 7 — pre-registered: does attention-velocity / rotation load / referee actually help? (Phase 5)
-
-**Pre-registration (written before the run, 2026-09-06 21:00 UTC).** Three new pre-match signals were
-added to the feature store, each with a hypothesis and a fixed test, so the result cannot be tuned after
-the fact. Test: the same walk-forward GBDT ablation as Result 2 (11 European divisions, 2015-07 →, 90-day
-retrain, ¼-Kelly), Δ log-loss when the group is removed; a group "earns its place" if removing it worsens
-log-loss by ≥ 0.001 (the size of the weather effect in Result 2, the smallest we could distinguish there).
-
-| group | features | hypothesis H1 | what we expect if H0 |
-|---|---|---|---|
-| `wiki_attention` | `pv_home_anom`, `pv_away_anom`, `pv_home_z`, `pv_away_z`, `pv_diff` — log-ratio and robust z of a club's English-Wikipedia article views on D-1 vs a 28-day trailing baseline (D-2 and earlier); match-day views never used | attention spikes carry news (injury, managerial, transfer) that Elo/form do not; **removing the group worsens log-loss by ≥ 0.001** | club-page attention is dominated by the fixture itself and by results already in Elo → Δ ≈ 0 |
-| `rotation_load` | `rot_*_minutes_7d` (squad minutes per starter-equivalent in all competitions, trailing 7 days), `rot_*_days_since_any`, `rot_*_midweek_cup` (non-league fixture 2–4 days before), `rot_load_diff` — from the open Transfermarkt extract | midweek cup/European load the spine cannot see predicts weekend under-performance; **Δ ≥ 0.001** | rest days from league fixtures already capture most of it (Result 2 found travel/fatigue ≈ 0) → Δ ≈ 0 |
-| `referee` (re-test) | `ref_cards_per_game`, `ref_home_bias` — now active because Transfermarkt games supply the referee name for ~70 k matches | referee tendency shifts 1X2 probabilities enough to register; **Δ ≥ 0.001** | the effect is on cards/fouls, not on who wins → Δ ≈ 0 (the literature suggests this) |
-| referee-announcement lag (event study) | pre → post announcement no-vig move, strong-tendency (\|z\| ≥ 1) vs neutral (\|z\| ≤ 0.5) referees, Welch one-sided t, α = 0.05 | strong-tendency announcements move the price more | no difference — or, more likely this early, **insufficient paired announcements** (the poller started 2026-09-06 and the Premier League page is JavaScript-rendered) |
-| cross-venue lead-lag | lagged cross-correlation + Granger F-test between Polymarket and Kalshi on the same fixture/outcome, hourly grid, ≥ 24 aligned steps | one venue leads by a stable 1–2 h | **insufficient**: the warehouse held 1–2 snapshots per market when this was written; the hourly scheduler now accumulates history |
-
-Results are appended below exactly as produced by `scripts/stage_e.py`, whichever way they go.
-
-### Result 7 — outcome (run 2026-09-06 22:02–22:10 UTC, `scripts/stage_e.py`, `reports/ablation_phase5.csv`)
-
-Feature store rebuilt with the context joins: referee names now present for **43.7 %** of the 41,939 matches
-(Transfermarkt), rotation load for **54.9 %** (clubs that map to a Transfermarkt id), attention anomalies for
-**99.1 %** (340 club articles, 1.34 M daily rows). Same 90-day-retrain walk-forward GBDT as Result 2.
-
-| group removed | log-loss full (all groups) | log-loss without | Δ log-loss | verdict against the pre-registered criterion |
-|---|---|---|---|---|
-| `referee` (now active) | 0.9999 | 0.9994 | −0.0005 | noise (\|Δ\| < 0.001) — H0; referee tendency does not move 1X2 |
-| `travel_fatigue` | 0.9999 | 0.9990 | −0.0009 | noise, leaning harmful — H0 (unchanged from Result 2) |
-| `wiki_attention` | 0.9999 | 0.9979 | **−0.0019** | **rejected**: removing it *improves* out-of-sample log-loss |
-| `rotation_load` | 0.9999 | 0.9979 | **−0.0020** | **rejected**: removing it *improves* out-of-sample log-loss |
-
-Reading. Both headline hypotheses are rejected, and not marginally: the "full" model with every new group
-(log-loss 0.9999) is *worse* than the Result 1 GBDT without them (0.9975), and dropping either new group
-recovers most of that. The market benchmark on the same rows is 0.9713. So:
-
-* **Attention velocity** at club-article level carries no information the tree can use beyond Elo and form —
-  most pre-match attention *is* the fixture and the last result, and the tail of genuine spikes (a sacking, a
-  transfer, an injury breaking in local press) is too rare to learn from 42 k rows without over-fitting the
-  rest. A player-level version (the injured striker's page, not the club's) is the obvious next test and is
-  not built here.
-* **Rotation load** from cup/European minutes is either already in the price and in rest-days, or too noisy
-  when 45 % of matches have no mapping. It does *not* rescue the fatigue thesis.
-* **Referee** is finally testable and is a no-op for match outcome, which is what the literature predicts (the
-  effect is on cards and fouls). The tendency table is still useful descriptively — the dossier quotes it.
-
-Decision (pre-registered rule applied, not a post-hoc choice): the two rejected groups stay in the feature
-store and in every future ablation, but the default `gbdt` model excludes them (`DEFAULT_EXCLUDED_PREFIXES` in
-`models/gbdt.py`, recorded in every model card). The headline number does **not** improve as a result —
-it stays at −0.037 bits (gbdt) / −0.024 bits (gbdt + early market) — it simply does not get worse.
-
-**Referee-announcement event study** (`reports/referee_lag.csv`): 275 referees with ≥ 20 matches of tendency
-data, **0 paired announcements** → `insufficient`. The Premier League appointments page is JavaScript-rendered
-(the parser finds nothing in the HTML), no other federation source is configured yet, and the poller only
-started today. The test exists and is unit-tested on synthetic pairs; it will run for real once a parseable
-source and a few weeks of hourly snapshots exist. Nothing is filled in.
-
-**Cross-venue lead-lag** (`reports/lead_lag.csv`): **0 shared fixture-outcomes with ≥ 24 aligned hourly steps**
-→ `insufficient`. At the time of the run the warehouse held one Kalshi pull and two Polymarket pulls, and the
-Polymarket rows were US-politics markets returned under the "soccer" tag (now filtered out). The hourly
-scheduler job snapshots both venues; the method (lagged cross-correlation + Granger F-test in both directions)
-is verified on synthetic series where one venue leads by one step.
-
-Net: Phase 5 added three real signals and two real tests and **moved the headline result by zero** — which is
-exactly what the pre-registration was for.
-
-## Result 8 — pre-registered: does confirmed-lineup squad value close the gap? (Phase 6)
-
-**Pre-registration.** Result 7 rejected two feature groups built from the open Transfermarkt extract
-(attention velocity, rotation *minutes*) without ever looking at *who* is in the confirmed lineup or how
-good they are — exactly the gap Result 4 and the "what changes the answer" section (below) call out as
-untested: player-level information. `src/pitch_edge/features/squad_value.py` builds two new, genuinely
-different signals from the same extract, both strictly pre-match (Transfermarkt's confirmed lineup is
-recorded at the same pre-kickoff timing a bookmaker's closing price reflects, and valuations are joined
-`ASOF` on or before the match date):
-
-* `sv_home_xi_value` / `sv_away_xi_value` / `sv_xi_value_diff` — log1p summed market value of the eleven
-  players Transfermarkt lists as `starting_lineup`, i.e. the confirmed XI's raw quality.
-* `sv_home_missing_pct` / `sv_away_missing_pct` / `sv_missing_pct_diff` — the value-weighted share of each
-  side's "usual XI" (the eleven players with the most total minutes for that club in the trailing 365
-  days) who are absent from *today's* confirmed lineup — a direct injury/suspension/ban proxy, deliberately
-  independent of the fatigue/minutes signal Result 7 already rejected.
-
-**Hypothesis H1.** Confirmed-lineup value and missing-star value carry information about squad strength
-and absences that Elo, rolling form and the (rejected) rotation-load group do not — because they are the
-first signals in the feature store built from the *actual XI*, not team aggregates. Test: the same
-walk-forward GBDT comparison as Result 1 (11 European divisions, 2015-07 →, 90-day retrain, 3% edge),
-`gbdt_squadval` vs `gbdt` and `gbdt_mkt_squadval` vs `gbdt_mkt`, exclude_prefixes limited to the Result-7
-rejected groups (`pv_`, `rot_`) so `sv_` is the only difference from the two production baselines. What we
-expect if H0: like `wiki_attention` and `rotation_load`, the signal is already implicit in Elo/form and in
-the closing price, and the new group changes nothing or hurts (Result 7's pattern).
-
-**Coverage caveat (checked before reading the numbers as real).** Of the 41,939 matches in the slice, the
-Transfermarkt club-name resolver maps **54.9%** to a club id (identical to Result 7's `rotation_load`
-coverage — it is the same club-id map); of those, **89.1%** also match a specific Transfermarkt game by
-(date, home club, away club). Net: `sv_home_xi_value` is non-null (a real starting-XI join, not a
-zero-fallback) for **48.9%** of the 41,939 matches, and the missing-star baseline (`sv_home_missing_pct`,
-which additionally needs 365 days of trailing appearance history for both sides) is available for
-**44.0%**. So this signal can only possibly move ~half the sample — the other half sees imputed
-(training-fold-median) values, the same mechanism as `gbdt`'s existing NaN handling. `n_predictions` in
-`reports/squad_value/summary.json` is
-40,357 versus Result 1's 40,894 (537 fewer, 1.3%). This is **not** the squad-value join dropping rows —
-`features/context.py::load_context` and `FeatureBuilder.build` only ever `LEFT JOIN`/merge the `sv_`
-columns, and `GBDTMatchModel` imputes missing values with the training-fold median, so a match with no
-Transfermarkt lineup simply gets a neutral value, not a dropped row. The feature frame itself has exactly
-41,939 rows, identical to Result 1. The discrepancy in walk-forward test-fold membership instead comes
-from the (documented, one-directional) upgrade of warehouse rows since Result 1 was produced — the 90-day
-fold boundaries are computed from the *400th row's date* after sorting by date, so any churn in exactly
-which rows compose the same 41,939-row count shifts fold edges and the size of the last partial fold. It
-is a real, checkable side effect of the standing daily ingest loop, not an artefact of this feature.
-
-**Result** (`reports/squad_value/REPORT.md`, `reports/squad_value/summary.json`, same 90-day-retrain
-walk-forward protocol as Result 1, run on the 40,357 shared predictions):
-
-| model | log-loss | market log-loss | Δ (bits) |
-|---|---|---|---|
-| `gbdt` (baseline, no market) | 0.9988 | 0.9713 | −0.0396 |
-| `gbdt_squadval` (+ `sv_` group) | 0.9973 | 0.9713 | −0.0374 |
-| `gbdt_mkt` (baseline, + early market) | 0.9900 | 0.9713 | −0.0269 |
-| `gbdt_mkt_squadval` (+ `sv_` group) | 0.9895 | 0.9713 | −0.0262 |
-
-Reading honestly. Both squad-value variants move in the *right* direction — the first Phase-6+ feature
-group to do so, after `wiki_attention` and `rotation_load` both made things worse in Result 7. Without the
-market feature, adding `sv_` closes 0.0022 bits of a 0.0396-bit gap (~5.5% of it); with the early market
-probability already in the model, it closes only 0.0007 bits of a 0.0269-bit gap (~2.6%). For scale: Elo
-(Result 2) is worth 0.0188 log-loss (~0.027 bits) on its own, so the no-market squad-value effect is
-roughly a tenth of Elo's, and the market-aware effect is small enough that it is not clearly distinguishable
-from the kind of fold-boundary noise documented in the coverage caveat above — the same data churn that
-moved `gbdt`'s own gap from −0.037 (Result 1) to −0.040 bits here, a swing three times the size of the
-`gbdt_mkt_squadval` improvement. **Verdict: directionally consistent with H1, not decisively confirmed.**
-The no-market result (0.0022 bits, ~5.5% of the gap) is the more credible of the two because it is larger
-than the observed noise floor; the market-aware result (0.0007 bits) is not, on this sample, distinguishable
-from noise. A formal significance test (paired bootstrap over folds) and the full pre-registered ablation
-(`squad_value` group in `ablation.py::FEATURE_GROUPS`, `pitch-edge ablation --groups ...,squad_value`)
-against the ≥0.001 log-loss criterion used in Result 7 are the natural next steps and were not completed in
-this run.
-
-Decision: `_squadval` is added to `available_models()` as a **named, separately-reported candidate**
-(`gbdt_squadval`, `gbdt_mkt_squadval` in `src/pitch_edge/models/__init__.py`) — it does **not** replace the
-default `gbdt`/`gbdt_mkt` production models. `sv_` is listed in `PENDING_EXCLUDED_PREFIXES`
-(`models/gbdt.py`) precisely so the two headline models stay byte-for-byte reproducible against every prior
-result in this document while the new group accumulates more walk-forward evidence (and, ideally, better
-coverage — StatsBomb-quality lineup confirmation for the ~51% of matches Transfermarkt does not currently
-link).
-
-## What changes the answer
-
-1. **Early vs closing prices** (football-data.co.uk Pinnacle `PS*`/`PSC*`): the only way to measure CLV
-   and to bet at a price the model could actually have taken.
-2. **Player-level information**: the open Transfermarkt extract (1.9 M appearances, 631 k substitutions,
-   valuations) and StatsBomb events give squad quality, absence and rotation signals the aggregate
-   spine cannot see.
-3. **Under-covered markets with local text**: Swedish Allsvenskan/Superettan/Ettan results plus SVT,
-   Sportbladet, Expressen, DN, GP feeds — the sentiment-velocity scanner now runs in Swedish too.
-4. **Cross-venue prices**: Polymarket and Kalshi snapshots (457 football series on Kalshi) for divergence
-   detection against bookmaker no-vig probabilities.
-
-All four are wired in; the next full `pitch-edge refresh` re-runs this study with them. Losing results
-will keep being published here — that is the point of the document.
+- Every model is compared against the market's own closing (or best-available) price on the same
+  out-of-sample walk-forward folds — never a shuffled split, never priced at a fantasy line.
+- Losing is the expected, honest baseline for a public-data model marked against the close, and
+  it gets published exactly like a win would.
+- `reports/rag_eval.csv`-style retrieval-quality checks, referee/lead-lag event studies, and any
+  other standalone evaluation get the same treatment: a real run, a real `CASE_STUDY.md`, no
+  numbers carried over from a previous codebase state.

@@ -44,6 +44,7 @@ def test_run_backtests_persists_everything(loaded, tmp_path):
         [DixonColesMatchModel(), GBDTMatchModel(n_estimators=25)],
         cfg,
         wh=loaded,
+        data_dir=tmp_path / "data",
         report_dir=tmp_path / "r",
         label="t",
     )
@@ -51,7 +52,7 @@ def test_run_backtests_persists_everything(loaded, tmp_path):
     summ, bets = latest_backtest_tables(loaded)
     assert len(summ) == 6 and not bets.empty
     assert loaded.count("model_predictions") == 2 * len(results["gbdt"].predictions)
-    assert (tmp_path / "r" / "model_card_gbdt.json").exists() and (tmp_path / "r" / "REPORT.md").exists()
+    assert (tmp_path / "data" / "model_card_gbdt.json").exists() and (tmp_path / "r" / "CASE_STUDY.md").exists()
 
 
 def test_rag_index_built_from_warehouse(loaded, tmp_path):

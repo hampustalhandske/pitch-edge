@@ -150,3 +150,65 @@ def statsbomb_documents(events: pd.DataFrame, matches: pd.DataFrame) -> list[Doc
             )
         )
     return docs
+
+
+def espn_documents(fixtures: pd.DataFrame, team_stats: pd.DataFrame, key_events: pd.DataFrame) -> list[Document]:
+    """One document per matched, completed ESPN fixture: the score, both teams' match stats
+    (possession/shots/passing), and the goal/card key events, as a compact match report.
+
+    Deliberately NOT a bulk embed of `espn_commentary`/`espn_plays` (2.4M/2.8M raw rows) — that
+    volume is mostly noisy minute-by-minute text that would dwarf the rest of the index for little
+    grounding value, whereas team stats + key events already summarise what a match report needs.
+    `fixtures` should come pre-filtered to `matched_match_id IS NOT NULL` (see
+    `espn_fixtures_mapped` in `data/sources/espn_soccer_data.py`) so every document can cite the
+    same `match_id` pitch-edge's other documents use."""
+    docs = []
+    stats_by_event = dict(iter(team_stats.groupby("eventId"))) if not team_stats.empty else {}
+    events_by_event = dict(iter(key_events.groupby("eventId"))) if not key_events.empty else {}
+    for _, r in fixtures.iterrows():
+        bits = [
+            f"{r['home_team']} {int(r['homeTeamScore'])}-{int(r['awayTeamScore'])} {r['away_team']} "
+            f"({r['league_code']}, {pd.Timestamp(r['date']).date()})."
+        ]
+        g = stats_by_event.get(r["eventId"])
+        if g is not None and len(g) == 2:
+            home = g[g["teamId"] == r["homeTeamId"]]
+            away = g[g["teamId"] == r["awayTeamId"]]
+            stat_cols = ("possessionPct", "totalShots", "shotsOnTarget", "passPct")
+            if not home.empty and not away.empty:
+                h, a = home.iloc[0], away.iloc[0]
+                if all(pd.notna(h[c]) and pd.notna(a[c]) for c in stat_cols):
+                    bits.append(
+                        f"Possession {h['possessionPct']:.0f}%-{a['possessionPct']:.0f}%, "
+                        f"shots {int(h['totalShots'])}-{int(a['totalShots'])} "
+                        f"({int(h['shotsOnTarget'])}-{int(a['shotsOnTarget'])} on target), "
+                        f"pass accuracy {h['passPct'] * 100:.0f}%-{a['passPct'] * 100:.0f}%."
+                    )
+        ev = events_by_event.get(r["eventId"])
+        if ev is not None and not ev.empty:
+            # Substitutions/goals carry one row per participant (scorer+assister, sub in+out),
+            # all sharing the same keyEventOrder — keep one row per order so the list reads clean.
+            texts = (
+                ev.sort_values("keyEventOrder")
+                .drop_duplicates(subset="keyEventOrder")["keyEventShortText"]
+                .dropna()
+                .head(8)
+                .tolist()
+            )
+            if texts:
+                bits.append("Key events: " + "; ".join(texts) + ".")
+        docs.append(
+            Document(
+                f"espn:{r['matched_match_id']}",
+                " ".join(bits),
+                {
+                    "type": "espn_match",
+                    "match_id": str(r["matched_match_id"]),
+                    "date": str(pd.Timestamp(r["date"]).date()),
+                    "home_team": r["home_team"],
+                    "away_team": r["away_team"],
+                    "league": str(r["league_code"]),
+                },
+            )
+        )
+    return docs
