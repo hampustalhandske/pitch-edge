@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 from datetime import UTC, datetime
+from functools import partial
 from pathlib import Path
 
 import pandas as pd
@@ -171,14 +172,16 @@ def ingest_football_data(
     counts: dict[str, int] = {}
     for league in leagues:
         counts[league] = _run(
-            wh, f"football_data_co_uk:{league}", lambda league=league: _ingest_fd_league(wh, src, league, seasons)
+            wh, f"football_data_co_uk:{league}", partial(_ingest_fd_league, wh, src, league, seasons)
         )
     if extra_leagues:
         for stem in EXTRA_LEAGUE_FILES:
-            counts[stem] = _run(
-                wh, f"football_data_co_uk:new/{stem}", lambda stem=stem: store_matches(wh, src.fetch_extra_league(stem))
-            )
+            counts[stem] = _run(wh, f"football_data_co_uk:new/{stem}", partial(_ingest_fd_extra_league, wh, src, stem))
     return counts
+
+
+def _ingest_fd_extra_league(wh: Warehouse, src: FootballDataCoUkSource, stem: str) -> int:
+    return store_matches(wh, src.fetch_extra_league(stem))
 
 
 def _ingest_fd_league(wh: Warehouse, src: FootballDataCoUkSource, league: str, seasons: list[int]) -> int:
