@@ -12,3 +12,4 @@ __pycache__/
 .env.*
 *.log
 logs/
+PROMPT_ELITE.md
