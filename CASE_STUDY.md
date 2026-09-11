@@ -15,12 +15,12 @@ number that isn't traceable to a file on disk.
 
 ## Available case studies
 
-_None yet under this system._ The previous version of this file described a run from
-2026-09-06 with hardcoded numbers that no longer match the current model registry (the GRU
-sequence model, GNN player embeddings and the in-play model were since removed;
-`odds/leadlag.py` and `backtest/event_study.py`, the two modules behind the old lead-lag and
-referee-lag results, no longer exist in the codebase) — rather than leave stale figures in place,
-this index was reset. Run the `case-study` skill against a label below to regenerate a real one:
+The previous version of this file described a run from 2026-09-06 with hardcoded numbers that no
+longer match the current model registry (the GRU sequence model, GNN player embeddings and the
+in-play model were since removed; `odds/leadlag.py` and `backtest/event_study.py`, the two modules
+behind the old lead-lag and referee-lag results, no longer exist in the codebase) — rather than
+leave stale figures in place, this index was reset. Run the `case-study` skill against a label
+below to regenerate a real one:
 
 | Label | Command | Status |
 |---|---|---|
@@ -28,7 +28,7 @@ this index was reset. Run the `case-study` skill against a label below to regene
 | `developing` | `pitch-edge backtest --label developing --leagues <16 under-covered divisions>` | not yet regenerated |
 | `squad_value` | `pitch-edge backtest --label squad_value --models gbdt,gbdt_mkt,gbdt_squadval,gbdt_mkt_squadval` | not yet regenerated |
 | `ablation` | `pitch-edge ablation` | not yet regenerated |
-| `replay` | `pitch-edge replay-eval` | not yet regenerated |
+| [`replay`](reports/replay/CASE_STUDY.md) | `pitch-edge replay-eval` | **done (2026-09-10)** — mechanically sound end-to-end (real evidence, deterministic reviewer, real closing-price scoring), but every model still loses to the market on the pre-T0 fold too, so every proposal was correctly `distrust`; only 4 proposals were scored, far too few to judge the rule's real discriminating power |
 
 ## What's still true regardless of specific numbers
 

@@ -182,10 +182,14 @@ def signals(model: str = "gbdt", min_date: str = "2018-07-01") -> None:
         rprint(f"[dim]{len(pending)} paper trades logged historically[/dim]")
 
 
-def _run_agentic_pipeline(wh: Warehouse, model: str, min_date: str) -> tuple[str, SignalState]:
-    """Shared by `agentic-signals` and `predict`: build deps, fit models, run the fully
-    deterministic agentic graph to the human-approval gate. No LLM involved anywhere in here —
-    routing, edge detection and risk sizing all run on real resources already in the warehouse."""
+def _run_agentic_pipeline(
+    wh: Warehouse, model: str, min_date: str, tool_reviewer: bool = False
+) -> tuple[str, SignalState]:
+    """Shared by `agentic-signals` and `predict`: build deps, fit models, run the agentic graph to
+    the human-approval gate. Fully deterministic by default — routing, edge detection and risk
+    sizing all run on real resources already in the warehouse. `tool_reviewer=True` swaps in the
+    opt-in tool-calling reviewer (`agents/tool_reviewer.py`), the only case where an LLM runs inside
+    this pipeline rather than only on-demand via `pitch-edge predict`."""
     from pitch_edge.agents.graph import GraphDependencies
     from pitch_edge.agents.orchestrator import AgenticSignalPipeline
     from pitch_edge.agents.risk import RiskLimits, RiskManager
@@ -239,7 +243,9 @@ def _run_agentic_pipeline(wh: Warehouse, model: str, min_date: str) -> tuple[str
     )
     reports_dir = get_settings().backtest_dir / "main"
     index = build_rag_index(wh)
-    pipe = AgenticSignalPipeline(deps, reports_dir=reports_dir, index=index, wh=wh, available_models=fitted)
+    pipe = AgenticSignalPipeline(
+        deps, reports_dir=reports_dir, index=index, wh=wh, available_models=fitted, use_tool_reviewer=tool_reviewer
+    )
     thread_id, state = pipe.run_to_gate()
     return thread_id, state
 
@@ -281,13 +287,25 @@ def _print_proposals(state: SignalState, title: str) -> None:
 def agentic_signals(
     model: str = typer.Option("gbdt", help="Default/fallback model — the per-league router picks the real one"),
     min_date: str = "2018-07-01",
+    tool_reviewer: bool = typer.Option(
+        False,
+        "--tool-reviewer/--no-tool-reviewer",
+        help=(
+            "Opt-in: swap the deterministic reviewer for a local-LLM agent that calls its own "
+            "backtest_evidence/search_context tools (agents/tool_reviewer.py) instead of being "
+            "handed pre-fetched evidence. Slower and less deterministic — off by default; also "
+            "settable via PITCH_EDGE_REVIEWER_TOOL_CALLING=true."
+        ),
+    ),
 ) -> None:
     """Genuinely agentic signals pipeline: data-quality screening, per-league model routing,
-    deterministic edge review — same human-approval gate as `signals`. Fully deterministic, no LLM
-    involved — for a plain-language explanation of the resulting proposals, run `pitch-edge predict`
-    instead, which calls the LLM exactly once over the whole batch."""
+    deterministic edge review — same human-approval gate as `signals`. Fully deterministic by
+    default, no LLM involved (pass --tool-reviewer to opt into the tool-calling reviewer) — for a
+    plain-language explanation of the resulting proposals, run `pitch-edge predict` instead, which
+    calls the LLM exactly once over the whole batch."""
+    tool_reviewer = tool_reviewer or get_settings().agentic_reviewer_tool_calling
     with _wh() as wh:
-        thread_id, state = _run_agentic_pipeline(wh, model, min_date)
+        thread_id, state = _run_agentic_pipeline(wh, model, min_date, tool_reviewer=tool_reviewer)
         rprint(f"[bold]thread:[/bold] {thread_id}  (paused at HUMAN APPROVAL GATE)")
         rprint(f"[dim]screened: {len(state.get('selected_fixtures', []))} fixtures scouted[/dim]")
         _print_proposals(state, "Pending proposals (agentic)")

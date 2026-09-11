@@ -9,12 +9,18 @@ exact node functions from `agents.graph.make_nodes(deps)`, unmodified — only `
 (`interrupt_before=["human_approval"]`) is identical to the deterministic graph's: it is not
 negotiable and is not being changed by adding agent judgment upstream of it.
 
-No LLM runs anywhere in this graph. `select_fixtures` and `review_proposals` are both deterministic
-(see their own docstrings) — routing, edge detection, and risk sizing all run on the real resources
-this project already has (the model router, the feature store, real/synthetic odds, backtest
-evidence). `gather_context` still retrieves RAG documents per fixture, purely so that evidence is
-available if a user later asks the system to explain the results — that single, on-demand LLM call
-lives in `agents/explainer.py` and is never invoked as part of running this graph.
+No LLM runs anywhere in this graph by default. `select_fixtures` and `review_proposals` are both
+deterministic (see their own docstrings) — routing, edge detection, and risk sizing all run on the
+real resources this project already has (the model router, the feature store, real/synthetic odds,
+backtest evidence). `gather_context` still retrieves RAG documents per fixture, purely so that
+evidence is available if a user later asks the system to explain the results — that single,
+on-demand LLM call lives in `agents/explainer.py` and is never invoked as part of running this graph.
+
+Opt-in exception: `use_tool_reviewer=True` (or `PITCH_EDGE_REVIEWER_TOOL_CALLING=true` /
+`agentic-signals --tool-reviewer`) swaps `review_proposals` for
+`agents.tool_reviewer.review_proposals_agentic`, which gives a local LLM its own `backtest_evidence`
+/ `search_context` tools and lets it decide what to call before returning a verdict, instead of being
+handed pre-fetched evidence. Off by default — see `agents/tool_reviewer.py` for why.
 
 The `inference` node's model is chosen per-league by `select_model_for_league` rather than one
 hardcoded model — `deps.infer`/`deps.model_name` must therefore be *rebuilt per league* inside this
@@ -36,6 +42,7 @@ from pitch_edge.agents.graph import GraphDependencies, SignalState, make_nodes
 from pitch_edge.agents.reviewer import review_proposals
 from pitch_edge.agents.router import select_model_for_league
 from pitch_edge.agents.selection import select_fixtures
+from pitch_edge.agents.tool_reviewer import review_proposals_agentic
 from pitch_edge.data.storage import Warehouse
 from pitch_edge.models.base import MatchModel
 from pitch_edge.rag.fixture_context import gather_fixture_context
@@ -87,6 +94,7 @@ def build_agentic_graph(
     available_models: list[MatchModel] | None = None,
     checkpointer=None,
     context_as_of: str | None = None,
+    use_tool_reviewer: bool = False,
 ):
     """`available_models` must already be fit (e.g. on `load_feature_frame(wh, ...)`) — this graph
     only selects among them per-league and calls `predict_proba`. Without them (or without `wh`),
@@ -96,7 +104,11 @@ def build_agentic_graph(
     `context_as_of` (an ISO date string) is threaded into `gather_fixture_context` to exclude any
     retrieved doc dated on or after it — required by `backtest/replay.py` so a production RAG index
     that already contains real match-report docs for the replay window can't leak the real outcome
-    into the explainer's context. Live `agentic-signals` runs leave it unset (nothing to hide)."""
+    into the explainer's context. Live `agentic-signals` runs leave it unset (nothing to hide).
+
+    `use_tool_reviewer` (default False) swaps the deterministic `review_proposals` node for
+    `agents.tool_reviewer.review_proposals_agentic` — see that module and this function's docstring
+    above for what changes and why it stays opt-in."""
     base_nodes = make_nodes(deps)
 
     def select_fixtures_node(state: SignalState) -> dict:
@@ -120,6 +132,8 @@ def build_agentic_graph(
         }
 
     def review_proposals_node(state: SignalState) -> dict:
+        if use_tool_reviewer:
+            return review_proposals_agentic(state, reports_dir, index)
         return review_proposals(state, reports_dir)
 
     # `inference` is rebuilt to route per-league instead of the deterministic graph's single model.
@@ -168,6 +182,7 @@ class AgenticSignalPipeline:
         available_models: list[MatchModel] | None = None,
         checkpointer=None,
         context_as_of: str | None = None,
+        use_tool_reviewer: bool = False,
     ):
         self.graph = build_agentic_graph(
             deps,
@@ -177,6 +192,7 @@ class AgenticSignalPipeline:
             available_models=available_models,
             checkpointer=checkpointer,
             context_as_of=context_as_of,
+            use_tool_reviewer=use_tool_reviewer,
         )
 
     def run_to_gate(self, thread_id: str | None = None) -> tuple[str, SignalState]:

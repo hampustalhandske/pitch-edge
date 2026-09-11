@@ -57,6 +57,9 @@ class Settings:
     local_llm_base_url: str = field(
         default_factory=lambda: _env("PITCH_EDGE_LOCAL_LLM_BASE_URL", "http://localhost:11434")
     )
+    agentic_reviewer_tool_calling: bool = field(
+        default_factory=lambda: _env("PITCH_EDGE_REVIEWER_TOOL_CALLING", "false").lower() == "true"
+    )
 
     @property
     def raw_dir(self) -> Path:

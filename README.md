@@ -39,7 +39,7 @@ For results, known limitations and the honest headline numbers, see `CASE_STUDY.
 
 ```mermaid
 flowchart LR
-  subgraph Sources["Free data sources"]
+  subgraph Sources["Data Sources"]
     FD[football-data.co.uk<br/>results + multi-book odds]
     CF[Club-Football-Match-Data<br/>2000-2025 spine · Elo]
     TM[Transfermarkt open extract<br/>players · rotation · valuations]
@@ -64,27 +64,6 @@ flowchart LR
   GATE --> PT[Paper-trade log]
   WH & BT & RAG & PT --> UI[NiceGUI dashboard · 5 views · dark]
 ```
-
-## Data sources
-
-| Source | Provides | Access |
-|---|---|---|
-| Club-Football-Match-Data (xgabora, open) | 2000–2025 results spine, Elo/form at kickoff, market-avg/max odds | open dataset |
-| football-data.co.uk | Pinnacle early + closing prices (real CLV), referee names, Swedish odds | free reuse, local archive mirror read first |
-| Transfermarkt open extract (dcaribou, MIT) | player appearances, rotation/fatigue load, squad valuations | open dataset |
-| openfootball | fixtures, Allsvenskan/Superettan/Ettan results | public domain |
-| StatsBomb Open Data | match events | open-data licence |
-| ESPN soccer data | supplementary match/fixture data | free API |
-| Kalshi · Polymarket | prediction-market snapshots, cross-venue divergence | public read APIs |
-| Wikidata + Open-Meteo | ground geocoding, kickoff weather/forecast | CC0 / free |
-| Wikimedia pageviews REST API | club-article attention velocity (D-1 vs 28-day baseline) | public, keyless |
-| RSS (EN + SV) | sentiment velocity, injury/lineup keyword flags | RSS |
-| WhoScored (vendored connector) | fixture discovery, event data | not yet wired into ingestion |
-
-Optional, keyed (off by default, free registration): API-Football (confirmed lineups), The Odds API (live
-1X2 quotes), Everysport (Swedish lower divisions), Anthropic (RAG generation fallback). See `API_KEYS.md`.
-Every fetch goes through `data/http.py::CachedHttpClient` — throttled, disk-cached, robots-aware, with a
-per-host circuit breaker.
 
 ## Models
 
@@ -126,8 +105,11 @@ Two LangGraph pipelines share the same downstream nodes and the same non-negotia
 - **`signals`** — deterministic: `scout → features → inference → odds → edge_detector → risk_manager →
   ⟂ human_approval → log_alerts`, one fixed model.
 - **`agentic-signals`** — additive: a local-LLM data-quality screening agent selects fixtures, a per-league
-  router picks the model with the best real backtest evidence for that league, and a RAG-grounded reviewer
-  flags proposals before they reach approval.
+  router picks the model with the best real backtest evidence for that league, and a deterministic
+  RAG-grounded reviewer flags proposals before they reach approval. `--tool-reviewer` (off by default,
+  also `PITCH_EDGE_REVIEWER_TOOL_CALLING=true`) swaps that reviewer for a genuinely tool-calling LLM agent
+  that decides for itself when to call `backtest_evidence`/`search_context` instead of being handed
+  pre-fetched evidence — slower and less deterministic, so it stays opt-in (`agents/tool_reviewer.py`).
 
 Both compile with `interrupt_before=["human_approval"]`; `log_alerts` refuses to write anything without an
 explicit human decision. `replay-eval` scores the agentic reviewer's trust/distrust verdicts against real
