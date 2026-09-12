@@ -1,6 +1,5 @@
-"""Opt-in tool-calling reviewer: same input/output shape as `agents.reviewer.review_proposals`,
-but the verdict comes from an LLM agent calling its own tools (`create_react_agent`) instead of
-being handed pre-fetched evidence. See agents/tool_reviewer.py for why it stays off by default.
+"""Tool-calling reviewer: the verdict comes from an LLM agent calling its own tools
+(`create_react_agent`) instead of being handed pre-fetched evidence.
 """
 
 from __future__ import annotations
@@ -39,7 +38,16 @@ def _state(**proposal_kwargs):
 
 def _write_by_league(tmp_path, edge_bits=0.03):
     pd.DataFrame(
-        [{"model": "gbdt", "league_code": "E0", "n": 400, "log_loss": 0.6, "market_log_loss": 0.63, "edge_bits": edge_bits}]
+        [
+            {
+                "model": "gbdt",
+                "league_code": "E0",
+                "n": 400,
+                "log_loss": 0.6,
+                "market_log_loss": 0.63,
+                "edge_bits": edge_bits,
+            }
+        ]
     ).to_csv(tmp_path / "by_league.csv", index=False)
 
 

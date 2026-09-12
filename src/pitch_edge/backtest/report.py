@@ -7,6 +7,7 @@ from pathlib import Path
 import pandas as pd
 
 from pitch_edge.backtest.engine import BacktestResult
+from pitch_edge.backtest.slices import slice_evidence_checkpoints
 
 
 def results_table(results: dict[str, BacktestResult]) -> pd.DataFrame:
@@ -115,12 +116,14 @@ def write_report(
     report_dir: str | Path,
     title: str = "Walk-forward backtest",
     merge_existing: bool = True,
+    features: pd.DataFrame | None = None,
 ) -> Path:
-    """Write the local, machine-readable CSVs (`data_dir` — used by the dashboard and the
-    agentic model router, never committed) plus one public, one-page `CASE_STUDY.md`
-    (`report_dir` — this is the only thing that belongs under `reports/`). No raw
-    bets/predictions are written here — those already live in the warehouse (`backtest_bets`,
-    read via `Warehouse`)."""
+    """Write the local, machine-readable CSVs (`data_dir`, never committed) plus one public,
+    one-page `CASE_STUDY.md` (`report_dir` — this is the only thing that belongs under
+    `reports/`). No raw bets/predictions are written here — those already live in the warehouse
+    (`backtest_bets`, read via `Warehouse`). `features` (the frame the backtest ran on) is
+    optional; when given, `slice_evidence.csv` (circumstance-stratified, checkpointed evidence —
+    see `backtest/slices.py`) is written alongside `by_league.csv`."""
     data = Path(data_dir)
     data.mkdir(parents=True, exist_ok=True)
     models = list(results)
@@ -134,6 +137,12 @@ def write_report(
     summary.to_csv(data / "backtest_summary.csv", index=False)
     calib.to_csv(data / "calibration.csv", index=False)
     leagues.to_csv(data / "by_league.csv", index=False)
+
+    if features is not None:
+        slices = pd.concat([slice_evidence_checkpoints(r, features) for r in results.values()], ignore_index=True)
+        if merge_existing:
+            slices = _merge_existing(data, "slice_evidence.csv", slices, models)
+        slices.to_csv(data / "slice_evidence.csv", index=False)
 
     any_cfg = next(iter(results.values())).config
     preamble = (

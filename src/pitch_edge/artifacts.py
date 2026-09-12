@@ -99,7 +99,6 @@ def build_data_universe(wh: Warehouse) -> dict:
         "features",
         "model_predictions",
         "backtest_bets",
-        "paper_trades",
     ):
         out[t] = int(wh.count(t))
     if wh.table_exists("odds"):

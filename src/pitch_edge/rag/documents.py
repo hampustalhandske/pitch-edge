@@ -110,6 +110,40 @@ def prediction_documents(
     return docs
 
 
+def evidence_documents(slice_evidence: pd.DataFrame) -> list[Document]:
+    """One document per (model, slice_dim, slice_value, checkpoint_date) row of
+    `backtest/slices.py::slice_evidence_checkpoints`. States the sample size and whether the
+    edge cleared the Benjamini-Hochberg significance threshold plainly, so an LLM quoting this
+    document can only ever repeat that framing, never launder a small-sample edge into false
+    confidence."""
+    docs = []
+    for _, r in slice_evidence.iterrows():
+        sig = "a statistically significant" if r["significant"] else "NOT a statistically significant"
+        text = (
+            f"As of {r['checkpoint_date']}, model {r['model']} over {r['slice_dim']}={r['slice_value']} "
+            f"(n={int(r['n'])} matches): log-loss {r['log_loss']:.4f} vs market log-loss "
+            f"{r['market_log_loss']:.4f}, edge {r['edge_bits']:+.4f} bits (95% CI "
+            f"{r['ci_low']:+.4f} to {r['ci_high']:+.4f}). This is {sig} edge (q-value={r['q_value']:.3f})."
+        )
+        docs.append(
+            Document(
+                f"evidence:{r['model']}:{r['slice_dim']}:{r['slice_value']}:{r['checkpoint_date']}",
+                text,
+                {
+                    "type": "evidence",
+                    "model": str(r["model"]),
+                    "slice_dim": str(r["slice_dim"]),
+                    "slice_value": str(r["slice_value"]),
+                    "checkpoint_date": str(r["checkpoint_date"]),
+                    "n": int(r["n"]),
+                    "edge_bits": float(r["edge_bits"]),
+                    "significant": bool(r["significant"]),
+                },
+            )
+        )
+    return docs
+
+
 def news_documents(news: pd.DataFrame) -> list[Document]:
     docs = []
     for _, r in news.iterrows():

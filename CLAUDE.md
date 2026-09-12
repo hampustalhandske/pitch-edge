@@ -4,16 +4,32 @@ Read `README.md` first for scope; this file is the working contract for agents e
 
 ## What this is
 
-A Python-only football (soccer) intelligence & market-edge research platform: free-data ingestion → DuckDB
-warehouse → feature store → Dixon-Coles / GBDT / Lightning GRU & Transformer / PyG GNN → walk-forward
-backtests scored on closing-line value → LangChain hybrid RAG (Claude Fable 5.1 explainer) → LangGraph
-signal pipeline with a mandatory human approval gate → single-page dark Streamlit dashboard.
+A Python-only football (soccer) intelligence & market-edge research platform, narrowed to two layers:
+
+1. **Deterministic evidence layer** — free-data ingestion → DuckDB warehouse → feature store →
+   Dixon-Coles / GBDT walk-forward backtests scored on closing-line value, stratified into
+   circumstance slices (league, referee, rest-days gap, squad-value gap, travel fatigue, weather)
+   with a minimum-sample floor and Benjamini-Hochberg FDR correction (`backtest/slices.py`),
+   checkpointed across time so the evidence itself is never computed with hindsight
+   (`backtest/as_of.py`). Nothing here ever runs an LLM.
+2. **`ask` agent** — a LangGraph `StateGraph` (`agents/qa_graph.py`) answering exactly three
+   standardized questions — "top N bets", "prediction on team A vs team B", "what's on day X" —
+   as of an explicit point in time (there is no live-odds feed, so there is no genuine "now" to
+   answer as of instead). Two LLM-touching nodes: `parse_intent` (structures the question) and
+   `judge` (a bounded tool-calling agent that narrates already-computed model predictions/market
+   edges/backtest evidence — it never computes a probability or an edge itself). A single-page
+   NiceGUI dashboard (`dashboard/web.py`) is a thin front end for the same graph the CLI uses.
+
+Everything else that used to sit between these — a LangGraph signals/orchestrator pipeline, a risk
+manager, a human-approval gate, staking, `pending_signals`/`paper_trades` — was deleted; see the
+Phase 8 entry below for why and what replaced it.
 
 ## Non-negotiables (never relax, even in "test mode")
 
-- **No automated bet placement, no real-money movement.** The approval gate is structural
-  (`interrupt_before=["human_approval"]`, `log_alerts` raises without a human id). Do not add any code path
-  that calls a bookmaker/exchange with an order.
+- **No automated bet placement, no real-money movement.** Enforced structurally by absence: no
+  code path anywhere in the project calls a bookmaker/exchange API, and there is no staking or
+  order-placement machinery left to gate — the `ask` agent only ever answers a question. Do not
+  add any code path that calls a bookmaker/exchange with an order.
 - **The ToS-clean-only restriction is lifted.** The project owner has explicitly reversed the earlier
   "ToS-clean data only" line ("it is impossible to get data if it is not ToS clean; skip that constraint
   now") — sources like Understat, FotMob `/api`, Sofascore, Flashscore and X (and third-party scrapers such
@@ -30,12 +46,13 @@ signal pipeline with a mandatory human approval gate → single-page dark Stream
 ## Commands
 
 ```bash
-uv sync --extra dev                   # env (torch, lightning, langchain, chromadb, langgraph, streamlit …)
-uv run pytest                         # 260 tests, network mocked (responses); markers: unit, integration, network
+uv sync --extra dev                   # env (torch, lightning, langchain, chromadb, langgraph, nicegui …)
+uv run pytest                         # network mocked (responses); markers: unit, integration, network
 uv run ruff check . && uv run ruff format . && uv run mypy src
-uv run pitch-edge serve               # dashboard
-uv run pitch-edge refresh [--fast]    # ingest → features → backtests → RAG → artifacts
-uv run pitch-edge {setup|intel|ingest|features|backtest|ablation|lead-lag|referee-study|artifacts|rag|rag-eval|signals|agentic-signals|replay-eval|health|export|schedule}
+uv run pitch-edge serve               # dashboard — one page, a question box
+uv run pitch-edge ask "top 4 bets"    # the only Q&A entrypoint; also "<team> vs <team>", "what's on <day>"
+uv run pitch-edge refresh [--fast]    # ingest → features → backtests → RAG
+uv run pitch-edge {setup|ingest|features|backtest|ablation|ask|rag-eval|artifacts|health|export|schedule}
 caffeinate -i uv run python scripts/stage_*.py   # restartable long runs (see scripts/README.md)
 ```
 
@@ -128,3 +145,46 @@ short-lived read-only connections (`_read_cached` / `_query_cached`, cache keyed
   which runs a test, reads only its local data, and writes an honest write-up — never a fabricated
   number. `reports/*` files that were git-tracked before this change were removed from tracking (moved
   under `data/`, not deleted) pending a fresh, verified case study for each label.
+- Phase 8 (2026-09-12): narrowed the project to the two layers described in "What this is" above,
+  after an audit (`AGENTIC_AUDIT_REPORT.md`) found the human-approval gate wasn't actually enforced on
+  the dashboard's real path and the project had no live-odds feed, so the signals/staking framing was
+  answering a question ("should I place this bet") the project can't honestly answer. Deleted:
+  `agents/graph.py`, `orchestrator.py`, `risk.py`, `router.py`, `selection.py`, `reviewer.py`,
+  `explainer.py`, `backtest/replay.py`, the `signals`/`agentic-signals`/`predict`/`tip`/`replay-eval`
+  CLI commands, the `paper_trades` table, and the dashboard's Overview/Data-universe/Backtest-
+  calibration/Suggestions-and-approval tabs (down to one: "Ask the system"). `agents/tool_reviewer.py`'s
+  `create_react_agent` + narrow-typed-read-only-tools pattern was kept and reworked into
+  `agents/evidence_tools.py` rather than deleted. New: `backtest/slices.py` (circumstance-stratified,
+  checkpointed backtest evidence — see "What this is"), `backtest/as_of.py` (the single source of
+  point-in-time cutoffs), `agents/qa_data.py`/`qa_context.py`/`evidence_tools.py`/`qa_graph.py` (the
+  `ask` agent), and `rag/query_parser.py::parse_ask_intent`/`AskIntent` (replacing the old free-text
+  `parse_query`/`ParsedQuery`, deleted as fully orphaned once `ask` replaced `rag`/`predict`/`tip`).
+  `dashboard/data.py` was deleted too (its readers existed only for the removed tabs). A fixture only
+  becomes an `ask` candidate if it carries a real (non-synthetic) early Pinnacle quote — there is still
+  no live-odds key set, so "upcoming" always means an already-archived historical match treated as if
+  it were upcoming relative to a past `as_of`; the `ask` agent's model set is deliberately fast-only
+  (Dixon-Coles + GBDT, no sequence model) since it fits fresh per question rather than reusing a
+  persisted model (nothing in this project persists fitted weights — confirmed, not assumed, before
+  relying on it). `pitch-edge artifacts` and its dashboard-artifact JSONs are no longer consumed by
+  anything in the dashboard — left in place, not removed, since nothing in this phase's scope called
+  for deciding their fate; picking that up is future work.
+- Phase 9 (2026-09-12): `agents/llm.py::get_llm` (renamed from `get_local_llm`, every call site
+  updated) is now provider-selectable — `PITCH_EDGE_LLM_PROVIDER=groq` (with `GROQ_CLOUD_API_KEY`)
+  routes every LLM call through Groq's free tier instead of local Ollama, confirmed against the real
+  API: a real recurring daily quota (1,000 req/day, 200k tokens/day on `openai/gpt-oss-20b`), not a
+  trial credit like Hugging Face's current free tier ($0.10/month — confirmed unusable as a workflow
+  LLM provider and not wired in). Confirmed live: `parse_ask_intent` structured-output calls
+  0.25-0.6s on Groq vs 1.6-9.4s on local `llama3.1:8b`, and a full `judge` tool-calling pass in
+  ~2.3s. Two real compatibility bugs found and fixed by testing against the live API, not assumed:
+  (1) every `.with_structured_output()` call now passes `method="json_schema"` explicitly — the
+  default `function_calling` method hallucinates a tool call to a nonexistent tool name on Groq's
+  gpt-oss models; (2) `agents/qa_graph.py`'s `judge` node no longer uses `create_react_agent`'s
+  built-in `response_format` (it forces `tool_choice`, which gpt-oss rejects with "Tool choice is
+  required, but model did not call a tool") — the react loop now runs with no `response_format`,
+  and a separate `_structure_answer` call (also `method="json_schema"`) turns its final message
+  into the `Answer` schema afterward. `JUDGE_RECURSION_LIMIT` raised from 8 to 25 (confirmed too
+  tight for a real 4-fixture `top_bets` batch, cutting the tool loop off mid-reasoning). `ask`
+  confirmed end-to-end against real production data (all three intents) for the first time in this
+  work — a real bug was also found and fixed in `gather()` along the way: it was doing a RAG lookup
+  for every fixture in the whole candidate window (119, in the real run) before ranking down to the
+  top N, instead of after.

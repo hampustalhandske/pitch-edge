@@ -15,6 +15,7 @@ pytestmark = pytest.mark.unit
 
 runner = CliRunner()
 N = len(OPTIONAL_KEYS)
+N_API = sum(1 for k in OPTIONAL_KEYS if k.kind == "api")
 
 
 @pytest.fixture
@@ -28,7 +29,7 @@ def test_setup_declining_everything_writes_nothing(tmp_path, clean_env):
     res = runner.invoke(app, ["setup", "--env-file", str(env)], input="n\n" * N)
     assert res.exit_code == 0, res.output
     assert not env.exists()
-    assert "0 of 4 optional API keys unlocked" in res.output and "keyless" in res.output
+    assert f"0 of {N_API} optional API keys unlocked" in res.output and "keyless" in res.output
     assert "place a bet" in res.output  # the guardrail is in the command's own output
 
 

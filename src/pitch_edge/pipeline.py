@@ -14,8 +14,6 @@ from pathlib import Path
 
 import pandas as pd
 
-from pitch_edge.agents.graph import GraphDependencies, SignalPipeline
-from pitch_edge.agents.risk import RiskLimits, RiskManager, RiskState
 from pitch_edge.backtest.engine import BacktestResult, WalkForwardConfig, compare_models
 from pitch_edge.backtest.report import calibration_table, results_table, write_report
 from pitch_edge.config import Settings, get_settings
@@ -28,6 +26,7 @@ from pitch_edge.models import default_models
 from pitch_edge.models.base import MatchModel
 from pitch_edge.rag.documents import (
     espn_documents,
+    evidence_documents,
     match_documents,
     news_documents,
     prediction_documents,
@@ -109,7 +108,7 @@ def run_backtests(
     results = compare_models(features, models, config)
     data = Path(data_dir) if data_dir else settings.backtest_dir / label
     report = Path(report_dir) if report_dir else settings.reports_dir / label
-    write_report(results, data, report, title=f"Walk-forward backtest — {label}")
+    write_report(results, data, report, title=f"Walk-forward backtest — {label}", features=features)
     if wh is not None:
         run_id = run_id or datetime.now(UTC).strftime("%Y%m%dT%H%M%S")
         for name, r in results.items():
@@ -180,6 +179,11 @@ def build_rag_index(wh: Warehouse, index: VectorIndex | None = None, max_matches
             stats = wh.query(f"SELECT * FROM espn_team_stats WHERE eventId IN ({placeholders})", ids)
             key_events = wh.query(f"SELECT * FROM espn_key_events WHERE eventId IN ({placeholders})", ids)
             index.add(espn_documents(fx, stats, key_events))
+    slice_path = get_settings().backtest_dir / "main" / "slice_evidence.csv"
+    if slice_path.exists():
+        sl = pd.read_csv(slice_path)
+        if not sl.empty:
+            index.add(evidence_documents(sl))
     return index
 
 
@@ -351,57 +355,6 @@ def live_quotes_from_odds_api(wh: Warehouse, fixtures: pd.DataFrame) -> dict[str
             "away": float(away_price),
         }
     return quotes
-
-
-def build_signal_pipeline(
-    wh: Warehouse,
-    features: pd.DataFrame,
-    model: MatchModel,
-    limits: RiskLimits | None = None,
-    fixtures: pd.DataFrame | None = None,
-    quotes: list[dict] | None = None,
-) -> SignalPipeline:
-    fixtures_df = fixtures if fixtures is not None else upcoming_fixture_frame(wh, features)
-
-    def scout() -> list[dict]:
-        return (
-            fixtures_df.assign(date=fixtures_df["date"].astype(str)).to_dict(orient="records")
-            if not fixtures_df.empty
-            else []
-        )
-
-    def featurize(rows: list[dict]) -> list[dict]:
-        return rows
-
-    def infer(rows: list[dict]) -> list[dict]:
-        if not rows:
-            return []
-        X = pd.DataFrame(rows)
-        X["date"] = pd.to_datetime(X["date"])
-        probs = model.predict_proba(X)
-        return [
-            {"match_id": mid, "model": model.name, "p_home": float(h), "p_draw": float(d), "p_away": float(a)}
-            for mid, h, d, a in zip(X["match_id"], probs["home"], probs["draw"], probs["away"], strict=True)
-        ]
-
-    def fetch_odds(rows: list[dict]) -> list[dict]:
-        if quotes is not None:
-            return quotes
-        if not rows:
-            return []
-        rows_df = pd.DataFrame(rows)
-        live = live_quotes_from_odds_api(wh, rows_df)
-        synthetic = synthetic_quotes_from_elo(rows_df)
-        return [live.get(q["match_id"], q) for q in synthetic]
-
-    def sink(alerts: list[dict]) -> None:
-        if alerts:
-            wh.upsert("paper_trades", pd.DataFrame(alerts))
-
-    deps = GraphDependencies(
-        scout, featurize, infer, fetch_odds, RiskManager(limits or RiskLimits(), RiskState()), sink, model.name
-    )
-    return SignalPipeline(deps)
 
 
 # --------------------------------------------------------------------- full run

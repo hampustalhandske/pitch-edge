@@ -203,7 +203,7 @@ def test_local_llm_is_tried_before_claude(monkeypatch):
     """Backend precedence is local-first: a reachable local model must win even when a Claude
     key is also configured, and Claude's client must never be constructed/called in that case."""
     monkeypatch.setattr(
-        "pitch_edge.agents.llm.get_local_llm",
+        "pitch_edge.agents.llm.get_llm",
         lambda model=None: _FakeLocalLLM("Home is favoured at 55.0% [pred:gbdt:m1]."),
     )
 
@@ -229,7 +229,7 @@ def test_local_llm_failure_falls_back_to_claude(monkeypatch):
         def invoke(self, messages):
             raise RuntimeError("ollama not running")
 
-    monkeypatch.setattr("pitch_edge.agents.llm.get_local_llm", lambda model=None: _RaisingLLM())
+    monkeypatch.setattr("pitch_edge.agents.llm.get_llm", lambda model=None: _RaisingLLM())
     gen = GroundedGenerator(api_key="test-key")
     docs = [Document("pred:gbdt:m1", "Model gbdt: P(home)=55.0%.", {"type": "prediction"})]
     ans = gen.answer("why?", docs)

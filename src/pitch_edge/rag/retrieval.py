@@ -7,6 +7,20 @@ RRF needs no score calibration between the two, and the cross-encoder re-reads t
 candidates with the query — the standard, well-tested three-stage recipe.
 
 Everything degrades gracefully: no embedding model → BM25 only; no cross-encoder → RRF order.
+
+The embedder is pinned to `device="cpu"` — confirmed reproducible crash on Apple Silicon
+otherwise: PyTorch's MPS (Metal) backend raises a low-level driver assertion (`failed assertion
+_status < MTLCommandBufferStatusCommitted ... setCurrentCommandEncoder`) when the embedder and the
+cross-encoder both run forward passes on the GPU in the same process. It's a small (~22M-parameter)
+model, so CPU inference stays fast for the handful of documents a single retrieval call embeds.
+
+The cross-encoder is deliberately left on its default device (MPS when available) rather than
+also forced to CPU: `cross-encoder/ms-marco-MiniLM-L-6-v2` was confirmed, at the raw model level,
+to produce `NaN` logits on CPU in this environment (not a dtype issue — reproduced with weights
+already `float32`) while producing correct scores on MPS. Forcing it to CPU would silently corrupt
+ranking rather than fix anything, so instead `query()` checks every rerank score for `NaN` and
+degrades to the pre-rerank RRF order if any turn up, the same way a missing cross-encoder already
+degrades — an honest fallback instead of a wrong one.
 """
 
 from __future__ import annotations
@@ -84,7 +98,9 @@ class HybridRetriever:
                 from langchain_chroma import Chroma
                 from langchain_huggingface import HuggingFaceEmbeddings
 
-                emb = HuggingFaceEmbeddings(model_name=embedding_model or settings.embedding_model)
+                emb = HuggingFaceEmbeddings(
+                    model_name=embedding_model or settings.embedding_model, model_kwargs={"device": "cpu"}
+                )
                 self._vs = Chroma(
                     collection_name=collection,
                     embedding_function=emb,
@@ -196,11 +212,17 @@ class HybridRetriever:
             if d in self._docs
         ]
         if self._reranker is not None and hits:
-            pairs = [(text, h.document.text) for h in hits]
-            rs = self._reranker.predict(pairs)
-            for h, s in zip(hits, rs, strict=True):
-                h.rerank_score = float(s)
-            hits.sort(key=lambda h: -(h.rerank_score or -1e9))
+            try:
+                pairs = [(text, h.document.text) for h in hits]
+                rs = [float(s) for s in self._reranker.predict(pairs)]
+                if any(s != s for s in rs):  # NaN != NaN — see module docstring
+                    raise ValueError("cross-encoder returned NaN score(s)")
+            except Exception as exc:  # noqa: BLE001 - a broken reranker must fall back, not corrupt order
+                logger.warning("Cross-encoder rerank failed (%s); keeping RRF order", exc)
+            else:
+                for h, s in zip(hits, rs, strict=True):
+                    h.rerank_score = s
+                hits.sort(key=lambda h: -(h.rerank_score if h.rerank_score is not None else -1e9))
         return hits[:k]
 
 

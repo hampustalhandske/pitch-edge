@@ -1,19 +1,10 @@
-"""Opt-in, genuinely tool-calling reviewer — an alternative to `agents.reviewer.review_proposals`.
+"""A genuinely tool-calling reviewer for a proposed betting signal.
 
-The default reviewer (`agents/reviewer.py`) is deliberately deterministic: it already has both
-numbers it needs (backtest evidence, real-vs-synthetic odds) handed to it, so there is no reasoning
-step that benefits from an LLM. This module instead gives a local LLM (`agents/llm.py`, Ollama —
-never a paid API) two tools, `backtest_evidence` and `search_context`, and lets it decide for itself
-which to call before returning a verdict — the "agent decides its own tool calls in a loop" pattern,
-built on `langgraph.prebuilt.create_react_agent`.
-
-Off by default (`Settings.agentic_reviewer_tool_calling`, env `PITCH_EDGE_REVIEWER_TOOL_CALLING`,
-CLI `agentic-signals --tool-reviewer`): it is slower (one or more LLM round-trips per proposal
-instead of zero) and less deterministic than `review_proposals`, so it stays an explicit opt-in
-rather than the default path. Same non-negotiables as everywhere else in this project: the LLM only
-ever cites what a tool returns, never invents a number, and a 'distrust'/'needs_info' verdict is
-still passed through to `human_approval` rather than dropping the proposal — this agent's judgment
-never weakens or bypasses the human-approval gate.
+Gives a local LLM (`agents/llm.py`, Ollama — never a paid API) two tools, `backtest_evidence` and
+`search_context`, and lets it decide for itself which to call before returning a verdict — the
+"agent decides its own tool calls in a loop" pattern, built on `langgraph.prebuilt.create_react_agent`.
+Falls back to a deterministic rule (`_judge`) on any LLM/tool failure. The LLM only ever cites what
+a tool returns and never invents a number.
 """
 
 from __future__ import annotations
@@ -27,13 +18,34 @@ from langchain_core.tools import tool
 from langgraph.prebuilt import create_react_agent
 from pydantic import BaseModel, Field
 
-from pitch_edge.agents.graph import SignalState
-from pitch_edge.agents.llm import get_local_llm
-from pitch_edge.agents.reviewer import _judge
+from pitch_edge.agents.llm import get_llm
 from pitch_edge.backtest.report import model_league_performance
 from pitch_edge.rag.index import VectorIndex
 
 logger = logging.getLogger(__name__)
+
+
+def _judge(proposal: dict, league_perf: dict | None, real_odds: bool) -> tuple[str, list[str]]:
+    """Deterministic fallback judge (the old `agents/reviewer.py::_judge`, kept here as this
+    module's own fallback pending its Phase-C rework into the `judge` graph node's tool set)."""
+    model_name = proposal.get("model_name", "")
+    perf = (league_perf or {}).get(model_name)
+    if perf is None:
+        return "needs_info", [f"no walk-forward evidence found for model {model_name} in this league"]
+    edge_bits = perf["edge_bits"]
+    n = perf["n"]
+    if not real_odds:
+        return "distrust", [
+            "odds are synthetic (synthetic_elo_book), not real market prices",
+            f"model {model_name} edge_bits={edge_bits:+.4f} over n={n} matches in this league",
+        ]
+    if edge_bits > 0:
+        return "trust", [
+            f"model {model_name} has positive real edge_bits={edge_bits:+.4f} over n={n} matches in this league"
+        ]
+    return "distrust", [
+        f"model {model_name} has negative real edge_bits={edge_bits:+.4f} over n={n} matches in this league"
+    ]
 
 
 class ToolReviewVerdict(BaseModel):
@@ -82,7 +94,7 @@ _PROMPT = (
 
 
 def _build_agent(reports_dir: str | Path, index: VectorIndex, llm_model: str | None):
-    llm = get_local_llm(model=llm_model)
+    llm = get_llm(model=llm_model)
     return create_react_agent(llm, tools=_make_tools(reports_dir, index), response_format=ToolReviewVerdict)
 
 
@@ -102,12 +114,11 @@ def _agentic_judge(agent, proposal: dict, league_code: str | None) -> tuple[str,
 
 
 def review_proposals_agentic(
-    state: SignalState, reports_dir: str | Path, index: VectorIndex, llm_model: str | None = None
+    state: dict, reports_dir: str | Path, index: VectorIndex, llm_model: str | None = None
 ) -> dict:
-    """Same input/output shape as `agents.reviewer.review_proposals` so it drops into
-    `agents/orchestrator.py` as a straight swap. Falls back to the deterministic `_judge` per
-    proposal on any LLM/tool failure (Ollama not running, malformed structured output) — a broken
-    local LLM must never block a run, matching `agents/explainer.py`'s fallback policy."""
+    """Reviews each proposal, returning `{proposals, reviews, log}`. Falls back to the deterministic
+    `_judge` per proposal on any LLM/tool failure (Ollama not running, malformed structured output) —
+    a broken local LLM must never block a run."""
     proposals = state.get("proposals", [])
     if not proposals:
         return {

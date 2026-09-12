@@ -1,57 +1,81 @@
-"""Local-LLM query parsing for the RAG layer.
+"""Local-LLM query parsing for the `ask` agent.
 
-Turns a free-text question ("how does the model view Arsenal vs Chelsea this weekend?") into
-structured entities (team names, a restated topic) so retrieval can be pointed at the right
-documents instead of relying on the raw question text alone — the same
-`gather_fixture_context`-style team-focused query already used by the agentic pipeline
-(`rag/fixture_context.py`), reused here for the interactive `rag` CLI/dashboard question box.
-
-Uses the same local Ollama model as the selection/reviewer agents (`agents/llm.py`) — no API key
-needed. Falls back to treating the raw question as the topic (no team names extracted) if the
-local model is unreachable or returns something unusable; retrieval then proceeds exactly as it
-did before this module existed.
+`parse_ask_intent` structures a free-text question into one of the `ask` agent's three
+standardized shapes (top N bets / one fixture / fixtures on a day), using the same local Ollama
+model as the rest of the project (`agents/llm.py`) — no API key needed.
 """
 
 from __future__ import annotations
 
 import logging
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 
 
-class ParsedQuery(BaseModel):
-    home_team: str | None = Field(default=None, description="First/home team named in the question, if any")
-    away_team: str | None = Field(default=None, description="Second/away team named in the question, if any")
-    topic: str = Field(description="The question restated concisely, for use as a fallback search query")
+class AskIntent(BaseModel):
+    """Structured-output target for `parse_ask_intent` — the `ask` agent's three standardized
+    question shapes, plus a catch-all for anything else."""
+
+    intent: Literal["top_bets", "fixture", "fixtures_on_day", "unrecognized"]
+    n: int | None = Field(default=None, description="For 'top_bets': how many bets were asked for")
+    home_team: str | None = Field(default=None, description="For 'fixture': the first team named")
+    away_team: str | None = Field(default=None, description="For 'fixture': the second team named")
+    day: str | None = Field(default=None, description="For 'fixtures_on_day': the date named, as ISO YYYY-MM-DD")
 
 
-def parse_query(question: str, llm=None) -> ParsedQuery:
-    """Best-effort structured extraction. Never raises — degrades to `ParsedQuery(topic=question)`
-    (i.e. a no-op) if the local LLM is unreachable or its output can't be parsed."""
+class TopBetsQuery(BaseModel):
+    n: int
+
+
+class FixtureQuery(BaseModel):
+    home_team: str
+    away_team: str
+
+
+class FixturesOnDayQuery(BaseModel):
+    day: str
+
+
+_ASK_INTENT_PROMPT = (
+    "Classify this question about football betting signals into exactly one of three shapes, or "
+    "'unrecognized' if it fits none of them:\n"
+    "1. 'top_bets': asking for the N best/top bets right now (extract n; default 4 if unspecified "
+    "but clearly this shape, e.g. 'give me the top bets').\n"
+    "2. 'fixture': asking for a prediction on one specific match between two named teams (extract "
+    "home_team and away_team).\n"
+    "3. 'fixtures_on_day': asking what fixtures/matches are happening on a given day (extract day "
+    "as an ISO date if one is stated or clearly implied; otherwise use 'unrecognized').\n"
+    "Never guess team names or a day that isn't actually in the question. If the question asks "
+    "anything else (general chit-chat, a question about a concept, no specific bets/fixture/day), "
+    "use 'unrecognized'.\n\n"
+    "Question: {question!r}"
+)
+
+
+def parse_ask_intent(question: str, llm=None) -> TopBetsQuery | FixtureQuery | FixturesOnDayQuery | None:
+    """Structures `question` into one of the `ask` agent's three standardized intents, or `None`
+    if the local LLM can't confidently place it into one of them (missing required fields, or the
+    LLM itself unreachable/malformed) — the caller renders `None` as "I can't understand that."""
     try:
         if llm is None:
-            from pitch_edge.agents.llm import get_local_llm
+            from pitch_edge.agents.llm import get_llm_for
 
-            llm = get_local_llm()
-        structured = llm.with_structured_output(ParsedQuery)
-        parsed = structured.invoke(
-            "Extract structured information from this football question for a search system.\n"
-            f"Question: {question!r}\n"
-            "home_team/away_team: the specific club names mentioned, exactly as written, or null if "
-            "none are named (a general question about a league, a model, or a concept has no teams).\n"
-            "topic: the question restated concisely, to use as a fallback search query."
-        )
-        return ParsedQuery(home_team=parsed.home_team, away_team=parsed.away_team, topic=parsed.topic or question)
-    except Exception as exc:  # noqa: BLE001 - local LLM unavailable must never break RAG retrieval
-        logger.info("parse_query: local LLM unavailable (%s); using the raw question", exc)
-        return ParsedQuery(topic=question)
-
-
-def retrieval_query_text(parsed: ParsedQuery) -> str:
-    """The text to actually search with: a team-focused query when both teams were named
-    (matches `rag/fixture_context.py::gather_fixture_context`'s phrasing), else the topic."""
-    if parsed.home_team and parsed.away_team:
-        return f"{parsed.home_team} vs {parsed.away_team} team news injuries form"
-    return parsed.topic
+            llm = get_llm_for("fast")
+        # method="json_schema" — the function-calling default trips a tool-name hallucination on
+        # Groq's gpt-oss models (`Tool call validation failed: ... which was not in request.tools`);
+        # JSON-schema-constrained decoding is confirmed reliable and fast on both Ollama and Groq.
+        structured = llm.with_structured_output(AskIntent, method="json_schema")
+        parsed: AskIntent = structured.invoke(_ASK_INTENT_PROMPT.format(question=question))
+    except Exception as exc:  # noqa: BLE001 - local LLM unavailable must never raise
+        logger.info("parse_ask_intent: local LLM unavailable (%s)", exc)
+        return None
+    if parsed.intent == "top_bets":
+        return TopBetsQuery(n=parsed.n or 4)
+    if parsed.intent == "fixture" and parsed.home_team and parsed.away_team:
+        return FixtureQuery(home_team=parsed.home_team, away_team=parsed.away_team)
+    if parsed.intent == "fixtures_on_day" and parsed.day:
+        return FixturesOnDayQuery(day=parsed.day)
+    return None

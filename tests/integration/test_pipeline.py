@@ -1,8 +1,7 @@
-"""Warehouse -> feature frame -> backtests persisted -> RAG index -> signal pipeline, offline."""
+"""Warehouse -> feature frame -> backtests persisted -> RAG index, offline."""
 
 from __future__ import annotations
 
-import pandas as pd
 import pytest
 
 from pitch_edge.backtest.engine import WalkForwardConfig
@@ -10,12 +9,10 @@ from pitch_edge.data.ingest import store_matches
 from pitch_edge.models import DixonColesMatchModel, GBDTMatchModel
 from pitch_edge.pipeline import (
     build_rag_index,
-    build_signal_pipeline,
     latest_backtest_tables,
     load_feature_frame,
     persist_features,
     run_backtests,
-    synthetic_quotes_from_elo,
 )
 from pitch_edge.rag.index import VectorIndex
 
@@ -69,22 +66,3 @@ def test_rag_index_built_from_warehouse(loaded, tmp_path):
     assert idx.count() > 100
     hits = idx.query("Team01 vs Team02 model probability", k=3)
     assert hits and any(d.metadata["type"] in ("match", "prediction") for d, _ in hits)
-
-
-def test_signal_pipeline_stops_at_gate_then_logs_paper_trades(loaded):
-    f = load_feature_frame(loaded, leagues=["SYN"])
-    model = GBDTMatchModel(n_estimators=25).fit(f)
-    fixtures = f.sort_values("date").tail(6).copy()
-    fixtures["date"] = pd.Timestamp("2030-01-01")
-    quotes = synthetic_quotes_from_elo(fixtures, margin=1.02)
-    quotes[0]["home"] = 6.0  # one clearly mispriced quote so a proposal survives the risk manager
-    pipe = build_signal_pipeline(loaded, f, model, fixtures=fixtures, quotes=quotes)
-    thread_id, state = pipe.run_to_gate()
-    assert "alerts" not in state  # gate blocked everything
-    props = pipe.pending_proposals(thread_id)
-    assert props, "expected at least one proposal"
-    key = f"{props[0]['match_id']}|{props[0]['outcome']}"
-    final = pipe.resume_with_decisions(thread_id, {key: "approved"}, approved_by="tester")
-    assert len(final["alerts"]) == 1 and final["alerts"][0]["approved_by"] == "tester"
-    assert loaded.count("paper_trades") == 1
-    assert any("human_approval" in line for line in final["log"])

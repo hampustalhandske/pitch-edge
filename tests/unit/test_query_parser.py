@@ -1,11 +1,17 @@
-"""Local-LLM query parsing: extracts team names for retrieval, degrades to raw-question topic
-when the local LLM is unreachable or returns nothing usable — never breaks RAG."""
+"""Local-LLM query parsing: structures a question into the `ask` agent's three standardized
+intents, degrading to `None` ("I can't understand that") on anything else or an unreachable LLM."""
 
 from __future__ import annotations
 
 import pytest
 
-from pitch_edge.rag.query_parser import ParsedQuery, parse_query, retrieval_query_text
+from pitch_edge.rag.query_parser import (
+    AskIntent,
+    FixtureQuery,
+    FixturesOnDayQuery,
+    TopBetsQuery,
+    parse_ask_intent,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -22,12 +28,12 @@ class _StubLLM:
     def __init__(self, result):
         self._result = result
 
-    def with_structured_output(self, model):
+    def with_structured_output(self, model, method=None):
         return _StubStructuredLLM(self._result)
 
 
 class _RaisingLLM:
-    def with_structured_output(self, model):
+    def with_structured_output(self, model, method=None):
         class _Raiser:
             def invoke(self, prompt):
                 raise RuntimeError("ollama not running")
@@ -35,21 +41,39 @@ class _RaisingLLM:
         return _Raiser()
 
 
-def test_parse_query_extracts_team_names():
-    llm = _StubLLM(ParsedQuery(home_team="Arsenal", away_team="Chelsea", topic="Arsenal vs Chelsea outlook"))
-    parsed = parse_query("How does the model view Arsenal vs Chelsea this weekend?", llm=llm)
-    assert parsed.home_team == "Arsenal" and parsed.away_team == "Chelsea"
-    assert retrieval_query_text(parsed) == "Arsenal vs Chelsea team news injuries form"
+def test_parse_ask_intent_top_bets():
+    llm = _StubLLM(AskIntent(intent="top_bets", n=6))
+    parsed = parse_ask_intent("give me the top 6 bets", llm=llm)
+    assert parsed == TopBetsQuery(n=6)
 
 
-def test_parse_query_no_teams_falls_back_to_topic():
-    llm = _StubLLM(ParsedQuery(home_team=None, away_team=None, topic="what is fractional Kelly staking"))
-    parsed = parse_query("What is fractional Kelly staking?", llm=llm)
-    assert parsed.home_team is None
-    assert retrieval_query_text(parsed) == "what is fractional Kelly staking"
+def test_parse_ask_intent_top_bets_defaults_n_to_four():
+    llm = _StubLLM(AskIntent(intent="top_bets", n=None))
+    parsed = parse_ask_intent("what are the best bets", llm=llm)
+    assert parsed == TopBetsQuery(n=4)
 
 
-def test_parse_query_degrades_when_llm_unavailable():
-    parsed = parse_query("Arsenal vs Chelsea?", llm=_RaisingLLM())
-    assert parsed.home_team is None and parsed.away_team is None
-    assert retrieval_query_text(parsed) == "Arsenal vs Chelsea?"
+def test_parse_ask_intent_fixture():
+    llm = _StubLLM(AskIntent(intent="fixture", home_team="Liverpool", away_team="Arsenal"))
+    parsed = parse_ask_intent("Liverpool vs Arsenal?", llm=llm)
+    assert parsed == FixtureQuery(home_team="Liverpool", away_team="Arsenal")
+
+
+def test_parse_ask_intent_fixture_missing_a_team_is_unrecognized():
+    llm = _StubLLM(AskIntent(intent="fixture", home_team="Liverpool", away_team=None))
+    assert parse_ask_intent("Liverpool vs someone?", llm=llm) is None
+
+
+def test_parse_ask_intent_fixtures_on_day():
+    llm = _StubLLM(AskIntent(intent="fixtures_on_day", day="2024-06-01"))
+    parsed = parse_ask_intent("what's on 2024-06-01", llm=llm)
+    assert parsed == FixturesOnDayQuery(day="2024-06-01")
+
+
+def test_parse_ask_intent_unrecognized():
+    llm = _StubLLM(AskIntent(intent="unrecognized"))
+    assert parse_ask_intent("what's the weather like", llm=llm) is None
+
+
+def test_parse_ask_intent_degrades_to_none_when_llm_unavailable():
+    assert parse_ask_intent("top 4 bets", llm=_RaisingLLM()) is None

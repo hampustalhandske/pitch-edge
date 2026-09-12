@@ -66,8 +66,18 @@ No key here can place a bet or move money; there is no bookmaker/exchange accoun
 | Env var | `ANTHROPIC_API_KEY` |
 | Sign-up | https://console.anthropic.com |
 | Connector | `pitch_edge.rag.generate.GroundedGenerator` — uses `claude-fable-5-1` (override with `PITCH_EDGE_LLM_MODEL`) via the official SDK when the key is present; otherwise a deterministic template |
-| Unlocks | fluent, cited natural-language answers and scouting reports in the **Ask the system** tab and `pitch-edge rag`, plus the optional analyst narrative at the end of a Match Intel dossier (dropped if a single figure fails the citation check). The LLM never produces a probability; every number is quoted from retrieved documents |
+| Unlocks | a last-resort fallback for `rag/generate.py` if the configured provider (Ollama or Groq) is unreachable (dropped if a single figure fails the citation check). The LLM never produces a probability; every number is quoted from already-computed evidence |
 | Cost note | one short answer ≈ a few thousand input tokens; the system prompt is cached |
+
+## 5. Groq Cloud — a free, faster alternative to local Ollama
+
+| | |
+|---|---|
+| Env var | `GROQ_CLOUD_API_KEY` |
+| Sign-up | https://console.groq.com |
+| Connector | `pitch_edge.agents.llm.get_llm` — set `PITCH_EDGE_LLM_PROVIDER=groq` to route every `ask`-agent LLM call (`parse_intent`, `judge`, `structure_context`'s squad-value hint) and `rag/generate.py`'s local-first step through Groq instead of Ollama; `PITCH_EDGE_GROQ_MODEL` overrides the default `openai/gpt-oss-20b` |
+| Unlocks | noticeably faster structured-output/tool-calling responses than a local 8B Ollama model, without needing `ollama serve` running at all |
+| Cost note | free tier is a real recurring daily quota (not a trial credit): 1,000 requests/day and 200,000 tokens/day on `openai/gpt-oss-20b`, with an 8,000-tokens-per-minute ceiling that a bursty run (e.g. a `top_bets` question with `judge` making several tool calls) can hit — a 429 there degrades to this project's existing "provider unreachable" fallback, same as Ollama being down |
 
 ---
 

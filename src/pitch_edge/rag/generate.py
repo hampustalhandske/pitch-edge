@@ -83,9 +83,9 @@ class GroundedGenerator:
         self._local_llm = None
         if not force_template:
             try:
-                from pitch_edge.agents.llm import get_local_llm
+                from pitch_edge.agents.llm import get_llm
 
-                self._local_llm = get_local_llm(model=local_model)
+                self._local_llm = get_llm(model=local_model)
             except Exception as exc:  # noqa: BLE001
                 logger.info("Local LLM unavailable (%s); will try Claude/template", exc)
             if api_key or settings.anthropic_api_key:
@@ -142,7 +142,8 @@ class GroundedGenerator:
         ok, cited, missing = verify_citations(text, docs)
         if missing:
             text += f"\n\n_Note: the figure(s) {', '.join(missing)} could not be matched to a retrieved document and should not be relied on._"
-        return Answer(text, cited, "local", docs, verified=ok, unverified_numbers=missing, model=self._local_llm.model)
+        local_model_name = getattr(self._local_llm, "model", None) or getattr(self._local_llm, "model_name", None)
+        return Answer(text, cited, "local", docs, verified=ok, unverified_numbers=missing, model=local_model_name)
 
     # ----------------------------------------------------------------- claude
     def _answer_claude(self, question: str, docs: list[Document]) -> Answer:

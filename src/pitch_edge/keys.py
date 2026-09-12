@@ -52,9 +52,16 @@ OPTIONAL_KEYS: tuple[OptionalKey, ...] = (
     OptionalKey(
         "ANTHROPIC_API_KEY",
         "Anthropic",
-        "Claude Fable 5.1 as the RAG explainer and dossier narrator (cited, verified; it never estimates a probability); without it a deterministic template is used",
+        "Claude Fable 5.1 as `rag/generate.py`'s last-resort fallback (cited, verified; it never estimates a probability) if the configured provider (Ollama or Groq) is unreachable",
         "https://console.anthropic.com",
-        'uv run pitch-edge rag "why does the model like the away side?"',
+        'uv run pitch-edge ask "top 4 bets"',
+    ),
+    OptionalKey(
+        "GROQ_CLOUD_API_KEY",
+        "Groq Cloud",
+        "a free, faster alternative to local Ollama for every `ask`-agent LLM call (set PITCH_EDGE_LLM_PROVIDER=groq) — a real recurring daily quota (1,000 requests/day, 200k tokens/day on the default openai/gpt-oss-20b model), not a one-time trial credit",
+        "https://console.groq.com",
+        'PITCH_EDGE_LLM_PROVIDER=groq uv run pitch-edge ask "top 4 bets"',
     ),
     OptionalKey(
         "PITCH_EDGE_GCP_PROJECT",

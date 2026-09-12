@@ -8,3 +8,9 @@ manual multi-hour build. Use these instead:
 - `uv run pitch-edge schedule` — the standing local loop (hourly ingest, nightly refresh + retrain)
 
 Run either with `caffeinate -i` on macOS so a laptop sleep doesn't cost the run.
+
+- `uv run python scripts/data_summary.py [--json out.json]` — every table actually in the warehouse
+  right now (row count, column count, date range where one exists), read live from
+  `information_schema.tables` rather than a hand-maintained list. Run it any time you want to check
+  whether `src/pitch_edge/features/README.md`'s snapshot numbers are still current, or to see
+  tables that doc doesn't mention.

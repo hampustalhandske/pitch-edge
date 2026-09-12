@@ -33,7 +33,6 @@ TABLE_KEYS: dict[str, list[str]] = {
     "features": ["match_id"],
     "news_items": ["item_id"],
     "market_snapshots": ["market_id", "outcome", "snapshot_ts"],
-    "paper_trades": ["trade_id"],
     "pipeline_runs": ["run_id"],
     "model_predictions": ["match_id", "model_name", "run_id"],
     "backtest_bets": ["backtest_id", "match_id", "outcome"],

@@ -2,20 +2,21 @@
 
 [![CI](https://github.com/hampusstalhandske/pitch-edge/actions/workflows/ci.yml/badge.svg)](https://github.com/hampusstalhandske/pitch-edge/actions/workflows/ci.yml)
 
-A Python football (soccer) intelligence & market-edge research platform. It ingests free match, odds and
-context data into a DuckDB warehouse, models outcomes with classical and deep-learning methods, backtests
-walk-forward against real closing prices, explains results through a citation-grounded RAG layer, and
-**surfaces — never places —** signals behind a mandatory human-approval gate.
+A Python football (soccer) intelligence & market-edge research platform, narrowed to two layers: a
+deterministic backtest/evidence pipeline, and a LangGraph `ask` agent that answers exactly three
+standardized questions — "top N bets", "team A vs team B", "what's on day X" — grounded in that evidence.
+It **surfaces — never places —** anything: there is no staking or order-placement code anywhere in the
+project.
 
 > **Hard guardrails.** No automated bet placement under any flag or config. No real-money movement. Every
-> number on the dashboard traces back to a walk-forward backtest at real, vig-inclusive prices.
+> number the `ask` agent states traces back to a walk-forward backtest or a real, vig-inclusive market price.
 
 ## Quickstart
 
 ```bash
 uv sync --extra dev            # Python 3.11; torch, lightning, langchain, chromadb, langgraph, nicegui …
-uv run pitch-edge refresh      # ingest → features → backtests → RAG index → artifacts
-uv run pitch-edge serve        # dark-mode dashboard on :8501
+uv run pitch-edge refresh      # ingest → features → backtests → RAG index
+uv run pitch-edge serve        # dark-mode dashboard on :8501 — one page, a question box
 uv run pytest                  # unit + integration tests, network mocked
 ```
 
@@ -24,13 +25,13 @@ Anthropic) are documented in `API_KEYS.md`; `uv run pitch-edge setup` walks thro
 writes a git-ignored `.env`. `uv sync --extra cloud` adds the optional GCS/BigQuery mirror.
 
 ```bash
-uv run pitch-edge signals                            # deterministic LangGraph pipeline -> human-approval gate
-uv run pitch-edge agentic-signals                     # agentic variant: LLM data-quality screening, per-league
-                                                       # model routing, RAG-grounded edge review (needs `ollama serve`)
-uv run pitch-edge replay-eval [--as-of YYYY-MM-DD]    # scores the agentic reviewer's verdicts against real,
-                                                       # revealed-after-the-fact closing odds and results
-uv run pitch-edge ablation | backtest | rag | rag-eval | health | export
+uv run pitch-edge ask "top 4 bets"                 # the only Q&A entrypoint (needs `ollama serve` locally)
+uv run pitch-edge ask "Liverpool vs Arsenal"       # --as-of YYYY-MM-DD to answer as of a specific date;
+uv run pitch-edge ask "what's on 2024-03-16"       # default: the most recent real closing-odds date
+uv run pitch-edge ablation | backtest | rag-eval | health | export
 ```
+
+`PITCH_EDGE_LLM_PROVIDER=groq` (with `GROQ_CLOUD_API_KEY` set, see `API_KEYS.md`) swaps every `ask`-agent LLM call from local Ollama to [Groq](https://console.groq.com)'s free tier — a real recurring daily quota (1,000 requests/day, 200k tokens/day on the default `openai/gpt-oss-20b`), confirmed several times faster and equally structured-output-reliable than an 8B local model, with no `ollama serve` needed at all.
 
 For results, known limitations and the honest headline numbers, see `CASE_STUDY.md`. Model details are in
 `MODEL_CARDS.md`.
@@ -57,12 +58,10 @@ flowchart LR
   FS --> M2[GBDT ± market, ± confirmed lineups]
   FS --> M3[Lightning Transformer]
   M1 & M2 & M3 --> BT[Walk-forward backtester<br/>no-vig edge · Kelly · CLV · calibration · ablation]
-  WH & BT --> RAG[LangChain hybrid RAG<br/>Chroma ∪ BM25 → RRF → rerank → local LLM / Claude]
-  BT --> LG[Deterministic LangGraph pipeline<br/>scout→features→inference→odds→edge→risk]
-  BT --> AG[Agentic orchestrator<br/>selection→router→reviewer, same nodes downstream]
-  LG & AG --> GATE{{HUMAN APPROVAL GATE<br/>interrupt_before}}
-  GATE --> PT[Paper-trade log]
-  WH & BT & RAG & PT --> UI[NiceGUI dashboard · 5 views · dark]
+  BT --> SL[Circumstance-sliced evidence<br/>league/referee/rest/travel/weather · min-n + FDR · checkpointed]
+  WH & SL --> RAG[LangChain hybrid RAG<br/>Chroma ∪ BM25 → RRF → rerank]
+  RAG & SL --> ASK[ask LangGraph agent<br/>parse_intent → gather (deterministic) → judge (tool-calling)]
+  ASK --> UI[NiceGUI dashboard · one page · a question box]
 ```
 
 ## Models
@@ -86,7 +85,8 @@ Walk-forward only — train strictly before each fold, periodic retrain, never s
 priced at real quoted odds (Pinnacle early when present, otherwise market-average, and the report says
 which). CLV is measured against the closing line. ¼-Kelly, ½-Kelly and flat-stake strategies with hard caps,
 Monte Carlo drawdown, per-bet Sharpe. Every run writes a one-page `reports/<label>/CASE_STUDY.md`
-automatically; the full per-division/per-strategy breakdown and a feature-group ablation land in
+automatically; the full per-division/per-strategy breakdown, a feature-group ablation, and
+circumstance-sliced evidence (`slice_evidence.csv` — see `backtest/slices.py`) land in
 `data/backtest/<label>/` (local, gitignored). Losing strategies are published as-is.
 
 ## RAG
@@ -100,30 +100,29 @@ hit@k/MRR against synthetic QA generated from the corpus.
 
 ## Agentic layer
 
-Two LangGraph pipelines share the same downstream nodes and the same non-negotiable gate:
+One LangGraph `StateGraph` (`agents/qa_graph.py`), answering exactly three standardized questions —
+"top N bets", "team A vs team B", "what's on day X" — as of an explicit point in time (`--as-of`, or the
+most recent real closing-odds date by default; there is no live-odds feed today, so there is no genuine
+"now" to answer as of instead):
 
-- **`signals`** — deterministic: `scout → features → inference → odds → edge_detector → risk_manager →
-  ⟂ human_approval → log_alerts`, one fixed model.
-- **`agentic-signals`** — additive: a local-LLM data-quality screening agent selects fixtures, a per-league
-  router picks the model with the best real backtest evidence for that league, and a deterministic
-  RAG-grounded reviewer flags proposals before they reach approval. `--tool-reviewer` (off by default,
-  also `PITCH_EDGE_REVIEWER_TOOL_CALLING=true`) swaps that reviewer for a genuinely tool-calling LLM agent
-  that decides for itself when to call `backtest_evidence`/`search_context` instead of being handed
-  pre-fetched evidence — slower and less deterministic, so it stays opt-in (`agents/tool_reviewer.py`).
-
-Both compile with `interrupt_before=["human_approval"]`; `log_alerts` refuses to write anything without an
-explicit human decision. `replay-eval` scores the agentic reviewer's trust/distrust verdicts against real
-odds and results revealed only after the fact, using a training/replay time split.
+- **`parse_intent`** — the only LLM call that classifies the question, into one of the three intents above
+  or `unrecognized` ("I can't understand that" — there is no generic freeform fallback).
+- **`gather`** — deterministic: resolves candidate fixtures (a real, non-synthetic early Pinnacle quote is
+  required), fits every model fresh on data strictly before `as_of` (nothing in this project persists
+  fitted weights, so this is a real refit every time, not a cache lookup), computes each fixture's no-vig
+  market edge, and picks which model to trust per fixture from real backtest evidence matching that
+  fixture's own circumstances (`backtest/slices.py::select_trusted_model`) — never an LLM guess.
+- **`judge`** — a bounded, tool-calling react agent (`agents/evidence_tools.py`: `get_model_predictions`,
+  `get_backtest_evidence`, `search_context`, each argument-validated before touching any data) that
+  narrates the batch `gather` already computed, with one bounded reflection retry if its own citations
+  don't check out (`rag/generate.py::verify_citations`). It never computes a probability or an edge itself.
 
 ## Dashboard
 
 `uv run pitch-edge serve` launches a [NiceGUI](https://nicegui.io) app (Python-native, FastAPI + Vue/Quasar)
-— chosen because every view is a direct read of a warehouse table or a `data/backtest/`/`data/artifacts/` file, with no
-API contract or separate frontend to maintain. Five views: **Overview** (model vs. market headline),
-**Data universe** (per-source row counts, ingest health), **Backtest & calibration** (log-loss, reliability
-curves, ablation heat-map), **Suggestions & approval** (the human-approval step — the only place a proposal
-can be accepted, and only as a paper trade), **Ask the system** (grounded RAG Q&A). Dark theme, shared Plotly
-template, short-lived read-only warehouse connections so the dashboard never blocks the pipeline.
+— chosen because it's a direct front end for the same `ask` graph the CLI uses, with no API contract or
+separate frontend to maintain. One page: a question box and an answer, nothing else. Dark theme,
+short-lived read-only warehouse connections so the dashboard never blocks the pipeline.
 
 ## Layout
 
@@ -137,18 +136,23 @@ src/pitch_edge/
   data/alt/                odds (live + prediction markets), weather, travel, referee, news, Wikipedia attention
   data/storage.py, ingest.py   DuckDB warehouse + orchestrated ingestion with per-source health logging
   features/                pre-match feature store, rotation/lineup context, squad value (leakage-safe)
+                          — see `features/README.md` for what's in the warehouse and exactly which
+                          columns feed each model
   models/                  dixon_coles, gbdt, sequence (Lightning Transformer), calibration
-  backtest/                walk-forward engine, Kelly + Monte Carlo, metrics, replay evaluator, report writer
-  odds/                    OddsProvider interface, no-vig maths, steam/divergence detector
-  rag/                     documents, hybrid retrieval, grounded generator (local LLM / Claude), query parser
-  agents/                  risk manager, deterministic + agentic LangGraph pipelines, local-LLM router/reviewer
+  backtest/                walk-forward engine, Kelly + Monte Carlo, metrics, circumstance-sliced
+                          evidence (slices.py), point-in-time cutoffs (as_of.py), report writer
+  odds/                    OddsProvider interface, no-vig maths (utils.py, edge.py), steam/divergence detector
+  rag/                     documents (incl. evidence docs), hybrid retrieval, grounded generator
+                          (local LLM / Claude), ask-intent query parser
+  agents/                  the `ask` LangGraph agent (qa_graph.py, qa_data.py, qa_context.py,
+                          evidence_tools.py, llm.py)
   vendor/                  third-party connectors vendored with a documented fix (see `vendor/NOTICE.md`)
   ablation.py, artifacts.py, pipeline.py, scheduler.py   feature ablation, dashboard artifacts, single
                           pipeline entrypoint, APScheduler jobs
   cloud/sync.py            optional GCS + BigQuery mirror
-  dashboard/                web.py (NiceGUI, 5 views), data.py (read-only access), theme.py (dark palette)
-  cli.py                   ingest | features | backtest | ablation | rag | rag-eval | signals |
-                          agentic-signals | replay-eval | artifacts | health | export | refresh | serve | schedule | setup
+  dashboard/                web.py (NiceGUI, one page), theme.py (dark palette)
+  cli.py                   ingest | features | backtest | ablation | ask | rag-eval | artifacts |
+                          health | export | refresh | serve | schedule | setup
 scripts/                  restartable long-run stage scripts (see `scripts/README.md`)
 deploy/                    Dockerfile, Cloud Run / Scheduler commands
 tests/                     pytest unit + integration tests, network mocked
@@ -160,4 +164,6 @@ tests/                     pytest unit + integration tests, network mocked
 test (backtest/ablation/replay-eval), generated by the `case-study` Claude Code skill
 (`.claude/skills/case-study/SKILL.md`); `reports/` holds only those write-ups, never raw data. The
 CSVs/model cards behind them are local, under `data/backtest/` and `data/artifacts/` (gitignored).
-See also `MODEL_CARDS.md`, `API_KEYS.md`, `scripts/README.md`, `src/pitch_edge/vendor/NOTICE.md`.
+See also `src/pitch_edge/features/README.md` (what's in the warehouse and exactly which columns
+feed each model, generated from the current code rather than hand-maintained), `MODEL_CARDS.md`,
+`API_KEYS.md`, `scripts/README.md`, `src/pitch_edge/vendor/NOTICE.md`.

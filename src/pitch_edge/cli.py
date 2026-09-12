@@ -1,4 +1,4 @@
-"""`pitch-edge` command line: setup, ingest, features, backtest, intel, rag, signals, export, serve."""
+"""`pitch-edge` command line: setup, ingest, features, backtest, ablation, ask, export, serve."""
 
 from __future__ import annotations
 
@@ -10,11 +10,10 @@ import typer
 from rich import print as rprint
 from rich.table import Table
 
-from pitch_edge.agents.graph import SignalState
 from pitch_edge.config import get_settings
 from pitch_edge.data.storage import Warehouse
 
-app = typer.Typer(help="PITCH-EDGE — football intelligence & market-edge research. Surfaces signals, never bets.")
+app = typer.Typer(help="PITCH-EDGE — football intelligence & market-edge research. Answers questions, never bets.")
 
 
 def _wh() -> Warehouse:
@@ -100,21 +99,53 @@ def backtest(
         _print_df(results_table(results).round(4), "Backtest summary")
 
 
-@app.command()
-def rag(question: str = typer.Argument(..., help="Ask the system a grounded question")) -> None:
-    """Query the RAG layer (local-LLM query parsing -> retrieval -> grounded explanation)."""
-    from pitch_edge.rag.generate import GroundedGenerator
-    from pitch_edge.rag.index import VectorIndex
-    from pitch_edge.rag.query_parser import parse_query, retrieval_query_text
+def _ask_models() -> list:
+    """Fast models only — the `ask` agent fits fresh per question, so a slow sequence model would
+    make an interactive question take minutes instead of seconds."""
+    from pitch_edge.models import DixonColesMatchModel, GBDTMatchModel
 
-    idx = VectorIndex()
-    parsed = parse_query(question)
-    query_text = retrieval_query_text(parsed)
-    docs = [d for d, _ in idx.query(query_text, k=6)]
-    ans = GroundedGenerator().answer(question, docs)
-    parsed_note = f", parsed_teams={parsed.home_team!r} vs {parsed.away_team!r}" if parsed.home_team else ""
-    rprint(f"[dim]backend={ans.backend}, index={idx.backend}, docs={idx.count()}{parsed_note}[/dim]\n")
-    rprint(ans.text)
+    return [DixonColesMatchModel(), GBDTMatchModel(include_market=False), GBDTMatchModel(include_market=True)]
+
+
+@app.command()
+def ask(
+    question: str = typer.Argument(..., help="'top N bets', '<team> vs <team>', or 'what's on <day>'"),
+    as_of: str | None = typer.Option(
+        None, "--as-of", help="Answer as of this date (YYYY-MM-DD); default: most recent real closing-odds date"
+    ),
+    min_date: str = "2018-07-01",
+) -> None:
+    """The only Q&A entrypoint: standardized questions only, grounded in real backtest evidence
+    and real early-quote market odds, answered as of an explicit point in time (there is no live
+    odds feed today, so there is no genuine 'now' to answer as of instead)."""
+    from pitch_edge.agents.qa_graph import ask_question, build_qa_graph
+    from pitch_edge.backtest.as_of import default_as_of
+    from pitch_edge.pipeline import build_rag_index, load_feature_frame
+
+    with _wh() as wh:
+        features = load_feature_frame(wh, min_date=min_date)
+        if features.empty:
+            rprint("[red]no features — run `pitch-edge ingest` and `pitch-edge features` first[/red]")
+            raise typer.Exit(1)
+        cutoff = pd.Timestamp(as_of) if as_of else default_as_of(wh)
+        slice_path = get_settings().backtest_dir / "main" / "slice_evidence.csv"
+        slice_evidence = pd.read_csv(slice_path) if slice_path.exists() else pd.DataFrame()
+        index = build_rag_index(wh)
+        graph = build_qa_graph(features, slice_evidence, index, _ask_models())
+        state = ask_question(graph, question, cutoff)
+
+    rprint(f"[dim]as of {cutoff.date()}[/dim]\n")
+    if state.message:
+        rprint(state.message)
+        return
+    if state.answer is None:
+        rprint("[yellow]no answer produced[/yellow]")
+        return
+    rprint(f"[bold]{state.answer.overview}[/bold] [dim](backend={state.answer.backend})[/dim]\n")
+    for note in state.answer.notes:
+        rprint(f"  [dim]{note.match_id} {note.home_team} vs {note.away_team}:[/dim] {note.take}")
+    if not state.answer.citations_grounded:
+        rprint(f"\n[yellow]ungrounded numbers flagged: {state.answer.ungrounded_numbers}[/yellow]")
 
 
 @app.command("rag-eval")
@@ -140,242 +171,6 @@ def rag_eval(n: int = 80, k: int = 5) -> None:
     out = get_settings().artifacts_dir / "rag_eval.csv"
     results.to_csv(out, index=False)
     _print_df(summarize_eval(results, k=k).round(3), f"Retrieval eval — index={idx.backend}, {idx.count():,} docs")
-
-
-@app.command()
-def signals(model: str = "gbdt", min_date: str = "2018-07-01") -> None:
-    """Run the LangGraph pipeline to the human approval gate and print pending proposals."""
-    from pitch_edge.models import default_models
-    from pitch_edge.pipeline import build_signal_pipeline, load_feature_frame
-
-    with _wh() as wh:
-        f = load_feature_frame(wh, min_date=min_date)
-        m = next(x for x in default_models() if x.name == model)
-        m.fit(f)
-        pipe = build_signal_pipeline(wh, f, m)
-        thread_id, state = pipe.run_to_gate()
-        rprint(f"[bold]thread:[/bold] {thread_id}  (paused at HUMAN APPROVAL GATE)")
-        props = state.get("proposals", [])
-        if not props:
-            rprint("no proposals passed the risk manager")
-        else:
-            _print_df(
-                pd.DataFrame(props)[
-                    [
-                        "match_id",
-                        "home_team",
-                        "away_team",
-                        "outcome",
-                        "model_probability",
-                        "market_probability",
-                        "edge",
-                        "decimal_odds",
-                        "stake",
-                    ]
-                ].round(3),
-                "Pending proposals",
-            )
-        pending = wh.read("paper_trades") if wh.table_exists("paper_trades") else pd.DataFrame()
-        (get_settings().artifacts_dir / "pending_signals.json").write_text(
-            json.dumps({"thread_id": thread_id, "proposals": props}, default=str, indent=2)
-        )
-        rprint(f"[dim]{len(pending)} paper trades logged historically[/dim]")
-
-
-def _run_agentic_pipeline(
-    wh: Warehouse, model: str, min_date: str, tool_reviewer: bool = False
-) -> tuple[str, SignalState]:
-    """Shared by `agentic-signals` and `predict`: build deps, fit models, run the agentic graph to
-    the human-approval gate. Fully deterministic by default — routing, edge detection and risk
-    sizing all run on real resources already in the warehouse. `tool_reviewer=True` swaps in the
-    opt-in tool-calling reviewer (`agents/tool_reviewer.py`), the only case where an LLM runs inside
-    this pipeline rather than only on-demand via `pitch-edge predict`."""
-    from pitch_edge.agents.graph import GraphDependencies
-    from pitch_edge.agents.orchestrator import AgenticSignalPipeline
-    from pitch_edge.agents.risk import RiskLimits, RiskManager
-    from pitch_edge.models import available_models, default_models
-    from pitch_edge.pipeline import (
-        build_rag_index,
-        live_quotes_from_odds_api,
-        load_feature_frame,
-        synthetic_quotes_from_elo,
-        upcoming_fixture_frame,
-    )
-
-    f = load_feature_frame(wh, min_date=min_date)
-    if f.empty:
-        rprint("[red]no features — run `pitch-edge ingest` and `pitch-edge features` first[/red]")
-        raise typer.Exit(1)
-    fallback_model = next(x for x in default_models() if x.name == model)
-    fitted = available_models()
-    for m in fitted:
-        m.fit(f)
-    fallback_model.fit(f)
-    fixtures_df = upcoming_fixture_frame(wh, f)
-
-    def scout() -> list[dict]:
-        return (
-            fixtures_df.assign(date=fixtures_df["date"].astype(str)).to_dict(orient="records")
-            if not fixtures_df.empty
-            else []
-        )
-
-    def fetch_odds(rows: list[dict]) -> list[dict]:
-        if not rows:
-            return []
-        rows_df = pd.DataFrame(rows)
-        live = live_quotes_from_odds_api(wh, rows_df)
-        synthetic = synthetic_quotes_from_elo(rows_df)
-        return [live.get(q["match_id"], q) for q in synthetic]
-
-    def sink(alerts: list[dict]) -> None:
-        if alerts:
-            wh.upsert("paper_trades", pd.DataFrame(alerts))
-
-    deps = GraphDependencies(
-        scout=scout,
-        featurize=lambda rows: rows,
-        infer=lambda rows: [],  # replaced by the per-league router inside build_agentic_graph
-        fetch_odds=fetch_odds,
-        risk=RiskManager(RiskLimits()),
-        sink=sink,
-        model_name=fallback_model.name,
-    )
-    reports_dir = get_settings().backtest_dir / "main"
-    index = build_rag_index(wh)
-    pipe = AgenticSignalPipeline(
-        deps, reports_dir=reports_dir, index=index, wh=wh, available_models=fitted, use_tool_reviewer=tool_reviewer
-    )
-    thread_id, state = pipe.run_to_gate()
-    return thread_id, state
-
-
-def _print_proposals(state: SignalState, title: str) -> None:
-    reviews_by_key = {(r["match_id"], r["outcome"]): r for r in state.get("reviews", [])}
-    props = state.get("proposals", [])
-    if not props:
-        rprint("no proposals passed the risk manager")
-        return
-    table = pd.DataFrame(props)
-    table["verdict"] = [reviews_by_key.get((p["match_id"], p["outcome"]), {}).get("verdict", "") for p in props]
-    table["reasons"] = [
-        "; ".join(reviews_by_key.get((p["match_id"], p["outcome"]), {}).get("reasons", [])) for p in props
-    ]
-    table["real_odds"] = table["bookmaker"] != "synthetic_elo_book"
-    _print_df(
-        table[
-            [
-                "match_id",
-                "home_team",
-                "away_team",
-                "outcome",
-                "model_probability",
-                "market_probability",
-                "edge",
-                "decimal_odds",
-                "stake",
-                "real_odds",
-                "verdict",
-                "reasons",
-            ]
-        ].round(3),
-        title,
-    )
-
-
-@app.command("agentic-signals")
-def agentic_signals(
-    model: str = typer.Option("gbdt", help="Default/fallback model — the per-league router picks the real one"),
-    min_date: str = "2018-07-01",
-    tool_reviewer: bool = typer.Option(
-        False,
-        "--tool-reviewer/--no-tool-reviewer",
-        help=(
-            "Opt-in: swap the deterministic reviewer for a local-LLM agent that calls its own "
-            "backtest_evidence/search_context tools (agents/tool_reviewer.py) instead of being "
-            "handed pre-fetched evidence. Slower and less deterministic — off by default; also "
-            "settable via PITCH_EDGE_REVIEWER_TOOL_CALLING=true."
-        ),
-    ),
-) -> None:
-    """Genuinely agentic signals pipeline: data-quality screening, per-league model routing,
-    deterministic edge review — same human-approval gate as `signals`. Fully deterministic by
-    default, no LLM involved (pass --tool-reviewer to opt into the tool-calling reviewer) — for a
-    plain-language explanation of the resulting proposals, run `pitch-edge predict` instead, which
-    calls the LLM exactly once over the whole batch."""
-    tool_reviewer = tool_reviewer or get_settings().agentic_reviewer_tool_calling
-    with _wh() as wh:
-        thread_id, state = _run_agentic_pipeline(wh, model, min_date, tool_reviewer=tool_reviewer)
-        rprint(f"[bold]thread:[/bold] {thread_id}  (paused at HUMAN APPROVAL GATE)")
-        rprint(f"[dim]screened: {len(state.get('selected_fixtures', []))} fixtures scouted[/dim]")
-        _print_proposals(state, "Pending proposals (agentic)")
-        (get_settings().artifacts_dir / "pending_agentic_signals.json").write_text(
-            json.dumps(
-                {
-                    "thread_id": thread_id,
-                    "proposals": state.get("proposals", []),
-                    "selected_fixtures": state.get("selected_fixtures", []),
-                    "reviews": state.get("reviews", []),
-                },
-                default=str,
-                indent=2,
-            )
-        )
-
-
-@app.command()
-def predict(
-    model: str = typer.Option("gbdt", help="Default/fallback model — the per-league router picks the real one"),
-    min_date: str = "2018-07-01",
-    llm_model: str | None = typer.Option(
-        None, help="Override the local Ollama model (default: settings.local_llm_model)"
-    ),
-) -> None:
-    """Run the deterministic agentic pipeline, then ask the LLM once — a single call over the
-    whole batch of proposals, not one per fixture — to explain the results in plain language. This
-    is the ONLY command that touches an LLM; everything it explains was already computed
-    deterministically before this call happens. Falls back to a plain-text template if Ollama isn't
-    running, so you can always see your proposals."""
-    from pitch_edge.agents.explainer import explain_signals
-
-    with _wh() as wh:
-        thread_id, state = _run_agentic_pipeline(wh, model, min_date)
-        rprint(f"[bold]thread:[/bold] {thread_id}  (paused at HUMAN APPROVAL GATE)")
-        _print_proposals(state, "Pending proposals")
-        explanation = explain_signals(state.get("proposals", []), state.get("reviews", []), llm_model=llm_model)
-        rprint(f"\n[bold]explanation[/bold] [dim](backend={explanation.backend})[/dim]\n{explanation.overview}\n")
-        for note in explanation.notes:
-            rprint(f"  [dim]{note.match_id} {note.outcome}:[/dim] {note.take}")
-
-
-@app.command("replay-eval")
-def replay_eval(
-    as_of: str | None = typer.Option(
-        None, help="Override T0 (YYYY-MM-DD); default: auto-computed from real closing odds"
-    ),
-    window_days: int = 30,
-) -> None:
-    """T0 replay-simulation: train on data strictly before T0, run the agentic pipeline on the next
-    `window_days` as if they were upcoming fixtures, then reveal real closing odds/results and check
-    whether the reviewer's deterministic trust/distrust verdicts actually correlate with realized
-    edge. No LLM involved — the reviewer's verdict is a real-edge_bits/real-odds rule, so this is
-    validating that rule, not an LLM's judgment."""
-    from pitch_edge.backtest.replay import run_replay_eval
-
-    with _wh() as wh:
-        result = run_replay_eval(wh, get_settings().backtest_dir / "replay", as_of=as_of, window_days=window_days)
-        rprint(
-            f"[bold]T0:[/bold] {result['t0'].date()}  [bold]window:[/bold] {result['t0'].date()} -> {result['window_end'].date()}"
-        )
-        rprint(
-            f"[dim]{result['n_fixtures']} fixtures in window, {result['n_proposals']} proposals, {result['n_scored']} scored[/dim]"
-        )
-        if result["summary"].empty:
-            rprint(
-                "[yellow]no proposals could be scored (no real closing odds in this window, or nothing proposed)[/yellow]"
-            )
-        else:
-            _print_df(result["summary"].round(4), "Realized edge by reviewer verdict")
 
 
 @app.command()
