@@ -67,10 +67,10 @@ def _build_hf_fallback(settings: Settings) -> BaseChatModel | None:
         from langchain_huggingface import ChatHuggingFace, HuggingFaceEndpoint
 
         endpoint = HuggingFaceEndpoint(
-            repo_id=settings.hf_model,
+            model=settings.hf_model,
             huggingfacehub_api_token=settings.hf_token,
             temperature=0.01,  # HF's endpoint rejects exactly 0
-            timeout=settings.local_llm_timeout_s,
+            timeout=int(settings.local_llm_timeout_s),
         )
         return ChatHuggingFace(llm=endpoint)
     except Exception:
@@ -79,11 +79,12 @@ def _build_hf_fallback(settings: Settings) -> BaseChatModel | None:
 
 
 def get_llm(model: str | None = None, base_url: str | None = None) -> BaseChatModel:
+    """A single, bare model — no fallback chain (that's `get_llm_for`'s job). Used directly by
+    call sites that want one specific model (`rag/generate.py`'s local-first Ollama attempt,
+    `agents/tool_reviewer.py`)."""
     settings = get_settings()
     if settings.llm_provider == "groq":
-        primary = _build_groq(model or settings.groq_model, settings)
-        hf = _build_hf_fallback(settings)
-        return primary.with_fallbacks([hf]) if hf else primary
+        return _build_groq(model or settings.groq_model, settings)
     from langchain_ollama import ChatOllama
 
     return ChatOllama(

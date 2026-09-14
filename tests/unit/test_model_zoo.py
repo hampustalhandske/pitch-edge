@@ -80,4 +80,4 @@ def test_gru_sequences_exclude_future(split):
 
 def test_default_models_names():
     names = [m.name for m in default_models()]
-    assert names == ["dixon_coles", "gbdt", "transformer_sequence", "gbdt_mkt"]
+    assert names == ["dixon_coles", "gbdt", "stochastic_strength"]

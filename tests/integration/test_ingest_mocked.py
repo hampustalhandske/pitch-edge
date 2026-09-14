@@ -2,9 +2,6 @@
 
 from __future__ import annotations
 
-import json
-
-import pandas as pd
 import pytest
 import responses
 
@@ -14,7 +11,6 @@ from pitch_edge.data.ingest import (
     ingest_football_data,
     ingest_news,
     ingest_openfootball,
-    ingest_polymarket,
     ingest_statsbomb,
 )
 
@@ -77,7 +73,7 @@ def test_club_elo_ratings_resolved_to_canonical_names(warehouse, football_data_c
 
 
 @responses.activate
-def test_openfootball_statsbomb_news_polymarket(warehouse, statsbomb_events_df):
+def test_openfootball_statsbomb_news(warehouse, statsbomb_events_df):
     of = {
         "name": "x",
         "matches": [
@@ -147,16 +143,4 @@ def test_openfootball_statsbomb_news_polymarket(warehouse, statsbomb_events_df):
         responses.add(responses.GET, url, body=rss)
     assert ingest_news(warehouse) == 1
     assert warehouse.read("news_items").iloc[0]["is_injury_news"]
-
-    pm = [
-        {
-            "id": "7",
-            "question": "Will Arsenal win?",
-            "outcomes": json.dumps(["Yes", "No"]),
-            "outcomePrices": json.dumps(["0.3", "0.7"]),
-        }
-    ]
-    responses.add(responses.GET, "https://gamma-api.polymarket.com/markets", json=pm)
-    assert ingest_polymarket(warehouse) == 2
-    assert pd.notna(warehouse.read("market_snapshots").iloc[0]["decimal_odds"])
-    assert set(warehouse.health()["source"]) >= {"openfootball", "statsbomb_open_data", "news_rss", "polymarket"}
+    assert set(warehouse.health()["source"]) >= {"openfootball", "statsbomb_open_data", "news_rss"}

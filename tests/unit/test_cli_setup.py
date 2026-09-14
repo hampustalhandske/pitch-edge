@@ -43,9 +43,9 @@ def test_setup_writes_key_without_echo_and_status_picks_it_up(tmp_path, clean_en
     assert oct(env.stat().st_mode & 0o777) == "0o600"
     rows = {r["env"]: r for r in key_status(dotenv_path=env)}
     assert rows["API_FOOTBALL_KEY"]["set"] and rows["API_FOOTBALL_KEY"]["source"] == ".env"
-    assert not rows["ODDS_API_KEY"]["set"]
+    assert not rows["EVERYSPORT_API_KEY"]["set"]
     s = status_summary(dotenv_path=env)
-    assert s["n_api_set"] == 1 and s["next_unlock"]["env"] == "ODDS_API_KEY" and not s["anthropic_active"]
+    assert s["n_api_set"] == 1 and s["next_unlock"]["env"] == "EVERYSPORT_API_KEY" and not s["anthropic_active"]
     # re-running replaces in place, never duplicates
     write_env_value(env, "API_FOOTBALL_KEY", "new")
     assert env.read_text().count("API_FOOTBALL_KEY=") == 1

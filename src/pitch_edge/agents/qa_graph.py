@@ -248,8 +248,10 @@ def gather(
                 "p_away": float(p_away),
             }
 
-    if state.intent == "top_bets":
+    if state.intent == "top_bets" and wh is not None:
         # The real bar for a bet: an actual traded price before as_of, not just a mapped market.
+        # Only enforced when a warehouse is wired in — without one there's no PMXT data to check
+        # against at all, so top_bets_candidates' own (Pinnacle-quote) gate already applied above.
         candidates = candidates[candidates["match_id"].isin(live_market)]
         if candidates.empty:
             return {
@@ -261,7 +263,9 @@ def gather(
     # model to trust per fixture from real backtest evidence. No LLM, no RAG call yet.
     predictions = run_models(features, candidates, as_of, models)
     edges = (
-        pmxt_market_edges(predictions, live_market) if state.intent == "top_bets" else market_edges(candidates, predictions)
+        pmxt_market_edges(predictions, live_market)
+        if state.intent == "top_bets" and wh is not None
+        else market_edges(candidates, predictions)
     )
     edge_records = edges.to_dict(orient="records")
     model_names = [m.name for m in models]
