@@ -304,59 +304,6 @@ def synthetic_quotes_from_elo(fixtures: pd.DataFrame, margin: float = 1.05) -> l
     return quotes
 
 
-def live_quotes_from_odds_api(wh: Warehouse, fixtures: pd.DataFrame) -> dict[str, dict]:
-    """Real bookmaker quotes keyed by our internal `match_id`, matched by team name since the Odds
-    API's own event id doesn't correspond to ours. Returns {} entries only for fixtures with a
-    genuine live h2h quote; callers fall back to synthetic for everything else.
-
-    `side` is resolved against the *event's own* (unresolved) `home_team`/`away_team` on the same
-    row, not against our canonical team names — the Odds API always spells an outcome exactly like
-    the event's own team name, but that spelling may still differ from our canonical form (e.g.
-    "Tottenham Hotspur" vs "Tottenham"), so resolving `side` through `TeamNameResolver` the same way
-    we resolve the join key would silently fail to match it back up."""
-    if fixtures.empty or not wh.table_exists("live_odds"):
-        return {}
-    live = wh.read("live_odds")
-    live = live[live["market"] == "h2h"] if "market" in live else live
-    if live.empty or "home_team" not in live.columns:
-        return {}
-    live = live.assign(raw_home_team=live["home_team"], raw_away_team=live["away_team"])
-    outcome = pd.Series(pd.NA, index=live.index, dtype="object")
-    outcome[live["side"].str.lower() == live["raw_home_team"].str.lower()] = "home"
-    outcome[live["side"].str.lower() == live["raw_away_team"].str.lower()] = "away"
-    outcome[live["side"].str.lower() == "draw"] = "draw"
-    live = live.assign(outcome=outcome).dropna(subset=["outcome"])
-    teams = sorted(set(fixtures["home_team"]) | set(fixtures["away_team"]))
-    resolver = TeamNameResolver(teams)
-    live = live.assign(
-        home_team=live["raw_home_team"].map(lambda n: resolver.resolve(str(n)) or n),
-        away_team=live["raw_away_team"].map(lambda n: resolver.resolve(str(n)) or n),
-    )
-    quotes: dict[str, dict] = {}
-    for _, fx in fixtures.iterrows():
-        rows = live[(live["home_team"] == fx["home_team"]) & (live["away_team"] == fx["away_team"])]
-        if rows.empty:
-            continue
-        latest_ts = rows["snapshot_ts"].max()
-        rows = rows[rows["snapshot_ts"] == latest_ts]
-        bookmaker = rows["bookmaker"].iloc[0]
-        rows = rows[rows["bookmaker"] == bookmaker]
-        outcome_price = dict(zip(rows["outcome"], rows["price"], strict=True))
-        home_price = outcome_price.get("home")
-        away_price = outcome_price.get("away")
-        draw_price = outcome_price.get("draw")
-        if home_price is None or draw_price is None or away_price is None:
-            continue
-        quotes[fx["match_id"]] = {
-            "match_id": fx["match_id"],
-            "bookmaker": bookmaker,
-            "home": float(home_price),
-            "draw": float(draw_price),
-            "away": float(away_price),
-        }
-    return quotes
-
-
 # --------------------------------------------------------------------- full run
 def full_refresh(
     settings: Settings | None = None,
@@ -386,7 +333,7 @@ def full_refresh(
         summary["feature_rows"] = int(len(features))
         if not features.empty:
             persist_features(wh, features)
-            models = default_models(include_market=True)
+            models = default_models()
             if fast:
                 models = [m for m in models if m.name != "gru_sequence"]
             results = run_backtests(features, models, WalkForwardConfig(), wh=wh, label="main")

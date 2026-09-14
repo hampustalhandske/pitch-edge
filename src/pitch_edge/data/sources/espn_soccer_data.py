@@ -57,14 +57,40 @@ def _quote(path: str) -> str:
     return "'" + path.replace("'", "''") + "'"
 
 
-def load_espn_soccer_data(wh: Warehouse, archive_dir: str | Path) -> dict[str, int]:
-    """Load every `espn-soccer-data` CSV file into its own DuckDB table. Raises if `archive_dir`
-    doesn't exist — callers that want a soft no-op when the archive isn't present should check
-    first (see `ingest_espn_soccer_data` in `data/ingest.py`)."""
+# The subset actually kept: `espn_lineups` (formations/subs) and `espn_team_stats`
+# (possession%/tackle%/cross% — a materially richer stat line than football-data.co.uk's
+# shots/corners/fouls alone) have no equivalent elsewhere. `espn_key_events` is kept too — it
+# feeds `rag/documents.py::espn_documents`'s match-report narration (goal/card key events),
+# confirmed by grep before cutting anything, not assumed. `espn_fixtures`/`espn_teams`/
+# `espn_leagues` are kept purely as the join keys `build_espn_mapping` needs to resolve
+# `eventId`/`teamId` onto real matches/teams — without them none of the above can be joined to
+# anything. Dropped as confirmed-unused: `espn_commentary`/`espn_plays` (2.4M/2.8M rows —
+# `rag/documents.py` explicitly says it never embeds these), `espn_player_stats`, `espn_standings`,
+# `espn_status`, `espn_team_roster`, `espn_venues`, `espn_key_event_types`, `espn_players`.
+DEFAULT_TABLES = (
+    "espn_fixtures",
+    "espn_teams",
+    "espn_leagues",
+    "espn_team_stats",
+    "espn_lineups",
+    "espn_key_events",
+)
+
+
+def load_espn_soccer_data(
+    wh: Warehouse, archive_dir: str | Path, tables: tuple[str, ...] | None = DEFAULT_TABLES
+) -> dict[str, int]:
+    """Load `espn-soccer-data` CSV files into their own DuckDB tables. `tables=None` loads every
+    table (~1,400 files); the default loads only `DEFAULT_TABLES` (lineups/team-stats plus the
+    join keys they need). Raises if `archive_dir` doesn't exist — callers that want a soft no-op
+    when the archive isn't present should check first (see `ingest_espn_soccer_data`)."""
     base = Path(archive_dir)
     counts: dict[str, int] = {}
+    wanted = set(tables) if tables is not None else None
 
     for table, fname in BASE_DATA_FILES.items():
+        if wanted is not None and table not in wanted:
+            continue
         path = base / "base_data" / fname
         if not path.exists():
             logger.warning("espn_soccer_data: missing %s, skipping table %s", path, table)
@@ -73,6 +99,8 @@ def load_espn_soccer_data(wh: Warehouse, archive_dir: str | Path) -> dict[str, i
         counts[table] = wh.count(table)
 
     for table, dirname in GLOB_DATA_DIRS.items():
+        if wanted is not None and table not in wanted:
+            continue
         dir_path = base / dirname
         if not dir_path.exists():
             logger.warning("espn_soccer_data: missing dir %s, skipping table %s", dir_path, table)

@@ -59,6 +59,10 @@ TABLE_KEYS: dict[str, list[str]] = {
     "fixture_predictions": ["fixture_key", "model_name", "version"],
     "dossiers": ["fixture_key", "version"],
     "live_odds": ["match_id", "bookmaker", "market", "side", "snapshot_ts"],
+    "dim_soccer_markets": ["condition_id"],
+    "pmxt_orderbook": ["condition_id", "asset_id", "timestamp_received", "side", "price", "size"],
+    "pmxt_days_scanned": ["day"],
+    "pmxt_match_map": ["condition_id"],
 }
 
 

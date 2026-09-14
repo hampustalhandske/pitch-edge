@@ -164,6 +164,53 @@ def transfermarkt_context(wh: Warehouse, matches: pd.DataFrame) -> pd.DataFrame:
     return out[["match_id", *CONTEXT_COLUMNS]]
 
 
+NEWS_FEATURES = ["news_sent_home", "news_sent_away", "news_sent_diff", "news_injury_items_home", "news_injury_items_away"]
+
+
+def news_context(wh: Warehouse, matches: pd.DataFrame, window_days: int = 7) -> pd.DataFrame:
+    """Per match: mean RSS sentiment and injury-flagged item count per side, strictly from news
+    published in `[kickoff - window_days, kickoff)` — real timestamps, so this is point-in-time
+    safe the same way `as_of.py::filter_before` is. Empty frame if `news_items` doesn't exist."""
+    if not wh.table_exists("news_items"):
+        return pd.DataFrame()
+    news = wh.query("SELECT team, published_at, sentiment, is_injury_news FROM news_items WHERE team IS NOT NULL")
+    if news.empty:
+        return pd.DataFrame()
+    news["published_at"] = pd.to_datetime(news["published_at"], utc=True, errors="coerce").dt.tz_localize(None)
+    news = news.dropna(subset=["published_at"]).sort_values("published_at")
+
+    def _agg(teams: pd.Series, dates: pd.Series) -> pd.DataFrame:
+        rows = []
+        for team, kickoff in zip(teams, dates, strict=True):
+            window = news[
+                (news["team"] == team)
+                & (news["published_at"] < kickoff)
+                & (news["published_at"] >= kickoff - pd.Timedelta(days=window_days))
+            ]
+            rows.append(
+                {
+                    "sent": float(window["sentiment"].mean()) if not window.empty else np.nan,
+                    "injury_items": int(window["is_injury_news"].sum()) if not window.empty else 0,
+                }
+            )
+        return pd.DataFrame(rows)
+
+    dates = pd.to_datetime(matches["date"])
+    home = _agg(matches["home_team"], dates)
+    away = _agg(matches["away_team"], dates)
+    out = pd.DataFrame(
+        {
+            "match_id": matches["match_id"].to_numpy(),
+            "news_sent_home": home["sent"].to_numpy(),
+            "news_sent_away": away["sent"].to_numpy(),
+            "news_sent_diff": (home["sent"] - away["sent"]).to_numpy(),
+            "news_injury_items_home": home["injury_items"].to_numpy(),
+            "news_injury_items_away": away["injury_items"].to_numpy(),
+        }
+    )
+    return out
+
+
 def load_context(wh: Warehouse, matches: pd.DataFrame) -> pd.DataFrame | None:
     """Everything `FeatureBuilder.build(context=...)` accepts: Transfermarkt rotation/referee context
     plus Wikipedia attention anomalies when the `wiki_pageviews` table exists. None if nothing applies."""
@@ -183,6 +230,9 @@ def load_context(wh: Warehouse, matches: pd.DataFrame) -> pd.DataFrame | None:
             att = attention_features(matches, pv)
             if not att.empty:
                 frames.append(att)
+    news = news_context(wh, matches)
+    if not news.empty:
+        frames.append(news)
     if not frames:
         return None
     ctx = frames[0]

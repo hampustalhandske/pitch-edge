@@ -13,3 +13,6 @@ __pycache__/
 *.log
 logs/
 PROMPT_ELITE.md
+temp/
+.claude/settings.local.json
+

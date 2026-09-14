@@ -55,18 +55,62 @@ class Answer:
     model: str | None = None
 
 
+def _classify_number(text: str, start: int, end: int) -> str | None:
+    """Best-effort metric type for a number at `text[start:end]`, from nearby context — used only
+    to sanity-range-check it (a percentage-shaped number > 100, or "odds" of 0.6, is wrong however
+    the LLM sourced it). None if no type is inferable; such numbers get only the grounding check."""
+    after = text[end : end + 2]
+    before = text[max(0, start - 20) : start].lower()
+    if after.startswith("%"):
+        return "probability"
+    if "odds" in before or "odds" in text[end : end + 15].lower():
+        return "odds"
+    if "edge" in before:
+        return "edge"
+    return None
+
+
+def _in_range(kind: str, value: float) -> bool:
+    if kind == "probability":
+        return 0.0 <= value <= 100.0
+    if kind == "odds":
+        return value > 1.0
+    if kind == "edge":
+        return -100.0 <= value <= 100.0
+    return True
+
+
 def verify_citations(text: str, docs: list[Document]) -> tuple[bool, list[str], list[str]]:
-    """Return (all numbers grounded?, list of cited doc ids that exist, numbers not found in any source)."""
+    """Return (all numbers grounded?, list of cited doc ids that exist, numbers not found in any
+    source OR out of range for their inferred metric type).
+
+    Two independent checks, both must pass:
+    1. Grounding (as before): the digit string appears somewhere in the retrieved source text.
+    2. Range sanity: a number whose nearby context marks it as a probability/edge/odds (a "%"
+       sign, or the word "odds"/"edge" close by) must fall in that metric's valid range — this
+       catches a hallucinated "150% probability" or "0.4 odds" even if that exact digit string
+       happens to appear elsewhere in an unrelated source document."""
     doc_ids = {d.doc_id for d in docs}
     cited = [c for c in _CITE_RE.findall(text) if c in doc_ids]
     source_text = " ".join(d.text for d in docs)
     source_numbers = set(_NUMBER_RE.findall(source_text))
     source_numbers |= {n.replace(",", ".") for n in source_numbers} | {n.replace(".", ",") for n in source_numbers}
-    answer_numbers = _NUMBER_RE.findall(_CITE_RE.sub("", text))
-    missing = sorted(
-        {n for n in answer_numbers if n not in source_numbers and n.rstrip("0").rstrip(".") not in source_numbers}
-    )
-    return (not missing), cited, missing
+
+    answer_only = _CITE_RE.sub("", text)
+    missing: set[str] = set()
+    for m in _NUMBER_RE.finditer(answer_only):
+        n = m.group(1)
+        ungrounded = n not in source_numbers and n.rstrip("0").rstrip(".") not in source_numbers
+        kind = _classify_number(answer_only, m.start(), m.end())
+        out_of_range = False
+        if kind:
+            try:
+                out_of_range = not _in_range(kind, float(n.replace(",", ".")))
+            except ValueError:
+                out_of_range = False
+        if ungrounded or out_of_range:
+            missing.add(n)
+    return (not missing), cited, sorted(missing)
 
 
 class GroundedGenerator:

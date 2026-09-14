@@ -3,7 +3,9 @@ from pitch_edge.models.calibration import IsotonicCalibrator, brier_score, log_l
 from pitch_edge.models.dixon_coles import DixonColesModel
 from pitch_edge.models.gbdt import GBDTMatchModel
 from pitch_edge.models.poisson import DixonColesMatchModel
+from pitch_edge.models.sentiment import SentimentOnlyModel
 from pitch_edge.models.sequence import GRUSequenceModel, TransformerSequenceModel
+from pitch_edge.models.stochastic import StochasticStrengthModel
 
 __all__ = [
     "OUTCOMES",
@@ -11,6 +13,8 @@ __all__ = [
     "DixonColesModel",
     "GBDTMatchModel",
     "GRUSequenceModel",
+    "SentimentOnlyModel",
+    "StochasticStrengthModel",
     "TransformerSequenceModel",
     "IsotonicCalibrator",
     "MatchModel",
@@ -21,22 +25,21 @@ __all__ = [
 
 
 def available_models() -> list[MatchModel]:
-    """Every match-outcome model the CLI can select by name (superset of `default_models`)."""
+    """Every match-outcome model the CLI can select by name. Deliberately five *different*
+    approaches rather than several GBDT variants: a goals-process model, one tree ensemble on the
+    agreed feature set (no market odds — there's no live feed, so a historical market column would
+    just be bias, never something the live `ask` path can see), a Monte Carlo stochastic-process
+    model, a deep sequence model, and a sentiment-only model that isolates the news/LLM signal."""
     return [
         DixonColesMatchModel(),
         GBDTMatchModel(include_market=False),
-        GBDTMatchModel(include_market=True),
+        StochasticStrengthModel(),
         TransformerSequenceModel(),
-        # Phase 6 candidate (CASE_STUDY.md Result 8): confirmed-lineup squad-value + missing-star-value
-        # features on top of the same GBDT recipe as `gbdt`/`gbdt_mkt`. Only excludes the Result-7
-        # rejected groups so the new `sv_` group is the sole difference from the baseline GBDTs.
-        GBDTMatchModel(include_market=False, exclude_prefixes=("pv_", "rot_"), name_suffix="_squadval"),
-        GBDTMatchModel(include_market=True, exclude_prefixes=("pv_", "rot_"), name_suffix="_squadval"),
+        SentimentOnlyModel(),
     ]
 
 
-def default_models(include_market: bool = True) -> list[MatchModel]:
-    models: list[MatchModel] = [DixonColesMatchModel(), GBDTMatchModel(include_market=False), TransformerSequenceModel()]
-    if include_market:
-        models.append(GBDTMatchModel(include_market=True))
-    return models
+def default_models() -> list[MatchModel]:
+    """The fast-to-refit subset `ask` uses (no market odds, no sequence model — too slow to refit
+    per question)."""
+    return [DixonColesMatchModel(), GBDTMatchModel(include_market=False), StochasticStrengthModel()]

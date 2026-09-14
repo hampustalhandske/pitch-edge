@@ -19,16 +19,20 @@ The previous version of this file described a run from 2026-09-06 with hardcoded
 longer match the current model registry (the GRU sequence model, GNN player embeddings and the
 in-play model were since removed; `odds/leadlag.py` and `backtest/event_study.py`, the two modules
 behind the old lead-lag and referee-lag results, no longer exist in the codebase) — rather than
-leave stale figures in place, this index was reset. Run the `case-study` skill against a label
-below to regenerate a real one:
+leave stale figures in place, this index was reset. The model registry has since changed again:
+`gbdt_mkt`/`gbdt_squadval`/`gbdt_mkt_squadval` are gone (no live-odds feed means a market-odds
+feature is just bias on the live `ask` path), replaced by a five-model roster — `dixon_coles`,
+`gbdt` (no market odds), `stochastic_strength` (Monte Carlo on Elo), `transformer_sequence`,
+`sentiment_only` — and `replay-eval`/`agentic-signals` were removed in the Phase 8 scope
+narrowing (see `CLAUDE.md`). Run the `case-study` skill against a label below to regenerate a
+real one:
 
 | Label | Command | Status |
 |---|---|---|
-| `main` | `pitch-edge backtest --label main` | not yet regenerated |
+| `main` | `pitch-edge backtest --label main --models dixon_coles,gbdt,stochastic_strength,transformer_sequence,sentiment_only` | not yet regenerated |
 | `developing` | `pitch-edge backtest --label developing --leagues <16 under-covered divisions>` | not yet regenerated |
-| `squad_value` | `pitch-edge backtest --label squad_value --models gbdt,gbdt_mkt,gbdt_squadval,gbdt_mkt_squadval` | not yet regenerated |
 | `ablation` | `pitch-edge ablation` | not yet regenerated |
-| [`replay`](reports/replay/CASE_STUDY.md) | `pitch-edge replay-eval` | **done (2026-09-10)** — mechanically sound end-to-end (real evidence, deterministic reviewer, real closing-price scoring), but every model still loses to the market on the pre-T0 fold too, so every proposal was correctly `distrust`; only 4 proposals were scored, far too few to judge the rule's real discriminating power |
+| `pmxt_timing` | `pitch-edge map-pmxt && pitch-edge backtest-timing --label pmxt_timing` | smoke-tested against real Polymarket data (124 matches) — real mechanism, sample far too small for a real verdict; see `data/backtest/pmxt_timing/` |
 
 ## What's still true regardless of specific numbers
 

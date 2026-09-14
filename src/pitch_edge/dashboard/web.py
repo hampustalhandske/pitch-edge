@@ -134,20 +134,23 @@ def _ask_graph():
         from pitch_edge.agents.qa_graph import build_qa_graph
         from pitch_edge.config import get_settings
         from pitch_edge.data.storage import Warehouse
-        from pitch_edge.models import DixonColesMatchModel, GBDTMatchModel
+        from pitch_edge.models import default_models
         from pitch_edge.pipeline import build_rag_index, load_feature_frame
 
         settings = get_settings()
         settings.ensure_dirs()
-        with Warehouse(settings.db_path, read_only=True) as wh:
-            features = load_feature_frame(wh)
-            index = build_rag_index(wh)
+        # Kept open (not a `with` block) for the graph's lifetime: PolymarketOddsProvider needs a
+        # live connection each time the cached graph is invoked, not just at build time.
+        wh = Warehouse(settings.db_path, read_only=True)
+        features = load_feature_frame(wh)
+        index = build_rag_index(wh)
         slice_path = settings.backtest_dir / "main" / "slice_evidence.csv"
         import pandas as pd
 
         slice_evidence = pd.read_csv(slice_path) if slice_path.exists() else pd.DataFrame()
-        models = [DixonColesMatchModel(), GBDTMatchModel(include_market=False), GBDTMatchModel(include_market=True)]
-        _ASK_CACHE["graph"] = build_qa_graph(features, slice_evidence, index, models)
+        models = default_models()
+        _ASK_CACHE["wh"] = wh
+        _ASK_CACHE["graph"] = build_qa_graph(features, slice_evidence, index, models, wh=wh)
     return _ASK_CACHE["graph"]
 
 

@@ -56,6 +56,13 @@ BASE_FEATURES = [
     "sv_home_missing_pct",
     "sv_away_missing_pct",
     "sv_missing_pct_diff",
+    # News sentiment (data/alt/news.py, features/context.py::news_context) — point-in-time RSS
+    # sentiment/injury-item counts per side, strictly pre-match
+    "news_sent_home",
+    "news_sent_away",
+    "news_sent_diff",
+    "news_injury_items_home",
+    "news_injury_items_away",
 ]
 MARKET_FEATURES = ["mkt_home_p", "mkt_draw_p", "mkt_away_p", "mkt_overround"]
 

@@ -36,13 +36,6 @@ OPTIONAL_KEYS: tuple[OptionalKey, ...] = (
         "uv run pitch-edge ingest",
     ),
     OptionalKey(
-        "ODDS_API_KEY",
-        "The Odds API",
-        "live pre-match prices from real bookmakers: replaces the labelled synthetic Elo quotes in the signal pipeline and feeds the steam detector and the cross-venue lead-lag test",
-        "https://the-odds-api.com",
-        "uv run pitch-edge schedule",
-    ),
-    OptionalKey(
         "EVERYSPORT_API_KEY",
         "Everysport",
         "Swedish results and fixtures below Allsvenskan (Superettan, Ettan, Division 2/3) — the leagues where local information is thinnest",

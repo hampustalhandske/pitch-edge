@@ -63,6 +63,10 @@ class Settings:
     llm_provider: str = field(default_factory=lambda: _env("PITCH_EDGE_LLM_PROVIDER", "ollama"))
     groq_api_key: str | None = field(default_factory=lambda: os.environ.get("GROQ_CLOUD_API_KEY"))
     groq_model: str = field(default_factory=lambda: _env("PITCH_EDGE_GROQ_MODEL", "openai/gpt-oss-20b"))
+    # Free-tier Hugging Face Inference API — last-resort fallback behind both Groq models, since HF's
+    # current free tier is a small trial credit (not a real recurring quota like Groq's), see agents/llm.py.
+    hf_token: str | None = field(default_factory=lambda: os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_API_KEY"))
+    hf_model: str = field(default_factory=lambda: _env("PITCH_EDGE_HF_MODEL", "meta-llama/Llama-3.1-8B-Instruct"))
 
     @property
     def raw_dir(self) -> Path:

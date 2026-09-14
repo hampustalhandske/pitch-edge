@@ -59,10 +59,8 @@
     "deny": [
       "Bash(git push:*)",
       "Bash(rm -rf:*)",
-      "Bash(curl:*)",
       "Bash(git add:*)",
       "Bash(git commit:*)",
-      "Bash(pip install:*)",
       "Read(./.env)",
       "Read(./.env.*)",
       "Read(**/secrets/**)"

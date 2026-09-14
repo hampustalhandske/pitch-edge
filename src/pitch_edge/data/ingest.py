@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, timedelta
 from functools import partial
 from pathlib import Path
 
@@ -17,7 +17,6 @@ import pandas as pd
 
 from pitch_edge.config import get_settings
 from pitch_edge.data.alt.news import NewsScanner
-from pitch_edge.data.alt.polymarket import PolymarketSource
 from pitch_edge.data.alt.venues import VenueGeocoder
 from pitch_edge.data.alt.weather import OpenMeteoWeather
 from pitch_edge.data.sources.club_elo import ClubEloSource
@@ -421,18 +420,127 @@ def ingest_news(wh: Warehouse) -> int:
     return _run(wh, "news_rss", go)
 
 
-def ingest_polymarket(wh: Warehouse) -> int:
-    src = PolymarketSource()
-    return _run(
-        wh, "polymarket", lambda: wh.upsert("market_snapshots", src.fetch_football_markets().assign(venue="polymarket"))
+def pmxt_scanned_days(wh: Warehouse) -> set[str]:
+    if not wh.table_exists("pmxt_days_scanned"):
+        return set()
+    return set(wh.read("pmxt_days_scanned")["day"].astype(str))
+
+
+def ingest_pmxt_soccer_markets(
+    wh: Warehouse, earliest_day: date = date(2026, 4, 13), future_buffer_days: int = 14
+) -> int:
+    """Resolve every soccer market whose real match day falls in
+    `[earliest_day, today + future_buffer_days]` into `dim_soccer_markets` — the `condition_id`
+    lookup `ingest_pmxt_orderbook_hour` filters the archive against.
+
+    Walks backward from `today + future_buffer_days` (the buffer catches matches whose game is
+    just past the archive's newest hour but whose pre-match ticks fall inside it — see
+    `pmxt_archive.py`'s module docstring) one calendar day at a time, stopping the instant it
+    reaches a day already recorded in `pmxt_days_scanned` or passes `earliest_day`. A day's set
+    of matches never changes once recorded, so this makes re-running genuinely incremental: the
+    first run walks the whole range, every run after that only touches new day(s) since the
+    last one — never re-scanning history that's already known."""
+    from pitch_edge.data.alt.pmxt_archive import PMXTArchiveSource
+
+    src = PMXTArchiveSource()
+    scanned = pmxt_scanned_days(wh)
+
+    def go() -> int:
+        total_new = 0
+        day = date.today() + timedelta(days=future_buffer_days)
+        while day >= earliest_day:
+            day_str = day.isoformat()
+            if day_str in scanned:
+                logger.info("pmxt_soccer_markets: %s already scanned — stopping walk-back", day_str)
+                break
+            df = src.discover_soccer_markets_for_day(day)
+            total_new += wh.upsert("dim_soccer_markets", df)
+            wh.upsert("pmxt_days_scanned", pd.DataFrame([{"day": day_str, "n_markets": len(df)}]))
+            day -= timedelta(days=1)
+        return total_new
+
+    return _run(wh, "pmxt_soccer_markets", go)
+
+
+def pmxt_hour_already_ingested(wh: Warehouse, date: str, hour: int) -> bool:
+    """True if this hour's file has already been successfully processed — a re-run must never
+    re-download a ~100MB archive file it already has rows from."""
+    if not wh.table_exists("pipeline_runs"):
+        return False
+    rows = wh.query(
+        "SELECT 1 FROM pipeline_runs WHERE source = ? AND status = 'ok' LIMIT 1",
+        [f"pmxt_orderbook:{date}T{hour:02d}"],
     )
+    return not rows.empty
 
 
-def ingest_kalshi(wh: Warehouse, max_series: int = 60) -> int:
-    from pitch_edge.data.alt.kalshi import KalshiSource
+def ingest_pmxt_orderbook_hour(wh: Warehouse, date: str, hour: int, force: bool = False) -> int:
+    """One hour of the PMXT Polymarket orderbook archive, filtered to soccer markets already
+    resolved in `dim_soccer_markets` (run `ingest_pmxt_soccer_markets` first).
 
-    src = KalshiSource()
-    return _run(wh, "kalshi", lambda: wh.upsert("market_snapshots", src.fetch_football_markets(max_series=max_series)))
+    Skips the fetch entirely (no network call) if this hour already has a logged successful
+    run, unless `force=True` — makes a multi-year backfill restartable for free: killing and
+    re-running `ingest_pmxt_orderbook_range` never re-downloads an hour it already has."""
+    from pitch_edge.data.alt.pmxt_archive import PMXTArchiveSource
+
+    if not force and pmxt_hour_already_ingested(wh, date, hour):
+        return 0
+
+    src = PMXTArchiveSource()
+
+    def go() -> int:
+        if not wh.table_exists("dim_soccer_markets"):
+            logger.warning("pmxt_orderbook_hour: dim_soccer_markets is empty — run ingest_pmxt_soccer_markets first")
+            return 0
+        condition_ids = wh.read("dim_soccer_markets")["condition_id"].tolist()
+        df = src.fetch_orderbook_hour(date, hour, condition_ids)
+        return wh.upsert("pmxt_orderbook", df)
+
+    return _run(wh, f"pmxt_orderbook:{date}T{hour:02d}", go)
+
+
+def ingest_pmxt_orderbook_range(wh: Warehouse, start: datetime, end: datetime) -> dict[str, int]:
+    """Every hour in `[start, end]` inclusive, **newest first** — matches
+    `ingest_pmxt_soccer_markets`'s walk-backward order, and for the same reason: whatever hours
+    we don't get to are the least valuable ones to have missed (the oldest, furthest from
+    "now"), not the most recent.
+
+    Interruptible and resumable: a killed run just leaves earlier hours unfetched, and calling
+    this again picks up exactly where it left off (see `pmxt_hour_already_ingested`).
+
+    Logs one line per hour at INFO — the archive is genuinely gappy and a full backfill can run
+    for a long time, so silent multi-hour stretches with no sign of life aren't acceptable; a
+    caller redirecting stdout to a log file should run with `PYTHONUNBUFFERED=1` (or Python's
+    `-u`) so these lines actually land in the file as they happen instead of sitting in a
+    fully-buffered pipe until the whole range finishes."""
+    total_hours = int((end - start).total_seconds() // 3600) + 1
+    report: dict[str, int] = {}
+    cursor = end.replace(minute=0, second=0, microsecond=0)
+    start = start.replace(minute=0, second=0, microsecond=0)
+    i = 0
+    while cursor >= start:
+        i += 1
+        date_str = f"{cursor:%Y-%m-%d}"
+        key = f"{date_str}T{cursor.hour:02d}"
+        already_done = pmxt_hour_already_ingested(wh, date_str, cursor.hour)
+        n = ingest_pmxt_orderbook_hour(wh, date_str, cursor.hour)
+        report[key] = n
+        status = "skip(already done)" if already_done else (f"+{n} rows" if n else "gap (no file)")
+        logger.info("pmxt_orderbook_range [%d/%d] %s: %s", i, total_hours, key, status)
+        cursor -= timedelta(hours=1)
+    return report
+
+
+def build_pmxt_match_map(wh: Warehouse) -> int:
+    """Recompute `pmxt_match_map` (condition_id -> match_id, outcome_side) from whatever
+    `dim_soccer_markets`/`matches` currently hold. Cheap, idempotent, no network calls — safe to
+    re-run any time either table grows (new markets discovered, new matches ingested)."""
+    from pitch_edge.data.alt.pmxt_match_map import build_pmxt_match_map as _build
+
+    def go() -> int:
+        return len(_build(wh))
+
+    return _run(wh, "pmxt_match_map", go)
 
 
 def ingest_sweden(wh: Warehouse, seasons: tuple[int, ...] = (2023, 2024, 2025, 2026)) -> int:
@@ -609,27 +717,6 @@ def ingest_api_football_context(wh: Warehouse, leagues: list[str] | None = None,
     return _run(wh, "api_football", go)
 
 
-def ingest_odds_api(wh: Warehouse, sport_keys: list[str] | None = None) -> int:
-    """Live bookmaker quotes when `ODDS_API_KEY` is set (no-op without it, logged as such)."""
-    from pitch_edge.data.alt.odds_api import OddsApiSource
-
-    src = OddsApiSource()
-    sport_keys = sport_keys or ["soccer_epl"]
-
-    def go() -> int:
-        if not src.enabled:
-            logger.info("ODDS_API_KEY not set — skipping live odds (see `pitch-edge setup`)")
-            return 0
-        total = 0
-        for sport_key in sport_keys:
-            odds = src.live_odds(sport_key=sport_key)
-            if not odds.empty:
-                total += wh.upsert("live_odds", odds)
-        return total
-
-    return _run(wh, "odds_api", go)
-
-
 # ------------------------------------------------------------------------ all
 def ingest_everything(
     wh: Warehouse,
@@ -642,17 +729,24 @@ def ingest_everything(
 ) -> dict[str, int]:
     report: dict[str, int] = {}
     report.update(ingest_football_data(wh, leagues, seasons))
-    report["club_football_match_data"] = ingest_club_football_match_data(wh)
-    report["club_elo"] = ingest_club_elo(wh)
-    report["openfootball"] = ingest_openfootball(wh)
+    # `club_football_match_data` (xgabora) and `openfootball`'s cross-check table were removed:
+    # both are derivative of/redundant with the football-data.co.uk spine below (xgabora's only
+    # unique contribution, precomputed Elo, duplicates FeatureBuilder's own from-scratch Elo).
+    # `ingest_sweden` is untouched — a real primary source for Swedish leagues, not a duplicate.
     if include_statsbomb:
         report["statsbomb"] = ingest_statsbomb(wh, max_matches_per_competition=statsbomb_max_matches)
     if include_weather:
         report["venues_weather"] = ingest_venues_and_weather(wh)
     report["sweden_openfootball"] = ingest_sweden(wh)
     report["news"] = ingest_news(wh)
-    report["polymarket"] = ingest_polymarket(wh)
-    report["kalshi"] = ingest_kalshi(wh)
+    # Market-probability data is Polymarket-only now, via the PMXT archive (see
+    # `pmxt_archive.py`): the old live-snapshot connectors (`polymarket.py`, `kalshi.py`,
+    # `odds_api.py`, all deleted) and football-data.co.uk's own bookmaker-odds columns (no longer
+    # parsed at all — see `store_matches`) were removed as redundant with it / replaced by it.
+    # Discovery is cheap and safe to run on every ingest; the actual hour-by-hour tick backfill is
+    # deliberately NOT run here (a 1-2 year backfill is thousands of ~100MB files) — see
+    # `ingest_pmxt_orderbook_range` / the `pitch-edge ingest-pmxt START END` CLI command for that.
+    report["pmxt_soccer_markets"] = ingest_pmxt_soccer_markets(wh)
     if include_players:
         report["transfermarkt_open"] = ingest_transfermarkt_open(wh)
         report["thesportsdb_sweden"] = ingest_thesportsdb_sweden(wh)
@@ -662,7 +756,6 @@ def ingest_everything(
     # for the life of this project (every run returns 0 rows, see `ingest_club_elo`) and
     # API-Football's free tier (100 requests/day) never returned usable data either. Both
     # functions are still defined and callable directly if a working replacement is found later.
-    report["odds_api"] = ingest_odds_api(wh)
     report["espn_soccer_data"] = ingest_espn_soccer_data(wh)
     return report
 

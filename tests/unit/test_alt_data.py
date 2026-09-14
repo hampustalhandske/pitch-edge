@@ -8,7 +8,6 @@ import responses
 from pitch_edge.data.alt.audio import extract_momentum_features
 from pitch_edge.data.alt.news import NewsScanner, sentiment_velocity
 from pitch_edge.data.alt.opensky import OpenSkySource
-from pitch_edge.data.alt.polymarket import PolymarketSource
 from pitch_edge.data.alt.referee import referee_features
 from pitch_edge.data.alt.travel import fatigue_index, haversine_km, rest_and_congestion, travel_distance
 from pitch_edge.data.alt.venues import VenueGeocoder
@@ -93,22 +92,8 @@ def test_bluesky_403_degrades_to_empty(tmp_path):
     assert NewsScanner(cache_dir=tmp_path).fetch_bluesky("x").empty
 
 
-# --------------------------------------------------------------- polymarket
-def test_polymarket_parse_markets():
-    payload = [
-        {
-            "id": "1",
-            "question": "Will Arsenal win the EPL?",
-            "slug": "a",
-            "outcomes": '["Yes","No"]',
-            "outcomePrices": '["0.25","0.75"]',
-            "volumeNum": 1000,
-            "endDate": "2025-05-25T00:00:00Z",
-        },
-        {"id": "2", "question": "bad", "outcomes": '["Yes"]', "outcomePrices": '["1.0"]'},
-    ]
-    df = PolymarketSource.parse_markets(payload)
-    assert len(df) == 2 and df.loc[0, "decimal_odds"] == 4.0
+# Polymarket live-snapshot connector was removed (see `data/alt/pmxt_archive.py`); its
+# coverage is tested in `tests/unit/test_pmxt_archive.py`.
 
 
 @responses.activate

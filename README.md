@@ -29,6 +29,9 @@ uv run pitch-edge ask "top 4 bets"                 # the only Q&A entrypoint (ne
 uv run pitch-edge ask "Liverpool vs Arsenal"       # --as-of YYYY-MM-DD to answer as of a specific date;
 uv run pitch-edge ask "what's on 2024-03-16"       # default: the most recent real closing-odds date
 uv run pitch-edge ablation | backtest | rag-eval | health | export
+uv run pitch-edge ingest-pmxt <start> <end>   # backfill real Polymarket order-book ticks (PMXT archive)
+uv run pitch-edge map-pmxt                    # join those markets onto our own matches/match_id
+uv run pitch-edge backtest-timing             # does timing entry on model/market disagreement pay off?
 ```
 
 `PITCH_EDGE_LLM_PROVIDER=groq` (with `GROQ_CLOUD_API_KEY` set, see `API_KEYS.md`) swaps every `ask`-agent LLM call from local Ollama to [Groq](https://console.groq.com)'s free tier — a real recurring daily quota (1,000 requests/day, 200k tokens/day on the default `openai/gpt-oss-20b`), confirmed several times faster and equally structured-output-reliable than an 8B local model, with no `ollama serve` needed at all.
@@ -48,33 +51,40 @@ flowchart LR
     SB[StatsBomb Open Data<br/>events]
     ESPN[ESPN soccer data]
     ALT[weather · travel · referee<br/>news EN/SV · Wikipedia attention]
-    PM[Polymarket · Kalshi]
-    ODDS[The Odds API<br/>live 1X2 quotes]
+    PMXT[Polymarket order-book archive<br/>PMXT hourly ticks]
   end
   Sources --> HTTP[CachedHttpClient<br/>throttle · disk cache · robots · circuit breaker]
   HTTP --> WH[(DuckDB warehouse<br/>+ Parquet lake)]
+  PMXT --> MAP[pmxt_match_map<br/>Polymarket condition_id -> match_id]
+  WH --> MAP
   WH --> FS[Feature store<br/>Elo · form · rotation · referee · weather · travel]
   FS --> M1[Dixon-Coles per league]
-  FS --> M2[GBDT ± market, ± confirmed lineups]
-  FS --> M3[Lightning Transformer]
+  FS --> M2[GBDT, no market]
+  FS --> M3[Stochastic strength<br/>Ornstein-Uhlenbeck + Monte Carlo]
+  FS --> M4[Lightning Transformer]
+  FS --> M5[Sentiment-only<br/>news signal isolated]
   M1 & M2 & M3 --> BT[Walk-forward backtester<br/>no-vig edge · Kelly · CLV · calibration · ablation]
+  M2 & M3 & MAP --> TT[Tick-timing backtest<br/>entry-policy comparison vs real Polymarket ticks]
   BT --> SL[Circumstance-sliced evidence<br/>league/referee/rest/travel/weather · min-n + FDR · checkpointed]
   WH & SL --> RAG[LangChain hybrid RAG<br/>Chroma ∪ BM25 → RRF → rerank]
-  RAG & SL --> ASK[ask LangGraph agent<br/>parse_intent → gather (deterministic) → judge (tool-calling)]
+  RAG & SL & MAP --> ASK[ask LangGraph agent<br/>parse_intent → gather (deterministic) → judge (tool-calling)]
   ASK --> UI[NiceGUI dashboard · one page · a question box]
 ```
 
 ## Models
 
-One `MatchModel` interface (`fit`, `predict_proba`, `card`), identical walk-forward folds for all of them:
+One `MatchModel` interface (`fit`, `predict_proba`, `card`), identical walk-forward folds for all of them.
+Five genuinely different approaches, not variations on one — and **no market-odds feature on any of
+them**: there's no live-odds feed, so a historical bookmaker-odds column would just be bias the live `ask`
+path can never actually see.
 
 | Model | What it is |
 |---|---|
 | `dixon_coles` | bivariate Poisson + τ correction, exponential decay, one bounded MLE fit per league |
-| `gbdt` | histogram GBDT (LightGBM if installed, else scikit-learn HGB) on the feature store |
-| `gbdt_mkt` | same + *early* (never closing) no-vig market probabilities |
-| `gbdt_squadval` / `gbdt_mkt_squadval` | same recipe + confirmed-lineup squad value / missing-star-value features |
+| `gbdt` | histogram GBDT (LightGBM if installed, else scikit-learn HGB) on the agreed feature set (Elo, form, rest/travel/fatigue, referee, weather, news sentiment) |
+| `stochastic_strength` | team strength as a mean-reverting Ornstein-Uhlenbeck process on Elo; Monte Carlo simulates strength realizations and averages the resulting outcome probabilities — the quant-finance stochastic-process family (Vasicek-style), estimated by closed-form method-of-moments, no numerical optimizer |
 | `transformer_sequence` | PyTorch **Lightning** `TransformerEncoder` over each team's recent match sequence |
+| `sentiment_only` | multinomial logistic regression on *only* news sentiment/injury-item features — isolates whether that signal carries real edge on its own, rather than hiding it inside a bigger model; falls back to base rates when no news signal exists yet for a fixture |
 
 Isotonic calibration is fit per outcome on realised past folds only. Model cards live in
 `data/backtest/main/model_card_*.json` (local; `reports/main/CASE_STUDY.md` is the public write-up).
@@ -88,6 +98,12 @@ Monte Carlo drawdown, per-bet Sharpe. Every run writes a one-page `reports/<labe
 automatically; the full per-division/per-strategy breakdown, a feature-group ablation, and
 circumstance-sliced evidence (`slice_evidence.csv` — see `backtest/slices.py`) land in
 `data/backtest/<label>/` (local, gitignored). Losing strategies are published as-is.
+
+`pitch-edge backtest-timing` is a second, real-tick backtest over Polymarket's own order-book prices
+(`data/alt/pmxt_archive.py` + `pmxt_match_map` join, `odds/providers.py::PolymarketOddsProvider`) — instead
+of one open/close price pair per match, it compares **entry policies** (bet on the first tick, on the first
+tick where the model and market disagree by ≥`edge_threshold`, or on the last tick before kickoff) ranked
+by Sharpe ratio, the standard risk-adjusted metric for comparing trading strategies rather than raw ROI.
 
 ## RAG
 
@@ -111,11 +127,14 @@ most recent real closing-odds date by default; there is no live-odds feed today,
   required), fits every model fresh on data strictly before `as_of` (nothing in this project persists
   fitted weights, so this is a real refit every time, not a cache lookup), computes each fixture's no-vig
   market edge, and picks which model to trust per fixture from real backtest evidence matching that
-  fixture's own circumstances (`backtest/slices.py::select_trusted_model`) — never an LLM guess.
+  fixture's own circumstances (`backtest/slices.py::select_trusted_model`) — never an LLM guess. For "top N
+  bets" specifically, a fixture with no mapped real Polymarket market (`pmxt_match_map`) is dropped
+  outright rather than falling back to a bet recommendation with no real market to time an entry against.
 - **`judge`** — a bounded, tool-calling react agent (`agents/evidence_tools.py`: `get_model_predictions`,
-  `get_backtest_evidence`, `search_context`, each argument-validated before touching any data) that
-  narrates the batch `gather` already computed, with one bounded reflection retry if its own citations
-  don't check out (`rag/generate.py::verify_citations`). It never computes a probability or an edge itself.
+  `get_backtest_evidence`, `get_price_history` (real Polymarket ticks, if the fixture has one mapped),
+  `search_context`, each argument-validated before touching any data) that narrates the batch `gather`
+  already computed, with one bounded reflection retry if its own citations don't check out
+  (`rag/generate.py::verify_citations`). It never computes a probability or an edge itself.
 
 ## Dashboard
 
@@ -151,8 +170,9 @@ src/pitch_edge/
                           pipeline entrypoint, APScheduler jobs
   cloud/sync.py            optional GCS + BigQuery mirror
   dashboard/                web.py (NiceGUI, one page), theme.py (dark palette)
-  cli.py                   ingest | features | backtest | ablation | ask | rag-eval | artifacts |
-                          health | export | refresh | serve | schedule | setup
+  cli.py                   ingest | ingest-pmxt | map-pmxt | features | backtest | backtest-timing |
+                          ablation | ask | rag-eval | artifacts | health | export | refresh | serve |
+                          schedule | setup
 scripts/                  restartable long-run stage scripts (see `scripts/README.md`)
 deploy/                    Dockerfile, Cloud Run / Scheduler commands
 tests/                     pytest unit + integration tests, network mocked

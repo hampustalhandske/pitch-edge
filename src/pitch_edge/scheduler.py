@@ -1,7 +1,6 @@
 """Local scheduler (APScheduler). Phase 3 replaces this with Cloud Scheduler + Cloud Run jobs.
 
-Jobs: nightly data refresh + backtest, hourly news/prediction-market snapshots,
-5-minute odds snapshots when a live odds provider is configured. Every job
+Jobs: nightly data refresh + backtest, hourly news/prediction-market discovery. Every job
 only *records* data or proposals; the approval gate is untouched.
 """
 
@@ -14,9 +13,8 @@ from apscheduler.schedulers.blocking import BlockingScheduler
 
 from pitch_edge.config import get_settings
 from pitch_edge.data.ingest import (
-    ingest_kalshi,
     ingest_news,
-    ingest_polymarket,
+    ingest_pmxt_soccer_markets,
     ingest_referee_announcements,
     ingest_wikipedia_attention,
 )
@@ -26,12 +24,13 @@ logger = logging.getLogger(__name__)
 
 
 def job_news_and_markets() -> None:
-    """Hourly: news, both prediction-market venues (the snapshot history the lead-lag test needs),
-    referee-appointment pages (announcement timestamps) and recent Wikipedia pageviews."""
+    """Hourly: news, the Polymarket soccer-market dim table (see `pmxt_archive.py` — the old
+    live-snapshot `polymarket`/`kalshi` jobs were removed, replaced by the PMXT archive
+    backfill, which runs separately via `scripts/stage_pmxt_backfill.py`), referee-appointment
+    pages (announcement timestamps) and recent Wikipedia pageviews."""
     with Warehouse(get_settings().db_path) as wh:
         ingest_news(wh)
-        ingest_polymarket(wh)
-        ingest_kalshi(wh)
+        ingest_pmxt_soccer_markets(wh)
         ingest_referee_announcements(wh)
         ingest_wikipedia_attention(wh, recent_days=14)
 

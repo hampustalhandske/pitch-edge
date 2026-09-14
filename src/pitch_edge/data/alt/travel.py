@@ -44,7 +44,7 @@ def rest_and_congestion(matches: pd.DataFrame) -> pd.DataFrame:
         n14 = np.array([((dates < d) & (dates >= d - np.timedelta64(14, "D"))).sum() for d in dates])
         return pd.DataFrame({"matches_last_7d": n7, "matches_last_14d": n14}, index=grp.index)
 
-    tr = long.groupby("team", group_keys=False)[["date"]].apply(trailing)
+    tr = pd.concat([trailing(grp) for _, grp in long.groupby("team", sort=False)])
     long = long.join(tr)
 
     home = long[long["is_home"] == 1].set_index("match_id")[["rest_days", "matches_last_7d", "matches_last_14d"]]

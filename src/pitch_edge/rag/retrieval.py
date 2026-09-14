@@ -96,11 +96,9 @@ class HybridRetriever:
         if dense:
             try:
                 from langchain_chroma import Chroma
-                from langchain_huggingface import HuggingFaceEmbeddings
 
-                emb = HuggingFaceEmbeddings(
-                    model_name=embedding_model or settings.embedding_model, model_kwargs={"device": "cpu"}
-                )
+                model_name = embedding_model or settings.embedding_model
+                emb = self._build_embeddings(model_name, settings.hf_token)
                 self._vs = Chroma(
                     collection_name=collection,
                     embedding_function=emb,
@@ -120,6 +118,25 @@ class HybridRetriever:
             except Exception as exc:  # noqa: BLE001
                 logger.warning("Cross-encoder unavailable (%s); skipping rerank", exc)
                 self._reranker = None
+
+    @staticmethod
+    def _build_embeddings(model_name: str, hf_token: str | None):
+        """HF's hosted Inference API when a token is configured (offloads embedding compute off
+        this machine); falls back to local CPU sentence-transformers otherwise or if the API call
+        fails (cold model, rate limit, network) — confirmed live, not just constructed, before
+        committing to it, since a serverless endpoint can fail only at call time."""
+        if hf_token:
+            try:
+                from langchain_huggingface import HuggingFaceEndpointEmbeddings
+
+                emb = HuggingFaceEndpointEmbeddings(model=model_name, huggingfacehub_api_token=hf_token)
+                emb.embed_query("warmup")
+                return emb
+            except Exception as exc:  # noqa: BLE001
+                logger.info("HF Inference API embeddings unavailable (%s); falling back to local CPU", exc)
+        from langchain_huggingface import HuggingFaceEmbeddings
+
+        return HuggingFaceEmbeddings(model_name=model_name, model_kwargs={"device": "cpu"})
 
     # ----------------------------------------------------------------- state
     def _load_existing_into_bm25(self) -> None:

@@ -19,7 +19,6 @@ the two cannot drift. Keys are handled in the terminal only; the dashboard never
 ```bash
 # .env  (never commit this file)
 API_FOOTBALL_KEY=
-ODDS_API_KEY=
 EVERYSPORT_API_KEY=
 ANTHROPIC_API_KEY=
 ```
@@ -40,17 +39,7 @@ No key here can place a bet or move money; there is no bookmaker/exchange accoun
 | League ids wired | E0 39 · D1 78 · SP1 140 · I1 135 · F1 61 · N1 88 · P1 94 · SWE1 113 · SWE2 114 |
 | Budget note | responses are disk-cached, so the 100/day is spent only on new fixtures; ~2 leagues of injuries + lineups per day fits |
 
-## 2. The Odds API — live pre-match odds from real bookmakers
-
-| | |
-|---|---|
-| Env var | `ODDS_API_KEY` |
-| Sign-up | https://the-odds-api.com (free plan: 500 requests/month, no card) |
-| Connector | **not written yet** — one class behind `pitch_edge.odds.base.OddsProvider`; ~1 hour of work once a key exists |
-| Unlocks | replaces the *labelled synthetic* Elo-derived quotes in the signal pipeline with real soft-book prices (Bet365, Unibet, Pinnacle where licensed…), enables the cross-book **steam detector** (`pitch_edge.odds.steam`) on live snapshots, gives the **lead-lag test** (`pitch_edge.odds.leadlag`) a bookmaker leg next to Kalshi/Polymarket, and lets the scheduler store real pre-match → closing sequences for future CLV |
-| Budget note | 500/month ≈ one snapshot of 5 leagues every ~7 hours; the scheduler cadence is configurable |
-
-## 3. Everysport — Swedish football below Allsvenskan
+## 2. Everysport — Swedish football below Allsvenskan
 
 | | |
 |---|---|
@@ -59,7 +48,7 @@ No key here can place a bet or move money; there is no bookmaker/exchange accoun
 | Connector | `pitch_edge.data.sources.everysport.EverysportSource` — done, tested, off until the key exists |
 | Unlocks | results and fixtures for Superettan, Ettan, Division 2/3 — deeper Swedish coverage than openfootball/TheSportsDB; the leagues where local information is thinnest and the thesis is most plausible |
 
-## 4. Anthropic — Claude as the RAG explainer
+## 3. Anthropic — Claude as the RAG explainer
 
 | | |
 |---|---|
@@ -69,7 +58,7 @@ No key here can place a bet or move money; there is no bookmaker/exchange accoun
 | Unlocks | a last-resort fallback for `rag/generate.py` if the configured provider (Ollama or Groq) is unreachable (dropped if a single figure fails the citation check). The LLM never produces a probability; every number is quoted from already-computed evidence |
 | Cost note | one short answer ≈ a few thousand input tokens; the system prompt is cached |
 
-## 5. Groq Cloud — a free, faster alternative to local Ollama
+## 4. Groq Cloud — a free, faster alternative to local Ollama
 
 | | |
 |---|---|

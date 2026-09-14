@@ -55,6 +55,44 @@ def ingest(
         rprint(f"[bold]matches:[/bold] {wh.count('matches'):,}  [bold]odds rows:[/bold] {wh.count('odds'):,}")
 
 
+@app.command("ingest-pmxt")
+def ingest_pmxt(
+    start: str = typer.Argument(..., help="First hour to backfill, YYYY-MM-DD or YYYY-MM-DDTHH"),
+    end: str = typer.Argument(..., help="Last hour to backfill (inclusive), same format as START"),
+    discover_only: bool = typer.Option(False, help="Only refresh dim_soccer_markets, skip the hourly backfill"),
+) -> None:
+    """Backfill the PMXT Polymarket orderbook archive for soccer markets over [START, END].
+
+    Restartable: run under `nohup caffeinate -i` for a multi-year range (thousands of hourly
+    files) — killing and re-running this command never re-downloads an hour already ingested
+    (see `ingest_pmxt_orderbook_range`). Always run `--discover-only` first, or let this command
+    do it (it always refreshes `dim_soccer_markets` before backfilling), since the hourly filter
+    depends on it.
+    """
+    from pitch_edge.data.ingest import ingest_pmxt_orderbook_range, ingest_pmxt_soccer_markets
+
+    with _wh() as wh:
+        n_markets = ingest_pmxt_soccer_markets(wh)
+        rprint(f"dim_soccer_markets: +{n_markets} new (total {wh.count('dim_soccer_markets'):,})")
+        if discover_only:
+            return
+        report = ingest_pmxt_orderbook_range(wh, pd.Timestamp(start).to_pydatetime(), pd.Timestamp(end).to_pydatetime())
+        fetched = {h: n for h, n in report.items() if n}
+        rprint(f"backfilled {len(fetched)}/{len(report)} hours with new rows; pmxt_orderbook total: {wh.count('pmxt_orderbook'):,}")
+
+
+@app.command("map-pmxt")
+def map_pmxt() -> None:
+    """Recompute pmxt_match_map (Polymarket condition_id -> our match_id/outcome_side) from
+    whatever dim_soccer_markets/matches currently hold. Cheap, idempotent, no network calls —
+    safe to re-run any time either table grows."""
+    from pitch_edge.data.ingest import build_pmxt_match_map
+
+    with _wh() as wh:
+        build_pmxt_match_map(wh)
+        rprint(f"pmxt_match_map: {wh.count('pmxt_match_map'):,} rows")
+
+
 @app.command()
 def features(min_date: str = "2015-07-01", leagues: str = "") -> None:
     """Build and persist the pre-match feature store."""
@@ -72,14 +110,14 @@ def backtest(
     min_date: str = "2015-07-01",
     leagues: str = "",
     models: str = typer.Option(
-        "dixon_coles,gbdt,gbdt_mkt,gru_sequence",
-        help="Comma-separated model names (also: transformer_sequence)",
+        "dixon_coles,gbdt,stochastic_strength,transformer_sequence,sentiment_only",
+        help="Comma-separated model names",
     ),
     edge: float = 0.03,
     retrain_days: int = 30,
     label: str = "main",
 ) -> None:
-    """Walk-forward backtest with CLV / Kelly / calibration; writes reports/<label>/REPORT.md."""
+    """Walk-forward backtest with CLV / Kelly / calibration; writes reports/<label>/CASE_STUDY.md."""
     from pitch_edge.backtest.engine import WalkForwardConfig
     from pitch_edge.backtest.report import results_table
     from pitch_edge.models import available_models
@@ -99,12 +137,36 @@ def backtest(
         _print_df(results_table(results).round(4), "Backtest summary")
 
 
+@app.command("backtest-timing")
+def backtest_timing(
+    edge_threshold: float = 0.03,
+    retrain_days: int = 30,
+    label: str = "pmxt_timing",
+) -> None:
+    """Tick-timing backtest over real Polymarket order-book prices: does entering when the model
+    and the live market disagree beat betting the first or last available price? Requires
+    `pitch-edge map-pmxt` to have run first. Writes data/backtest/<label>/tick_timing_{bets,summary}.csv."""
+    from pitch_edge.backtest.tick_timing import TickTimingConfig, run_tick_timing_backtest
+
+    with _wh() as wh:
+        result = run_tick_timing_backtest(wh, TickTimingConfig(edge_threshold=edge_threshold, retrain_every_days=retrain_days))
+        if result["summary"].empty:
+            rprint("[red]no bets placed — check pmxt_match_map/pmxt_orderbook coverage[/red]")
+            raise typer.Exit(1)
+        out_dir = get_settings().backtest_dir / label
+        out_dir.mkdir(parents=True, exist_ok=True)
+        result["bets"].to_csv(out_dir / "tick_timing_bets.csv", index=False)
+        result["summary"].to_csv(out_dir / "tick_timing_summary.csv", index=False)
+        _print_df(result["summary"].round(4), "Tick-timing backtest (ranked by Sharpe)")
+
+
 def _ask_models() -> list:
     """Fast models only — the `ask` agent fits fresh per question, so a slow sequence model would
-    make an interactive question take minutes instead of seconds."""
-    from pitch_edge.models import DixonColesMatchModel, GBDTMatchModel
+    make an interactive question take minutes instead of seconds. No market-odds model: there's no
+    live-odds feed, so a historical market column would just be bias on the live `ask` path."""
+    from pitch_edge.models import default_models
 
-    return [DixonColesMatchModel(), GBDTMatchModel(include_market=False), GBDTMatchModel(include_market=True)]
+    return default_models()
 
 
 @app.command()
@@ -131,7 +193,7 @@ def ask(
         slice_path = get_settings().backtest_dir / "main" / "slice_evidence.csv"
         slice_evidence = pd.read_csv(slice_path) if slice_path.exists() else pd.DataFrame()
         index = build_rag_index(wh)
-        graph = build_qa_graph(features, slice_evidence, index, _ask_models())
+        graph = build_qa_graph(features, slice_evidence, index, _ask_models(), wh=wh)
         state = ask_question(graph, question, cutoff)
 
     rprint(f"[dim]as of {cutoff.date()}[/dim]\n")

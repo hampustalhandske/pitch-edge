@@ -5,7 +5,6 @@ import pandas as pd
 import pytest
 import responses
 
-from pitch_edge.data.alt.kalshi import KalshiSource, is_football_series
 from pitch_edge.data.alt.news import NewsScanner
 from pitch_edge.data.sources.openfootball import OpenFootballSource, parse_openfootball_txt
 from pitch_edge.data.sources.thesportsdb import TheSportsDBSource
@@ -54,60 +53,8 @@ def test_fetch_sweden_validates_played_rows(tmp_path):
     assert df["match_id"].is_unique
 
 
-def test_kalshi_series_filter_and_parse():
-    assert is_football_series("KXEPLGAME") and is_football_series("KXLIGAMXSCORE")
-    assert not is_football_series("KXNFLPROBOWL") and not is_football_series("KXNCAAFTEAMINT")
-    markets = [
-        {
-            "ticker": "KXEPLGAME-26SEP20FULMUN-TIE",
-            "event_ticker": "KXEPLGAME-26SEP20FULMUN",
-            "title": "Tie is the result",
-            "yes_bid_dollars": "0.1800",
-            "yes_ask_dollars": "0.7300",
-            "volume_fp": "12.00",
-            "open_interest_fp": "3.00",
-            "close_time": "2026-09-22T21:30:00Z",
-            "yes_sub_title": "Tie",
-            "rules_primary": "If Tie ...",
-        },
-        {"ticker": "OLD-STYLE", "title": "old cents", "yes_bid": 40, "yes_ask": 44, "volume": 5},
-        {"ticker": "NOPRICE", "title": "no price"},
-    ]
-    df = KalshiSource.parse_markets(markets, "KXEPLGAME")
-    assert len(df) == 2
-    tie = df.iloc[0]
-    assert tie["outcome"] == "Tie" and abs(tie["probability"] - 0.455) < 1e-9 and tie["spread"] == pytest.approx(0.55)
-    assert df.iloc[1]["probability"] == pytest.approx(0.42) and df.iloc[1]["venue"] == "kalshi"
-
-
-@responses.activate
-def test_kalshi_fetch_football_markets(tmp_path):
-    responses.add(
-        responses.GET,
-        "https://api.elections.kalshi.com/trade-api/v2/series",
-        json={"series": [{"ticker": "KXEPLGAME", "title": "EPL game"}, {"ticker": "KXNFLGAME", "title": "NFL"}]},
-    )
-    responses.add(
-        responses.GET,
-        "https://api.elections.kalshi.com/trade-api/v2/markets",
-        json={
-            "markets": [
-                {
-                    "ticker": "KXEPLGAME-X-ARS",
-                    "title": "Arsenal wins",
-                    "yes_bid_dollars": "0.60",
-                    "yes_ask_dollars": "0.62",
-                    "yes_sub_title": "Arsenal",
-                }
-            ]
-        },
-    )
-    df = KalshiSource(cache_dir=tmp_path).fetch_football_markets()
-    assert (
-        len(df) == 1
-        and df.iloc[0]["series"] == "KXEPLGAME"
-        and df.iloc[0]["decimal_odds"] == pytest.approx(1.639, abs=1e-3)
-    )
+# Kalshi/Polymarket live-snapshot connectors were removed (see `data/alt/pmxt_archive.py`);
+# their coverage is tested in `tests/unit/test_pmxt_archive.py`.
 
 
 @responses.activate

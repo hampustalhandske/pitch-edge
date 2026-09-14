@@ -24,9 +24,11 @@ def make_evidence_tools(
     index: VectorIndex,
     as_of: pd.Timestamp,
     valid_models: list[str],
+    live_market: dict[str, dict] | None = None,
 ) -> list:
     valid_model_set = set(valid_models)
     valid_dim_set = set(SLICE_DIMENSIONS)
+    live_market = live_market or {}
 
     @tool
     def get_model_predictions(match_id: str) -> str:
@@ -63,13 +65,37 @@ def make_evidence_tools(
         )
 
     @tool
+    def get_price_history(match_id: str) -> str:
+        """The most recent real Polymarket no-vig price for this fixture (strictly before this
+        question's as-of time), and how many ticks were seen. Returns 'no live market data' if
+        this fixture has no mapped Polymarket market or no trades yet."""
+        m = live_market.get(match_id)
+        if not m:
+            return "no live market data for this fixture"
+        return (
+            f"Polymarket, {m['n_ticks']} ticks, latest at {m['latest_ts']}: "
+            f"p_home={m['p_home']:.3f} p_draw={m['p_draw']:.3f} p_away={m['p_away']:.3f}"
+        )
+
+    as_of_str = str(as_of.date())
+
+    @tool
     def search_context(query: str) -> str:
         """Search retrieved news/match/prediction context for this question. `query` is truncated
-        to a short phrase."""
+        to a short phrase. Documents dated on/after this question's as-of date are dropped —
+        same client-side post-filter as `rag/fixture_context.py::gather_fixture_context` (the
+        `gather` node's own RAG lookup), applied here too since this tool previously had none,
+        meaning `judge` could otherwise be handed a real future-dated match report."""
         q = query[:MAX_QUERY_CHARS]
-        hits = index.query(q, k=MAX_SEARCH_K)
-        if not hits:
+        # Over-fetch since the as_of filter below may drop some hits.
+        hits = index.query(q, k=MAX_SEARCH_K * 3)
+        kept = [
+            (doc, score)
+            for doc, score in hits
+            if not any(doc.metadata.get(key, "") >= as_of_str for key in ("date", "published_at") if doc.metadata.get(key))
+        ][:MAX_SEARCH_K]
+        if not kept:
             return "no matching documents"
-        return "\n".join(f"[{doc.doc_id}] {doc.text[:400]}" for doc, _score in hits)
+        return "\n".join(f"[{doc.doc_id}] {doc.text[:400]}" for doc, _score in kept)
 
-    return [get_model_predictions, get_backtest_evidence, search_context]
+    return [get_model_predictions, get_backtest_evidence, get_price_history, search_context]

@@ -24,9 +24,18 @@ def real_odds_mask(df: pd.DataFrame) -> pd.Series:
     return df[list(REAL_ODDS_COLUMNS)].notna().all(axis=1)
 
 
-def top_bets_candidates(features: pd.DataFrame, as_of: pd.Timestamp, window_days: int = 14) -> pd.DataFrame:
-    """Fixtures in `[as_of, as_of + window_days)` with a real early Pinnacle quote."""
+def top_bets_candidates(
+    features: pd.DataFrame, as_of: pd.Timestamp, window_days: int = 14, pmxt_match_ids: set[str] | None = None
+) -> pd.DataFrame:
+    """Fixtures in `[as_of, as_of + window_days)`. A real bet recommendation needs a real market
+    to time an entry against — Polymarket now, not the old football-data.co.uk Pinnacle quote
+    (that archive's coverage stops in Jan 2026, before Polymarket data starts, so requiring both
+    would always return nothing). When `pmxt_match_ids` is given, only fixtures mapped in
+    `pmxt_match_map` qualify; without it (no warehouse wired in), falls back to the old
+    Pinnacle-quote gate so this function still degrades sanely for callers that predate PMXT."""
     window = filter_window(features, as_of, window_days)
+    if pmxt_match_ids is not None:
+        return window[window["match_id"].isin(pmxt_match_ids)].copy()
     return window[real_odds_mask(window)].copy()
 
 
@@ -88,4 +97,30 @@ def market_edges(fixtures: pd.DataFrame, predictions: pd.DataFrame) -> pd.DataFr
         edge = compute_edge({o: r[f"p_{o}"] for o in OUTCOMES}, h_odds, d_odds, a_odds)
         for outcome, stats in edge.items():
             rows.append({"match_id": r["match_id"], "model": r["model"], "outcome": outcome, **stats})
+    return pd.DataFrame(rows)
+
+
+def pmxt_market_edges(predictions: pd.DataFrame, live_market: dict[str, dict]) -> pd.DataFrame:
+    """Same shape as `market_edges`, but priced against real Polymarket no-vig probabilities
+    (`live_market`, from `PolymarketOddsProvider` ticks strictly before `as_of`) instead of the
+    old Pinnacle quote — the real market this project actually times entries against now."""
+    rows = []
+    for _, r in predictions.iterrows():
+        m = live_market.get(r["match_id"])
+        if not m:
+            continue
+        for outcome in OUTCOMES:
+            model_p = float(r[f"p_{outcome}"])
+            market_p = float(m[f"p_{outcome}"])
+            rows.append(
+                {
+                    "match_id": r["match_id"],
+                    "model": r["model"],
+                    "outcome": outcome,
+                    "model_probability": model_p,
+                    "market_probability": market_p,
+                    "edge": model_p - market_p,
+                    "decimal_odds": 1.0 / market_p if market_p > 0 else float("nan"),
+                }
+            )
     return pd.DataFrame(rows)

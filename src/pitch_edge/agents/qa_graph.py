@@ -32,7 +32,7 @@ from pydantic import BaseModel, Field
 from pitch_edge.agents.evidence_tools import make_evidence_tools
 from pitch_edge.agents.llm import get_llm_for
 from pitch_edge.agents.qa_context import structure_context
-from pitch_edge.agents.qa_data import market_edges, resolve_fixture, run_models, top_bets_candidates
+from pitch_edge.agents.qa_data import market_edges, pmxt_market_edges, resolve_fixture, run_models, top_bets_candidates
 from pitch_edge.backtest.slices import fixture_slice_values, select_trusted_model
 from pitch_edge.models.base import MatchModel
 from pitch_edge.rag.documents import Document
@@ -77,6 +77,7 @@ class QAState(BaseModel):
     edges: list[dict] = Field(default_factory=list)
     trusted: dict[str, str] = Field(default_factory=dict)
     context_docs: dict[str, list[dict]] = Field(default_factory=dict)
+    live_market: dict[str, dict] = Field(default_factory=dict)
     message: str | None = None
     answer: Answer | None = None
     retry_count: int = 0
@@ -192,21 +193,76 @@ def gather(
     models: list[MatchModel],
     top_bets_window_days: int,
     llm=None,
+    wh=None,
 ) -> dict:
     as_of = pd.Timestamp(state.as_of)
     if state.intent == "top_bets":
-        candidates = top_bets_candidates(features, as_of, window_days=top_bets_window_days)
+        # A bet recommendation requires a real Polymarket market to time an entry against — no
+        # PMXT coverage for a fixture means no bet is suggested for it, never a fallback.
+        pmxt_ids: set[str] | None = None
+        if wh is not None:
+            pmxt_ids = (
+                set(wh.query("SELECT DISTINCT match_id FROM pmxt_match_map")["match_id"])
+                if wh.table_exists("pmxt_match_map")
+                else set()
+            )
+        candidates = top_bets_candidates(features, as_of, window_days=top_bets_window_days, pmxt_match_ids=pmxt_ids)
     else:
         row = resolve_fixture(features, as_of, state.home_team or "", state.away_team or "")
         candidates = row if row is not None else features.iloc[0:0]
 
     if candidates.empty:
-        return {"candidates": [], "message": "No fixtures with real market odds were found for this question."}
+        msg = (
+            "No fixtures with a real Polymarket market to trade against were found for this question."
+            if state.intent == "top_bets"
+            else "No fixtures with real market odds were found for this question."
+        )
+        return {"candidates": [], "message": msg}
+
+    # Real Polymarket ticks strictly before as_of, for whichever candidates have one mapped
+    # (pmxt_match_map). Computed before ranking for top_bets: a mapped market with zero real
+    # trades yet before as_of is still not a real market to time an entry against.
+    live_market: dict[str, dict] = {}
+    if wh is not None:
+        from pitch_edge.odds.providers import PolymarketOddsProvider
+        from pitch_edge.odds.utils import no_vig_probabilities
+
+        provider = PolymarketOddsProvider(wh)
+        as_of_naive = as_of.tz_localize(None) if as_of.tzinfo else as_of
+        for match_id in candidates["match_id"]:
+            quotes = [
+                q for q in provider.get_quotes(match_id)
+                if pd.Timestamp(q.timestamp).tz_localize(None) < as_of_naive
+            ]
+            if not quotes:
+                continue
+            latest = quotes[-1]
+            p_home, p_draw, p_away = no_vig_probabilities(latest.home_odds, latest.draw_odds, latest.away_odds)
+            live_market[match_id] = {
+                "n_ticks": len(quotes),
+                "latest_ts": latest.timestamp,
+                # plain floats: LangGraph's checkpointer msgpack-serializes QAState and chokes on
+                # numpy.float64 (real crash confirmed live, not hypothetical)
+                "p_home": float(p_home),
+                "p_draw": float(p_draw),
+                "p_away": float(p_away),
+            }
+
+    if state.intent == "top_bets":
+        # The real bar for a bet: an actual traded price before as_of, not just a mapped market.
+        candidates = candidates[candidates["match_id"].isin(live_market)]
+        if candidates.empty:
+            return {
+                "candidates": [],
+                "message": "Mapped Polymarket markets exist for this window, but none have a real trade yet before this as-of date.",
+            }
 
     # Deterministic and cheap: fit/predict/edge for every candidate in the window, and pick which
     # model to trust per fixture from real backtest evidence. No LLM, no RAG call yet.
     predictions = run_models(features, candidates, as_of, models)
-    edges = market_edges(candidates, predictions)
+    edges = (
+        pmxt_market_edges(predictions, live_market) if state.intent == "top_bets" else market_edges(candidates, predictions)
+    )
     edge_records = edges.to_dict(orient="records")
     model_names = [m.name for m in models]
 
@@ -238,12 +294,18 @@ def gather(
         )
         context_docs[f["match_id"]] = [{"doc_id": d.doc_id, "text": d.text} for d in docs]
 
+    # `live_market` was already computed above (for top_bets, before ranking) or is empty (no wh
+    # or non-top_bets intent) — narrow it to the fixtures that survived ranking for the judge tool.
+    ranked_ids = {f["match_id"] for f in ranked}
+    live_market = {mid: m for mid, m in live_market.items() if mid in ranked_ids}
+
     return {
         "candidates": ranked,
         "predictions": predictions.to_dict(orient="records"),
         "edges": edge_records,
         "trusted": trusted,
         "context_docs": context_docs,
+        "live_market": live_market,
     }
 
 
@@ -282,7 +344,9 @@ def judge(
 
     try:
         agent_llm = llm or get_llm_for("deep")
-        tools = make_evidence_tools(predictions, slice_evidence, index, pd.Timestamp(state.as_of), model_names)
+        tools = make_evidence_tools(
+            predictions, slice_evidence, index, pd.Timestamp(state.as_of), model_names, state.live_market
+        )
         agent = _build_judge_agent(agent_llm, tools)
         result = agent.invoke({"messages": [HumanMessage(prompt)]}, config={"recursion_limit": JUDGE_RECURSION_LIMIT})
         transcript = str(result["messages"][-1].content)
@@ -347,6 +411,7 @@ def build_qa_graph(
     llm=None,
     top_bets_window_days: int = 14,
     checkpointer=None,
+    wh=None,
 ):
     """Compiles the graph above, closing over the fixed environment (`features`, `slice_evidence`,
     `index`, `models`) so `graph.invoke(QAState(question=..., as_of=...))` only needs the
@@ -357,7 +422,7 @@ def build_qa_graph(
     g.add_node("list_fixtures", lambda s: list_fixtures(s, features))
     g.add_node(
         "gather",
-        lambda s: gather(s, features, slice_evidence, index, models, top_bets_window_days, llm=llm),
+        lambda s: gather(s, features, slice_evidence, index, models, top_bets_window_days, llm=llm, wh=wh),
     )
     g.add_node("judge", lambda s: judge(s, pd.DataFrame(s.predictions), slice_evidence, index, model_names, llm=llm))
     g.add_node("cannot_answer", cannot_answer)
