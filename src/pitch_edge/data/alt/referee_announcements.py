@@ -75,7 +75,9 @@ def parse_assignments(text: str, teams: list[str] | None = None, window: int = 4
     if df.empty:
         return df
     df = df.drop_duplicates(["home_team", "away_team", "referee"])
-    df["fixture_key"] = [fixture_key(h, a, d) for h, a, d in zip(df["home_team"], df["away_team"], df["match_date"], strict=True)]
+    df["fixture_key"] = [
+        fixture_key(h, a, d) for h, a, d in zip(df["home_team"], df["away_team"], df["match_date"], strict=True)
+    ]
     return df.reset_index(drop=True)
 
 
@@ -92,8 +94,12 @@ def _resolve_side(raw: str, resolver: TeamNameResolver) -> str:
 class RefereeAnnouncementSource:
     name = "referee_announcements"
 
-    def __init__(self, cache_dir: str | Path | None = None, http: CachedHttpClient | None = None,
-                 sources: dict[str, dict[str, str]] | None = None):
+    def __init__(
+        self,
+        cache_dir: str | Path | None = None,
+        http: CachedHttpClient | None = None,
+        sources: dict[str, dict[str, str]] | None = None,
+    ):
         settings = get_settings()
         self.cache_dir = Path(cache_dir) if cache_dir else settings.raw_dir / "referee_announcements"
         self.http = http or CachedHttpClient(self.cache_dir, min_interval_s=2.0)
@@ -101,7 +107,11 @@ class RefereeAnnouncementSource:
 
     def poll(self, teams: list[str] | None = None, now: datetime | None = None) -> pd.DataFrame:
         """Fetch every configured page (never cached — we need *when* it changed) and parse assignments."""
-        seen_at = pd.Timestamp(now or datetime.now(UTC)).tz_localize(None) if (now is None or now.tzinfo is None) else pd.Timestamp(now).tz_convert(None)
+        seen_at = (
+            pd.Timestamp(now or datetime.now(UTC)).tz_localize(None)
+            if (now is None or now.tzinfo is None)
+            else pd.Timestamp(now).tz_convert(None)
+        )
         frames = []
         for name, cfg in self.sources.items():
             try:
@@ -115,8 +125,16 @@ class RefereeAnnouncementSource:
                 continue
             frames.append(df.assign(source=name, league_code=cfg.get("league_code"), announced_at=seen_at))
         if not frames:
-            return pd.DataFrame(columns=["fixture_key", "home_team", "away_team", "match_date", "referee", "source", "league_code", "announced_at"])
+            return pd.DataFrame(
+                columns=[
+                    "fixture_key",
+                    "home_team",
+                    "away_team",
+                    "match_date",
+                    "referee",
+                    "source",
+                    "league_code",
+                    "announced_at",
+                ]
+            )
         return pd.concat(frames, ignore_index=True)
-
-
-

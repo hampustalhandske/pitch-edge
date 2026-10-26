@@ -161,7 +161,9 @@ def test_select_trusted_model_picks_best_edge_even_if_negative():
             "checkpoint_date": ["2023-01-01", "2023-01-01"],
         }
     )
-    best, matches = select_trusted_model(evidence, {"league_code": "E0"}, ["gbdt", "dixon_coles"], pd.Timestamp("2024-01-01"))
+    best, matches = select_trusted_model(
+        evidence, {"league_code": "E0"}, ["gbdt", "dixon_coles"], pd.Timestamp("2024-01-01")
+    )
     assert best == "dixon_coles"
     assert len(matches) == 2
 

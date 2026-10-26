@@ -4,9 +4,15 @@ market-vs-model edges — all as-of aware, no LLM anywhere in this module.
 A fixture only ever becomes a candidate if it carries a real (non-synthetic) Pinnacle early quote
 (`PSH`/`PSD`/`PSA`) — there is no live-odds feed today, so "upcoming" here always means an already-
 archived historical match being treated as if it were upcoming relative to a past `as_of`.
+
+`annotate_candidates` attaches to each candidate the evidence status of the model that produced
+its number, read from the research ladder summary (`research/summary.py`): a candidate is only a
+*validated edge* when that model maps to a registered hypothesis at or above the display floor.
 """
 
 from __future__ import annotations
+
+from typing import Any
 
 import pandas as pd
 
@@ -14,8 +20,22 @@ from pitch_edge.backtest.as_of import filter_before, filter_window
 from pitch_edge.data.teams import TeamNameResolver
 from pitch_edge.models.base import OUTCOMES, MatchModel
 from pitch_edge.odds.edge import compute_edge
+from pitch_edge.research.summary import BASE_DISPLAY_FLOOR, meets_floor
 
 REAL_ODDS_COLUMNS = ("PSH", "PSD", "PSA")
+
+# The `ask` models (models.default_models) and the registered hypothesis (research/registry/<id>.yaml)
+# whose rung a candidate from that model carries: each model's R7 bet-rule hypothesis (bet the
+# best-edge outcome against the Pinnacle open, scored by CLV against the de-vigged close), the
+# return-kind test of the model-vs-market rule `ask` ranks with. Its probability-kind companion,
+# `outcome-models-<model>-edge-bits-v1`, cannot make a candidate an edge (research/STANDARDS.md L4).
+ASK_MODEL_HYPOTHESES: dict[str, str | None] = {
+    "dixon_coles": "outcome-models-dixon-coles-bet-rule-v1",
+    "gbdt": "outcome-models-gbdt-bet-rule-v1",
+    "stochastic_strength": "outcome-models-stochastic-strength-bet-rule-v1",
+}
+NOT_VALIDATED_LABEL = "model-vs-market disagreement, not a validated edge"
+VALIDATED_LABEL = "validated edge"
 
 
 def real_odds_mask(df: pd.DataFrame) -> pd.Series:
@@ -75,9 +95,7 @@ def run_models(
         m.fit(train)
         probs = m.predict_proba(X)
         for mid, h, d, a in zip(X["match_id"], probs["home"], probs["draw"], probs["away"], strict=True):
-            rows.append(
-                {"match_id": mid, "model": m.name, "p_home": float(h), "p_draw": float(d), "p_away": float(a)}
-            )
+            rows.append({"match_id": mid, "model": m.name, "p_home": float(h), "p_draw": float(d), "p_away": float(a)})
     return pd.DataFrame(rows)
 
 
@@ -124,3 +142,54 @@ def pmxt_market_edges(predictions: pd.DataFrame, live_market: dict[str, dict]) -
                 }
             )
     return pd.DataFrame(rows)
+
+
+def _rung_in(research: dict[str, Any], hypothesis_id: str) -> str | None:
+    for fam in research.get("families", []):
+        for h in fam.get("hypotheses", []):
+            if h.get("id") == hypothesis_id:
+                return str(h.get("rung"))
+    return None
+
+
+def candidate_evidence(
+    model: str | None, research: dict[str, Any], model_hypotheses: dict[str, str | None] | None = None
+) -> dict[str, Any]:
+    """Evidence status of `model` given the ladder summary `research` (`EvidenceSummary.to_dict()`).
+
+    Returns the model, its registered hypothesis id (None when it has none), that hypothesis' rung
+    (`unregistered` / `not in ledger` otherwise), the display floor, whether the candidate counts as a
+    validated edge, a short `status` and the `label` the answer must use for it."""
+    mapping = ASK_MODEL_HYPOTHESES if model_hypotheses is None else model_hypotheses
+    floor = str(research.get("display_floor", BASE_DISPLAY_FLOOR))
+    hypothesis_id = mapping.get(model) if model is not None else None
+    if hypothesis_id is None:
+        rung, status = "unregistered", "no registered evidence / below floor"
+    else:
+        found = _rung_in(research, hypothesis_id)
+        rung = found if found is not None else "not in ledger"
+        status = f"{rung}, {'at or above' if meets_floor(rung, floor) else 'below'} display floor {floor}"
+    validated = hypothesis_id is not None and meets_floor(rung, floor)
+    return {
+        "model": model,
+        "hypothesis_id": hypothesis_id,
+        "rung": rung,
+        "display_floor": floor,
+        "validated_edge": validated,
+        "status": status,
+        "label": VALIDATED_LABEL if validated else NOT_VALIDATED_LABEL,
+    }
+
+
+def annotate_candidates(
+    candidates: list[dict[str, Any]],
+    model_by_match: dict[str, str | None],
+    research: dict[str, Any],
+    model_hypotheses: dict[str, str | None] | None = None,
+) -> list[dict[str, Any]]:
+    """Copies of `candidates` (same order) each with an `evidence` entry from `candidate_evidence` for
+    the model that produced its number (`model_by_match[match_id]`, None when no model did)."""
+    return [
+        {**c, "evidence": candidate_evidence(model_by_match.get(c["match_id"]), research, model_hypotheses)}
+        for c in candidates
+    ]

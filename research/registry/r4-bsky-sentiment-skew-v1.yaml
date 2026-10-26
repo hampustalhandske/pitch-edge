@@ -1,0 +1,43 @@
+id: r4-bsky-sentiment-skew-v1
+family: crowd-attention
+registered_at: 2026-10-21T07:27:37Z
+author: quant-researcher
+question: >
+  Does the skew of a fixed lexicon sentiment in pre-kickoff Bluesky posts about the two clubs (home net sentiment
+  minus away net sentiment, known before decision hour H) predict the DIRECTION of Polymarket's subsequent move
+  toward kickoff, beyond Polymarket's own recent move and price level?
+hypothesis:
+  h1: >
+    Adding the sentiment skew sent_L,home - sent_L,away to the baseline lowers the walk-forward OOS MSE of
+    y = (p_end - p_0)_home - (p_end - p_0)_away: Δ OOS R² > 0 (expected coefficient sign positive: good news for
+    the home club, home price rises)
+  h0: Δ OOS R² <= 0
+  direction: positive
+  disconfirming: 95% match-day block-bootstrap CI of Δ OOS R² includes 0 or is negative
+decision_time: >
+  H = kickoff - h for h = 24..2 hours; features from Polymarket bars known by H and Bluesky posts indexed before H
+  (asserted in r4-common/panel.py).
+universe: as r4-bsky-mention-skew-v1
+window:
+  exploratory: [2026-01-05, 2026-02-28]
+  evaluation:  [2026-03-01, 2026-10-19]
+benchmark: Polymarket's own last pre-kickoff bar (the target end point; hindsight, target only)
+primary_metric: delta_oos_r2
+metric_kind: score
+secondary_metrics: []
+costs: none (predictive measurement of Polymarket price dynamics; no position is taken)
+model: >
+  As r4-bsky-mention-skew-v1 with skew = sent_L,home - sent_L,away, sent_L = (pos_L - neg_L) / (pos_L + neg_L + 2)
+  over the club's posts in [H - L, H); pos/neg = post matches the POSITIVE/NEGATIVE whole-word lists in
+  research/studies/r4-common/lexicon.py (fixed before any aggregation; no LLM, no negation handling).
+grid:
+  lookback_h: [6, 24]
+min_n: 300
+literature_ceiling: >
+  Lexicon sentiment from social media has small, mostly in-sample, predictive power for prices; Δ OOS R² above 0.02
+  is a leakage suspect.
+notes: >
+  Lexicon hit rates over all club-query posts: 2.0% positive, 3.0% negative, so sent_L is 0 for most small-club
+  hours. EXPLORATORY (kickoff 2026-01-20 -> 2026-02-28, not counted): 222 matches, 37 days; in-sample skew
+  coefficient +0.0071 [-0.0002, +0.0127] (L6), +0.0088 [-0.0021, +0.0193] (L24); one pseudo-OOS split Δ OOS R²
+  -0.0009 (L6), +0.0069 (L24).

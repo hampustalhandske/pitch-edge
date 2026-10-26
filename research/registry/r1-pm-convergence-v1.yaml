@@ -1,0 +1,30 @@
+id: r1-pm-convergence-v1
+family: polymarket-efficiency
+registered_at: 2026-10-20T20:45:00Z
+author: quant-researcher
+question: >
+  Does the gap between Polymarket's price and the de-vigged sharp open at kickoff-T predict Polymarket's
+  price move from T to its last pre-kickoff trade (convergence toward the sharp book)?
+hypothesis:
+  h1: OLS slope of move (p_last - p_T) on gap (p_T - q_open), pooled over outcomes, is < 0
+  h0: slope = 0
+  direction: negative
+  disconfirming: CI includes 0 or is positive; or sign flips in 2 of 3 chronological thirds
+decision_time: kickoff - T; open used only if open_known_at <= decision time (rule as r1-pm-gap-trade-v1)
+universe: as r1-pm-gap-trade-v1
+window:
+  exploratory: [2023-09-01, 2025-10-31]
+  evaluation:  [2025-11-01, 2026-10-19]
+benchmark: sharp open (Pinnacle open de-vigged where present, else Betfair Exchange open, booksum <= 1.05)
+primary_metric: ols_slope_move_on_gap
+secondary_metrics: [two_regressor_fit, sharp_move_on_gap, excluding_no_new_trade, by_side]
+costs: none (price-dynamics measurement)
+filters:
+  max_stale_hours: 6
+  max_stale_last_hours: 3
+grid:
+  hours_before_kickoff: [24, 6, 2]
+min_n: 300
+literature_ceiling: >
+  Full convergence is slope -1. Bid-ask bounce in last-trade prices alone produces a negative slope, so a
+  slope near 0 to -0.3 is not distinguishable from microstructure noise without the secondary checks.

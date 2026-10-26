@@ -94,8 +94,10 @@ class StatsBombOpenDataSource(MatchDataSource):
                     "player": (e.get("player") or {}).get("name"),
                     "player_id": (e.get("player") or {}).get("id"),
                     "position": (e.get("position") or {}).get("name"),
-                    "x": loc[0], "y": loc[1],
-                    "pass_end_x": end[0], "pass_end_y": end[1],
+                    "x": loc[0],
+                    "y": loc[1],
+                    "pass_end_x": end[0],
+                    "pass_end_y": end[1],
                     "pass_recipient": recipient.get("name"),
                     "pass_recipient_id": recipient.get("id"),
                     "pass_outcome": (pas.get("outcome") or {}).get("name"),
@@ -106,4 +108,3 @@ class StatsBombOpenDataSource(MatchDataSource):
                 }
             )
         return pd.DataFrame(rows)
-

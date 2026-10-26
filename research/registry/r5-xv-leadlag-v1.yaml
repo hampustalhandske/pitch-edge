@@ -1,0 +1,44 @@
+id: r5-xv-leadlag-v1
+family: cross-venue
+registered_at: 2026-10-20T21:30:53Z
+author: quant-researcher
+question: >
+  Does one venue's hourly price move predict the other's next-hour move (Kalshi vs Polymarket, soccer 1X2),
+  and which venue's price carries information about the Betfair Exchange close that the other lacks?
+hypothesis:
+  h1: >
+    (hourly) the slope of the follower's next-hour move on the leader's current move is > 0;
+    (close) in y = q_close - PM_mid, x = Kalshi_mid - PM_mid at the last hour <= kickoff - 1h, the slope b > 0
+    means Kalshi adds information beyond PM, 1 - b > 0 means PM adds information beyond Kalshi
+  h0: slope (or 1 - b) <= 0
+  direction: positive
+  disconfirming: 95% match-day block-bootstrap CI includes 0 or is negative
+decision_time: >
+  hour H on the hour, 2h <= kickoff - H and H + 1h <= kickoff for the hourly tests (prices known at their
+  hour end); last hour H* <= kickoff - 1h for the close tests
+universe: >
+  as r5-xv-agreement-v1. Hourly tests: (event, side, H) with Kalshi two-sided mids at H - 1h, H, H + 1h and a
+  fresh Polymarket trade in each of those three hours. Close tests: events keyed to football-data with a
+  Betfair Exchange close (power de-vigged, booksum <= 1.05) and a Polymarket book in force at H* (book
+  coverage 2026-04-09 -> 2026-06-10, 2026-09-29), per outcome.
+window:
+  exploratory: [2025-08-01, 2025-12-31]
+  evaluation:  [2026-01-01, 2026-10-19]
+benchmark: Betfair Exchange close (close tests only; hindsight, used as the target)
+primary_metric: ols_slope
+secondary_metrics: []
+costs: none (price-discovery measurement)
+grid:
+  test: [kalshi_leads_pm_hourly, pm_leads_kalshi_hourly, kalshi_adds_info_vs_bf_close, pm_adds_info_vs_bf_close]
+min_n: 300
+literature_ceiling: >
+  Hourly cross-venue lead slopes on liquid markets are small (0 to ~0.3); the close-information slope b lies
+  in [0, 1] when both prices are informative.
+notes: >
+  Known biases, stated in advance: the Kalshi mid is a quote at the end of the hour while the Polymarket
+  price is the last trade inside the hour, which may be earlier, so non-synchronous sampling tilts the hourly
+  tests toward "Kalshi leads" (kalshi_leads_pm_hourly) and toward 0 for pm_leads_kalshi_hourly; Polymarket
+  bid-ask bounce attenuates pm_leads_kalshi_hourly. The close tests use the Polymarket mid because last-trade
+  bounce would bias b upward. Slopes are scored via per-row influence values in run_trial (mean = slope),
+  exact block-bootstrap slope CIs stored beside them; blocks = match-day; 5,000 draws, seed 20261020. The two
+  close tests are complementary (they sum to 1) and are counted as two trials. Exploratory window (labelled exploratory, not counted, 48,552 hourly rows, 113 match-days): kalshi_leads_pm_hourly 0.042 [0.026, 0.078], pm_leads_kalshi_hourly 0.016 [0.008, 0.023]; contemporaneous dP on dK 0.13; Polymarket own-lag slope -0.36 (bounce), Kalshi -0.11. No book data in that window, so the close tests could not be explored.

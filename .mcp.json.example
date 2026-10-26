@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "lakehouse": {
+      "command": "arch",
+      "args": ["-arm64", "uv", "run", "--directory", "${LAKEHOUSE_REPO}", "python", "-m", "api.mcp"]
+    },
+    "edgelab": {
+      "command": "arch",
+      "args": ["-arm64", "${EDGELAB_DIR}/.venv/bin/edgelab", "mcp", "--root", "${EDGELAB_DIR}/strategies", "--runs-root", "${EDGELAB_DIR}/runs/service"]
+    }
+  }
+}

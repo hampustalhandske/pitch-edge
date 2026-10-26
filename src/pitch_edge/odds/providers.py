@@ -91,9 +91,7 @@ class PolymarketOddsProvider(OddsProvider):
         self._wh = wh
 
     def get_quotes(self, match_id: str) -> list[OddsQuote]:
-        markets = self._wh.query(
-            "SELECT condition_id, outcome_side FROM pmxt_match_map WHERE match_id = ?", [match_id]
-        )
+        markets = self._wh.query("SELECT condition_id, outcome_side FROM pmxt_match_map WHERE match_id = ?", [match_id])
         if markets.empty:
             return []
         side_by_condition = dict(zip(markets["condition_id"], markets["outcome_side"], strict=True))

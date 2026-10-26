@@ -199,6 +199,18 @@ class _FakeLocalLLM:
         return _Msg(self._text)
 
 
+def _local_llm_unavailable(monkeypatch):
+    """Make the local (Ollama) backend raise so GroundedGenerator falls through to Claude."""
+
+    class _RaisingLLM:
+        model = "llama3.1:8b"
+
+        def invoke(self, messages):
+            raise RuntimeError("ollama not running")
+
+    monkeypatch.setattr("pitch_edge.agents.llm.get_llm", lambda model=None: _RaisingLLM())
+
+
 def test_local_llm_is_tried_before_claude(monkeypatch):
     """Backend precedence is local-first: a reachable local model must win even when a Claude
     key is also configured, and Claude's client must never be constructed/called in that case."""
@@ -237,6 +249,7 @@ def test_local_llm_failure_falls_back_to_claude(monkeypatch):
 
 
 def test_fable_path_uses_beta_fallbacks_no_thinking_param_and_verifies(monkeypatch):
+    _local_llm_unavailable(monkeypatch)  # local-first: force the Claude path deliberately
     calls = _fake_anthropic(monkeypatch, "Home is favoured at 55.0% [pred:gbdt:m1]; the draw sits at 30%.")
     gen = GroundedGenerator(api_key="test-key")  # default model is claude-fable-5-1
     docs = [Document("pred:gbdt:m1", "Model gbdt: P(home)=55.0%, P(draw)=25.0%.", {"type": "prediction"})]
@@ -249,6 +262,7 @@ def test_fable_path_uses_beta_fallbacks_no_thinking_param_and_verifies(monkeypat
 
 
 def test_opus_path_uses_adaptive_thinking(monkeypatch):
+    _local_llm_unavailable(monkeypatch)
     calls = _fake_anthropic(monkeypatch, "Fine [m].")
     gen = GroundedGenerator(api_key="k", model="claude-opus-5")
     gen.answer("q", [Document("m", "Fine.", {"type": "match"})])
@@ -256,6 +270,7 @@ def test_opus_path_uses_adaptive_thinking(monkeypatch):
 
 
 def test_refusal_falls_back_to_template(monkeypatch):
+    _local_llm_unavailable(monkeypatch)
     _fake_anthropic(monkeypatch, "", stop_reason="refusal")
     ans = GroundedGenerator(api_key="k").answer("q", [Document("m", "Fine.", {"type": "match"})])
     assert ans.backend == "template"

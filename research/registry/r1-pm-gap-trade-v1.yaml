@@ -1,0 +1,42 @@
+id: r1-pm-gap-trade-v1
+family: polymarket-efficiency
+registered_at: 2026-10-20T20:45:00Z
+author: quant-researcher
+question: >
+  Paper strategy: at kickoff-T, buy the Polymarket outcome (yes side) whose all-in cost is below the de-vigged
+  sharp open probability by more than theta, or the complementary no side when PM is too high. Does it beat
+  the de-vigged Betfair Exchange close net of fees and spread?
+hypothesis:
+  h1: mean per-decision CLV log(q_close_side / cost) > 0
+  h0: mean CLV <= 0
+  direction: positive
+  disconfirming: CI includes 0 or lies below; or sign flips in 2 of 3 chronological thirds
+decision_time: kickoff - T for T in grid; the football-data open is used only if open_known_at <= decision time
+point_in_time: >
+  open_known_at = latest Tuesday-or-Friday 18:00 Europe/London strictly before kickoff (football-data
+  notes.txt: odds collected Friday afternoons for weekend games, Tuesday afternoons for midweek games).
+  PM price = last hourly bar with hour_start + 1h <= decision time. Both asserted in code.
+universe: as r1-pm-accuracy-v1, restricted to matches with a sharp open (main football-data leagues)
+window:
+  exploratory: [2023-09-01, 2025-10-31]
+  evaluation:  [2025-11-01, 2026-10-19]
+benchmark: >
+  primary: Betfair Exchange close de-vigged (power, booksum <= 1.05). secondary: last Polymarket trade before
+  kickoff (bar ended by kickoff, last trade at most 3h old).
+fair_value: sharp open = Pinnacle open de-vigged where present, else Betfair Exchange open (booksum <= 1.05)
+primary_metric: clv_log_vs_bf_close
+secondary_metrics: [clv_vs_pm_last, roi_after_fees, dsr, pbo_cscv]
+costs: >
+  cost per share = last trade price (or 1 - price for the no side) + max(bar (high-low)/2, 0.005)
+  + taker fee 0.05 * p * (1 - p)
+filters:
+  max_stale_hours: 6          # traded outcome's last trade at most 6h old at the decision time
+  max_stale_last_hours: 3     # for the PM-last secondary benchmark
+grid:                          # 18 trials
+  hours_before_kickoff: [24, 6, 2]
+  theta: [0.02, 0.04, 0.06]
+  side: [yes, no]
+min_n: 300
+literature_ceiling: >
+  PM vs sharp gaps net of fees are plausible but CLV above +2% per bet over hundreds of bets vs a sharp
+  close is a leakage suspect until audited.

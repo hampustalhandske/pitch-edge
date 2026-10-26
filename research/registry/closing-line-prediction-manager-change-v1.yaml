@@ -1,0 +1,63 @@
+id: closing-line-prediction-manager-change-v1
+family: closing-line-prediction
+registered_at: 2026-10-20T21:05:00Z
+author: quant-researcher
+question: >
+  Does a recent manager appointment (F039), interacted with fixture difficulty, predict the Pinnacle open-to-
+  close move beyond the soft-consensus gap?
+hypothesis:
+  h1: >
+    Adding new_h, new_a = exp(-days since the current manager's appointment / 30) and their products with the
+    team's Pinnacle-open win probability improves OOS prediction of the de-vigged Pinnacle close: mean
+    delta_kl_bits > 0.
+  h0: mean delta_kl_bits <= 0 (the feature group adds nothing to the consensus-gap baseline)
+  direction: positive
+  disconfirming: >
+    95% match-day block-bootstrap CI of mean delta_kl_bits includes 0 or lies below it; or the sign is negative in 2 of 3
+    chronological thirds; or a single division carries it.
+decision_time: >
+  football-data.co.uk pre-closing ('open') snapshot: Friday afternoon for Fri-Mon games, Tuesday afternoon for
+  Tue-Thu games (notes.txt). snapshot_date = that Friday/Tuesday. Every feature uses only information dated
+  strictly before snapshot_date (known by the end of the previous day), asserted in code
+  (features.assert_point_in_time and r3lib.assert_pit: known_at < snapshot_date on every row). This is stricter
+  than the fallback 'kickoff date minus 1 day 12:00 UTC' because a Friday snapshot for a Sunday or Monday game
+  is 2-3 days before kickoff.
+universe: >
+  Matches where both clubs map to Transfermarkt ids (fixture co-occurrence with tm_games domestic-league games:
+  same date +-1 and same score; 353 fd teams, top flights of 11 countries plus promoted/relegated clubs) and
+  have a tm_manager_tenures appointment dated before the snapshot.
+window:
+  exploratory: [2012-07-01, 2019-06-30]
+  evaluation: [2019-07-01, 2025-06-30]
+benchmark: >
+  Pinnacle close de-vigged (power; Shin as the grid's sensitivity) is the target; the comparison model is the R2-Q2
+  consensus-gap baseline re-fit on the same training rows. Post segment 2025-07-01..2026-10-19: Betfair Exchange close.
+primary_metric: delta_kl_bits
+secondary_metrics: [delta_r2_move, delta_ll_result_bits, delta_kl_bits_post_betfair]
+costs: none (prediction of the close, no bet); the strategy hypothesis carries the costs
+grid:
+  devig: [power, shin]
+min_n: 300
+literature_ceiling: >
+  Incremental OOS R^2 of the move above 2 percentage points (three times the whole R2-Q2 baseline R^2 of 0.65%),
+  or a delta_kl above 0.002 bits (half the mean KL between Pinnacle open and close, ~0.004 bits), is a leakage
+  suspect.
+notes: >
+  Target move_o = logit(p_close_o) - logit(p_open_o) per outcome, Pinnacle open and close de-vigged by the
+  grid's method. Baseline = R2-Q2 consensus-gap regression re-fit inside the walk-forward: per-outcome OLS of
+  move_o on [1, g_avg_o, g_max_o] (g_avg = logit p_avg_open - logit p_pin_open; g_max =
+  log(min(max_open/pin_open, 1.5))). Feature model = baseline regressors + the group's columns, outcome-specific
+  coefficients, fitted on the same rows. Walk-forward by season (July-June): fit on all prior seasons, predict
+  the next. Predicted close p_hat proportional to sigmoid(logit p_open + predicted move), renormalised. Code:
+  research/studies/r3-common/{features,r3lib}.py, research/studies/r3-features/run.py. Primary delta_kl_bits per
+  match = KL(p_close || p_hat_base) - KL(p_close || p_hat_model) in bits (log-loss of the close probabilities,
+  improvement over baseline). Secondary: delta_r2_move (per-match (SSE_base - SSE_model)/mean SSE_zero, mean =
+  incremental OOS R^2 of the move), delta_ll_result_bits (log2 p_hat_model(result) - log2 p_hat_base(result)),
+  delta_kl_bits_post_betfair (same as primary on 2025-07-01..2026-10-19 with the de-vigged Betfair Exchange
+  close as target and a model fitted on all Pinnacle seasons). Block bootstrap by match-day, 2000 draws, seed
+  20261020. A group 'passes L2 on the move' (the gate for registering the strategy with that group's model) only
+  if its selected trial passes L2 on delta_kl_bits AND its delta_r2_move 95% CI excludes 0 in the same config.
+  Appointment date = tm_manager_tenures.appointed (local-midnight timestamps converted to calendar dates),
+  known_at = appointment date < snapshot_date. Threat: Transfermarkt may date a tenure from the contract start
+  rather than the announcement; that only makes the feature later-known, never earlier. Exploratory
+  2013/14-2018/19 (n=23,784): delta_kl +5.9e-7 [-1.7e-6, 2.9e-6].

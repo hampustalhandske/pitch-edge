@@ -30,9 +30,12 @@ class OpenMeteoWeather:
 
     def fetch_hourly(self, lat: float, lon: float, start_date: str, end_date: str) -> pd.DataFrame:
         params = {
-            "latitude": round(lat, 4), "longitude": round(lon, 4),
-            "start_date": start_date, "end_date": end_date,
-            "hourly": ",".join(HOURLY_VARS), "timezone": "UTC",
+            "latitude": round(lat, 4),
+            "longitude": round(lon, 4),
+            "start_date": start_date,
+            "end_date": end_date,
+            "hourly": ",".join(HOURLY_VARS),
+            "timezone": "UTC",
         }
         payload = self.http.get_json(ARCHIVE_URL, params=params)
         hourly = payload.get("hourly", {})
@@ -46,9 +49,12 @@ class OpenMeteoWeather:
         """Forecast for one kickoff hour (≤ 16 days ahead); None when unavailable. Never cached."""
         when = pd.Timestamp(when)
         params = {
-            "latitude": round(lat, 4), "longitude": round(lon, 4),
-            "start_date": when.strftime("%Y-%m-%d"), "end_date": when.strftime("%Y-%m-%d"),
-            "hourly": ",".join(HOURLY_VARS), "timezone": "UTC",
+            "latitude": round(lat, 4),
+            "longitude": round(lon, 4),
+            "start_date": when.strftime("%Y-%m-%d"),
+            "end_date": when.strftime("%Y-%m-%d"),
+            "hourly": ",".join(HOURLY_VARS),
+            "timezone": "UTC",
         }
         try:
             payload = self.http.get_json(FORECAST_URL, params=params, cache=False)

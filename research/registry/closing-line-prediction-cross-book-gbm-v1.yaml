@@ -1,0 +1,63 @@
+id: closing-line-prediction-cross-book-gbm-v1
+family: closing-line-prediction
+registered_at: 2026-10-20T22:12:00Z
+author: quant-researcher
+question: >
+  Does a gradient-boosted model (sklearn HistGradientBoosting) on the same open-snapshot cross-book features
+  plus the probability level predict the de-vigged Pinnacle close better than R3's consensus-gap OLS baseline?
+hypothesis:
+  h1: >
+    mean delta_kl_bits = KL(close || p_hat_base) - KL(close || p_hat_hgb) > 0 over the evaluation window, the
+    baseline re-fitted in the same season walk-forward.
+  h0: mean delta_kl_bits <= 0
+  direction: positive
+  disconfirming: >
+    95% match-day block-bootstrap CI of mean delta_kl_bits includes 0 or lies below it; or the sign is negative
+    in 2 of 3 chronological thirds; or, with any one division removed, the 95% CI includes 0 (STANDARDS L3e).
+decision_time: >
+  As closing-line-prediction-cross-book-linear-v1: the football-data Fri/Tue pre-closing snapshot; features only
+  from its open columns, asserted in code (r6lib.assert_open_only on every test fold).
+universe: As closing-line-prediction-cross-book-linear-v1 (22 main divisions, 97,644 + 2,929 matches).
+window:
+  exploratory: [2012-07-01, 2019-06-30]
+  evaluation: [2019-07-01, 2025-06-30]
+  post_segment: [2025-07-01, 2026-10-19]
+benchmark: >
+  Target: de-vigged (power) Pinnacle close; post segment: de-vigged Betfair Exchange close. Comparison: the R3
+  consensus-gap OLS baseline re-fitted on the same training rows; secondary paired comparison against the
+  cross-book-linear-v1 ridge model on the same rows.
+primary_metric: delta_kl_bits
+metric_kind: probability
+secondary_metrics:
+  - delta_r2_move
+  - kl_gain_vs_open_bits
+  - delta_ll_result_bits
+  - delta_kl_bits_shin
+  - delta_kl_bits_vs_ridge
+  - delta_kl_bits_post_betfair
+  - kl_gain_vs_open_bits_post_betfair
+costs: none (prediction of the close; no bet is placed or scored)
+grid:
+  hgb: [tiny, res_tiny]
+min_n: 300
+literature_ceiling: >
+  delta_kl_bits above 0.001 bits or an incremental OOS R^2 of the move above 5 percentage points is a
+  leakage / snapshot-asynchrony suspect.
+notes: >
+  Code: research/studies/r6-cross-book-close/{r6lib,run}.py. Features: exactly the cross-book-linear-v1 design
+  (g_avg, g_max, 5 clipped/imputed book deviations, 5 missing flags, 5 centred overrounds, Pinnacle overround,
+  max booksum, dispersion) plus the probability level logit p_pin_open_o. Per-outcome models, squared-error
+  loss on the logit move, no early stopping, random_state 20261020, OMP_NUM_THREADS=1. Same walk-forward,
+  targets, transform to p_hat and metrics as cross-book-linear-v1.
+  hgb=tiny: HistGradientBoostingRegressor(max_iter=150, learning_rate=0.03, max_leaf_nodes=7,
+  min_samples_leaf=1000, l2_regularization=10) on the move.
+  hgb=res_tiny: the cross-book-linear-v1 ridge model (same lambda rule) plus the same tiny HGB fitted on the
+  ridge's in-sample training residual; prediction = ridge + HGB correction.
+  delta_kl_bits_vs_ridge = KL(close || p_hat_ridge) - KL(close || p_hat_hgb) on the same evaluation rows
+  (positive = boosting beats the linear model).
+  Exploratory (labelled, pre-registration; walk-forward 2014/15-2018/19, n = 37,630, power), all five HGB
+  settings tried, every one listed in research/studies/r6-cross-book-close/trials.csv: shallow (200 iter,
+  lr .05, 15 leaves, min leaf 200, l2 1) -2.9e-6 [-1.3e-5, +7.1e-6]; deeper (400, .03, 31, 100, 1) -3.57e-5
+  [-4.83e-5, -2.35e-5]; tiny +1.43e-5 [+8.4e-6, +2.05e-5]; res_tiny +2.12e-5 [+1.37e-5, +2.88e-5]; res_shallow
+  -3.5e-6 [-1.42e-5, +7.1e-6]. The two registered settings are the best two of five on exploratory data, so
+  the exploratory numbers are optimistically selected; only the evaluation window counts.

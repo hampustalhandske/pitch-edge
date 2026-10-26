@@ -1,0 +1,36 @@
+id: closing-line-prediction-bw-fair-ablation-v1
+family: closing-line-prediction
+registered_at: 2026-10-20T21:10:04Z
+author: quant-researcher
+question: >
+  POST-HOC (registered after seeing closing-line-prediction-soft-book-vs-model-close-v1, where BW theta=0 gave CLV
+  +1.63% [0.87, 2.41] n=408). Is that CLV produced by the xg closing-line model, or would the same bwin rule with a
+  simpler fair price (the R2-Q2 baseline's predicted close, or the de-vigged Pinnacle open as in R2-Q3) do as well?
+hypothesis:
+  h1: >
+    For bwin (BW) at theta=0 on the same universe, backing the largest-edge outcome when log(BW price * p_fair) > 0
+    with p_fair from the configured reference gives mean CLV > 0 vs the de-vigged Pinnacle close.
+  h0: mean CLV <= 0
+  direction: positive
+  disconfirming: 95% match-day block-bootstrap CI of mean CLV includes 0 or lies below it.
+decision_time: >
+  As closing-line-prediction-soft-book-vs-model-close-v1 (football-data pre-closing snapshot; prices are pre-closing
+  columns; the baseline model uses only *_open prices).
+universe: >
+  As closing-line-prediction-soft-book-vs-model-close-v1 (E0, SP1, I1, D1, F1 rows of the xg-finishing-v1
+  evaluation universe with BW pre-closing prices), so decisions are directly comparable.
+window:
+  exploratory: [2015-07-01, 2019-06-30]
+  evaluation: [2019-07-01, 2025-06-30]
+benchmark: Pinnacle close de-vigged by power
+primary_metric: clv_log
+secondary_metrics: [overlap_with_xg_rule]
+costs: bwin margin inside the taken price; no commission; stake limits not modelled
+grid:
+  fair: [baseline_close, pinnacle_open]
+min_n: 300
+literature_ceiling: CLV vs Pinnacle close above +2% per bet over hundreds of bets is a leakage suspect.
+notes: >
+  baseline_close = phat_base from the registered xg-finishing-v1 power walk-forward (R2-Q2 consensus-gap baseline
+  fitted on the same rows); pinnacle_open = power-de-vigged Pinnacle open. Same 1.5x-Pinnacle-open data-error cap.
+  Counted in the closing-line-prediction family. Code: research/studies/r3-strategy/ablation.py.

@@ -29,12 +29,16 @@ def rest_and_congestion(matches: pd.DataFrame) -> pd.DataFrame:
 
     Strictly uses matches dated *before* each fixture — no leakage.
     """
-    long = pd.concat(
-        [
-            matches[["match_id", "date", "home_team"]].rename(columns={"home_team": "team"}).assign(is_home=1),
-            matches[["match_id", "date", "away_team"]].rename(columns={"away_team": "team"}).assign(is_home=0),
-        ]
-    ).sort_values(["team", "date"]).reset_index(drop=True)
+    long = (
+        pd.concat(
+            [
+                matches[["match_id", "date", "home_team"]].rename(columns={"home_team": "team"}).assign(is_home=1),
+                matches[["match_id", "date", "away_team"]].rename(columns={"away_team": "team"}).assign(is_home=0),
+            ]
+        )
+        .sort_values(["team", "date"])
+        .reset_index(drop=True)
+    )
     long["prev_date"] = long.groupby("team")["date"].shift(1)
     long["rest_days"] = (long["date"] - long["prev_date"]).dt.days
 

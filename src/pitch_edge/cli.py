@@ -78,7 +78,9 @@ def ingest_pmxt(
             return
         report = ingest_pmxt_orderbook_range(wh, pd.Timestamp(start).to_pydatetime(), pd.Timestamp(end).to_pydatetime())
         fetched = {h: n for h, n in report.items() if n}
-        rprint(f"backfilled {len(fetched)}/{len(report)} hours with new rows; pmxt_orderbook total: {wh.count('pmxt_orderbook'):,}")
+        rprint(
+            f"backfilled {len(fetched)}/{len(report)} hours with new rows; pmxt_orderbook total: {wh.count('pmxt_orderbook'):,}"
+        )
 
 
 @app.command("map-pmxt")
@@ -149,7 +151,9 @@ def backtest_timing(
     from pitch_edge.backtest.tick_timing import TickTimingConfig, run_tick_timing_backtest
 
     with _wh() as wh:
-        result = run_tick_timing_backtest(wh, TickTimingConfig(edge_threshold=edge_threshold, retrain_every_days=retrain_days))
+        result = run_tick_timing_backtest(
+            wh, TickTimingConfig(edge_threshold=edge_threshold, retrain_every_days=retrain_days)
+        )
         if result["summary"].empty:
             rprint("[red]no bets placed — check pmxt_match_map/pmxt_orderbook coverage[/red]")
             raise typer.Exit(1)
@@ -305,7 +309,6 @@ def setup(
             if summary["anthropic_active"]
             else " · explainer runs on the offline template"
         )
-        + (" · GCP mirror configured" if summary["gcp_configured"] else "")
     )
     if written:
         rprint(f"wrote {len(written)} value(s) to {env_file} (owner-only permissions; values are never printed)")
@@ -375,6 +378,33 @@ def schedule() -> None:  # pragma: no cover
     run_forever()
 
 
+@app.command("lake-sync")
+def lake_sync(
+    only: list[str] = typer.Option(None, "--only", help="Mirror name(s) to sync (repeatable; default: all)"),  # noqa: B008
+    since: str = typer.Option("", help="Re-pull windows from this date (YYYY-MM-DD); default: each mirror's start"),
+    full_refresh: bool = typer.Option(
+        False, "--full-refresh", help="Empty each selected mirror first, then re-pull it"
+    ),
+) -> None:
+    """Mirror lakehouse tables into the warehouse as lake_* tables (idempotent; needs LAKEHOUSE_API_* in .env)."""
+    import os
+
+    if not os.environ.get("LAKEHOUSE_API_TOKEN"):
+        rprint("[red]LAKEHOUSE_API_TOKEN is not set (put LAKEHOUSE_API_URL / LAKEHOUSE_API_TOKEN in .env)[/red]")
+        raise typer.Exit(2)
+
+    from pitch_edge.lake.client import Lake
+    from pitch_edge.lake.mirror import MIRRORS, run_lake_sync
+
+    with _wh() as wh, Lake() as lake:
+        result = run_lake_sync(wh, lake, only=list(only or []) or None, since=since or None, full_refresh=full_refresh)
+        for name, rows in result.items():
+            table = MIRRORS[name].table
+            rprint(f"{table}: {'FAILED' if rows is None else f'{rows:,} rows written'} ({wh.count(table):,} stored)")
+    if any(v is None for v in result.values()):
+        raise typer.Exit(1)
+
+
 def _print_df(df: pd.DataFrame, title: str) -> None:
     t = Table(title=title)
     for c in df.columns:
@@ -382,6 +412,17 @@ def _print_df(df: pd.DataFrame, title: str) -> None:
     for row in df.itertuples(index=False):
         t.add_row(*[str(v) for v in row])
     rprint(t)
+
+
+# `pitch-edge research {register,status,grade,ledger}` — see research/cli.py.
+from pitch_edge.research.cli import research_app  # noqa: E402
+
+app.add_typer(research_app, name="research")
+
+# `pitch-edge paper {collect,decide,settle,report,status}` — see paper/cli.py.
+from pitch_edge.paper.cli import paper_app  # noqa: E402
+
+app.add_typer(paper_app, name="paper")
 
 
 if __name__ == "__main__":  # pragma: no cover

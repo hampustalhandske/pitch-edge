@@ -6,8 +6,7 @@ when a later write carries new columns (sources add odds columns over the
 years), so schema evolution never silently drops data. All writes are
 idempotent upserts keyed on natural keys — re-running ingestion is safe.
 
-Phase 3 mirrors these tables to BigQuery/GCS via `pitch_edge.cloud`; the
-Parquet export here is the hand-off format.
+`export_parquet` writes every table out as Parquet for use outside DuckDB.
 """
 
 from __future__ import annotations

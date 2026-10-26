@@ -41,8 +41,28 @@ FEEDS: dict[str, str] = {
     "gp_sport": "https://www.gp.se/rss/sport",
 }
 
-SWEDISH_INJURY_TERMS = ("skada", "skadad", "skadan", "missar", "borta i", "opererad", "sjukskriven", "avstängd", "avstängning", "bänkad")
-SWEDISH_LINEUP_TERMS = ("startelva", "startelvan", "elvan", "laguppställning", "petad", "vilas", "tillbaka i truppen", "truppen")
+SWEDISH_INJURY_TERMS = (
+    "skada",
+    "skadad",
+    "skadan",
+    "missar",
+    "borta i",
+    "opererad",
+    "sjukskriven",
+    "avstängd",
+    "avstängning",
+    "bänkad",
+)
+SWEDISH_LINEUP_TERMS = (
+    "startelva",
+    "startelvan",
+    "elvan",
+    "laguppställning",
+    "petad",
+    "vilas",
+    "tillbaka i truppen",
+    "truppen",
+)
 
 BLUESKY_SEARCH = "https://public.api.bsky.app/xrpc/app.bsky.feed.searchPosts"
 
@@ -120,7 +140,11 @@ class NewsScanner:
         lowered = text.str.lower()
         out["is_injury_news"] = lowered.map(lambda t: any(k in t for k in INJURY_TERMS + SWEDISH_INJURY_TERMS))
         out["is_lineup_news"] = lowered.map(lambda t: any(k in t for k in LINEUP_TERMS + SWEDISH_LINEUP_TERMS))
-        out["language"] = out["feed"].map(lambda f: "sv" if str(f) in ("svt_sport", "sportbladet", "expressen_sport", "dn_sport", "gp_sport") else "en")
+        out["language"] = out["feed"].map(
+            lambda f: (
+                "sv" if str(f) in ("svt_sport", "sportbladet", "expressen_sport", "dn_sport", "gp_sport") else "en"
+            )
+        )
         out["team"] = text.map(lambda t: _link_team(t, teams, resolver))
         return out
 
@@ -161,8 +185,12 @@ def sentiment_velocity(scored: pd.DataFrame, window_hours: int = 48) -> pd.DataF
         prev_mean = prev["sentiment"].mean() if len(prev) else float("nan")
         rows.append(
             {
-                "team": team, "as_of": as_of, "sent_mean": cur_mean, "sent_prev": prev_mean,
-                "sent_velocity": (cur_mean - prev_mean) if len(prev) else 0.0, "n_items": int(len(cur)),
+                "team": team,
+                "as_of": as_of,
+                "sent_mean": cur_mean,
+                "sent_prev": prev_mean,
+                "sent_velocity": (cur_mean - prev_mean) if len(prev) else 0.0,
+                "n_items": int(len(cur)),
                 "injury_items": int(cur.get("is_injury_news", pd.Series(dtype=bool)).sum()),
             }
         )

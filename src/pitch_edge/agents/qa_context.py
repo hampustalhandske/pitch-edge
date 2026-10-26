@@ -27,7 +27,9 @@ class SquadValueHint(BaseModel):
     note: str = Field(default="", description="One short sentence citing what the text said, empty if no evidence")
 
 
-def gather_context(index: VectorIndex, home: str, away: str, match_id: str, as_of: pd.Timestamp, k: int = 6) -> list[Document]:
+def gather_context(
+    index: VectorIndex, home: str, away: str, match_id: str, as_of: pd.Timestamp, k: int = 6
+) -> list[Document]:
     return gather_fixture_context(index, home, away, match_id, k=k, as_of=str(as_of.date()))
 
 

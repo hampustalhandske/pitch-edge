@@ -118,6 +118,8 @@ def build_pmxt_match_map(wh: Warehouse) -> pd.DataFrame:
             )
 
     logger.info("build_pmxt_match_map: %d mapped, %d unmapped/dropped", len(rows), unmapped)
-    df = pd.DataFrame(rows, columns=["condition_id", "match_id", "outcome_side", "home_team", "away_team", "match_date"])
+    df = pd.DataFrame(
+        rows, columns=["condition_id", "match_id", "outcome_side", "home_team", "away_team", "match_date"]
+    )
     wh.replace("pmxt_match_map", df)
     return df

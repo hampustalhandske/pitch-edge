@@ -1,0 +1,72 @@
+id: outcome-models-dixon-coles-edge-bits-v1
+family: outcome-models
+registered_at: 2026-10-21T07:05:00Z
+author: quant-researcher
+question: >
+  Does the `ask` agent's Dixon-Coles (DixonColesMatchModel: one bivariate-Poisson fit per league, xi=0.0018, 730-day lookback) predict match outcomes better than the de-vigged Pinnacle close (log-loss edge in bits,
+  walk-forward, 2019/20-2024/25)?
+hypothesis:
+  h1: >
+    The model's mean per-match log2 p_model(result) - log2 p_close(result) (p_close = power-de-vigged Pinnacle close) is
+    > 0 over the evaluation window (positive = model better than the sharp close).
+  h0: mean edge_bits <= 0
+  direction: positive
+  disconfirming: >
+    95% match-day block-bootstrap CI of mean edge_bits includes 0 or lies below it; or the sign is negative in 2 of 3
+    chronological thirds; or, with any one league removed, the 95% CI includes 0 (STANDARDS L3e). Expected, from the
+    existing report (all models below market, best -0.024 bits): a clean negative.
+decision_time: >
+  The football-data.co.uk Pinnacle opening snapshot (PSH/PSD/PSA: Friday afternoon for Fri-Mon games, Tuesday afternoon
+  for Tue-Thu games; R1 uses the latest Tue/Fri 18:00 Europe/London before kickoff as open_known_at). The model's
+  information cutoff is the start date of its walk-forward fold: it is fitted on matches with date < fold_start and
+  predicts the 14 days [fold_start, fold_start+14d) without refitting, so the model never sees anything dated on or
+  after the fold start (0-13 days before the match). Every feature is a rolling/expanding/sequential quantity shifted
+  by one match, or an external pre-match rating (home_elo/away_elo, probed in exploratory data to move with the
+  previous match's surprise and not the next one). Asserted in code (research/studies/r7-outcome-models/pit.py): (i)
+  feature-builder truncation invariance (features rebuilt from a spine cut at a date equal the full-spine features for
+  every earlier match), (ii) walk-forward truncation invariance (predictions of a run on the frame cut at 2020-06-30
+  equal the full run's for every match up to the cut), (iii) train.max(date) < fold_start <= match date for every
+  prediction. Results, closing prices and the Pinnacle close are targets/benchmarks only.
+universe: >
+  Matches of the 11 DEFAULT_BACKTEST_LEAGUES (E0, E1, D1, SP1, I1, F1, N1, P1, B1, SC0, T1; spine from
+  `load_feature_frame(min_date=2015-07-01)` of the warehouse, read-only, snapshotted to data/research/r7/features.parquet)
+  that have a complete Pinnacle open (PSH/PSD/PSA) AND a complete Pinnacle close (PSCH/PSCD/PSCA) and a result,
+  predicted by a model fitted walk-forward (retrain every 14 days = the `ask` candidate window; first fold after 400
+  training matches). Matches without both Pinnacle quotes are dropped and counted per league/season in the report.
+window:
+  exploratory: [2015-07-01, 2019-06-30]   # seasons before 2019/20; may be looked at to design
+  evaluation:  [2019-07-01, 2025-06-30]   # seasons 2019/20-2024/25, scored once after registration
+benchmark: >
+  Pinnacle closing 1X2 (PSCH/PSCD/PSCA), de-vigged by the power method (STANDARDS). Sensitivities (secondary metrics):
+  Shin de-vig of the close, multiplicative de-vig of the Pinnacle OPEN (the market price `ask` compares against), and the
+  engine's isotonic-calibrated probabilities.
+primary_metric: edge_bits
+metric_kind: probability
+secondary_metrics:
+  - edge_bits_shin
+  - edge_bits_vs_open_mult
+  - edge_bits_calibrated
+costs: none (probability scoring; no bet is placed)
+grid:
+  probabilities: [raw]
+min_n: 300
+literature_ceiling: >
+  Published public-data models land between -0.03 and +0.005 bits vs the de-vigged Pinnacle close; above +0.02 bits is a
+  leakage suspect (STANDARDS).
+notes: >
+  Model under test: Dixon-Coles (DixonColesMatchModel: one bivariate-Poisson fit per league, xi=0.0018, 730-day lookback). value per match = log2 p_model(result) - log2 p_close(result); `raw` = the model's own
+  probabilities exactly as `ask` serves them. Block = ISO match date; league = league_code (leave-one-league-out). The
+  engine run uses WalkForwardConfig(min_train_matches=400, retrain_every_days=14, calibrate=True) with no staking
+  strategies; seeds fixed (HistGradientBoosting random_state=42, StochasticStrengthModel seed=0).
+  Why this window: from counts only, in the warehouse frame Pinnacle open+close are present for 3,140 / 4,309 / 3,900 /
+  3,835 / 2,647 / 3,795 matches in 2019/20 ... 2024/25 (2023/24 is 68% covered: a coverage hole, reported per league),
+  1,736 of 3,761 in 2025/26 (to 2025-09) and none from 2026-02, so 2024/25 is the last complete season. Code:
+  research/studies/r7-outcome-models/{snapshot,pit,generate,run}.py; per-match outputs in data/research/r7/. The
+  production `ask` agent (agents/qa_graph.py::gather) fits `default_models()` fresh at as_of on the rows dated before
+  as_of of its own feature frame (CLI: min_date 2018-07-01; dashboard: all rows) and serves the RAW model probabilities
+  (no isotonic calibration); this study therefore scores the raw `raw_*` probabilities of the walk-forward and reports
+  the engine's isotonic-calibrated `p_*` as a secondary. The walk-forward refit cadence (14 days) matches the ask
+  window; the train window starts 2015-07 (not the warehouse's full history). Weather features are observed, not
+  forecast, values (a mild approximation of a forecast; `wx_*` are inputs to gbdt only).
+  Before registration only coverage counts, an Elo-column timing probe on pre-2019/20 rows (exploratory) and the existing
+  warehouse report (all models below market) were looked at; no metric of this study was computed on any window.

@@ -12,7 +12,11 @@ point in time (see `backtest/as_of.py`).
 resolves candidate fixtures, fits every model fresh on data strictly before `as_of` and predicts
 them (`agents/qa_data.py`), computes each candidate's no-vig market edge, and picks which model to
 trust per fixture from real backtest evidence matching that fixture's own circumstances
-(`backtest/slices.py::select_trusted_model`) — never an LLM guess. `judge` is a bounded
+(`backtest/slices.py::select_trusted_model`) — never an LLM guess. It also reads the research
+ladder and paper-ledger status once per question (`research/summary.py::load_status`, read-only)
+and tags every candidate with the evidence status of the model behind its number: unless that
+model's registered hypothesis holds the display floor (the `research/STANDARDS.md` ratchet), the
+candidate is a model-vs-market disagreement, not a validated edge. `judge` is a bounded
 tool-calling agent (`agents/evidence_tools.py`) that narrates and, when it has good reason from the
 evidence, may prefer a different model's number for a fixture — it never computes a probability or
 an edge itself, only ever picks among and explains numbers `gather` already produced.
@@ -21,7 +25,9 @@ an edge itself, only ever picks among and explains numbers `gather` already prod
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from datetime import datetime
+from typing import Any
 
 import pandas as pd
 from langchain_core.messages import HumanMessage
@@ -29,16 +35,25 @@ from langgraph.graph import END, StateGraph
 from langgraph.prebuilt import create_react_agent
 from pydantic import BaseModel, Field
 
-from pitch_edge.agents.evidence_tools import make_evidence_tools
+from pitch_edge.agents.evidence_tools import make_evidence_tools, make_status_tools, status_json
 from pitch_edge.agents.llm import get_llm_for
 from pitch_edge.agents.qa_context import structure_context
-from pitch_edge.agents.qa_data import market_edges, pmxt_market_edges, resolve_fixture, run_models, top_bets_candidates
+from pitch_edge.agents.qa_data import (
+    NOT_VALIDATED_LABEL,
+    annotate_candidates,
+    market_edges,
+    pmxt_market_edges,
+    resolve_fixture,
+    run_models,
+    top_bets_candidates,
+)
 from pitch_edge.backtest.slices import fixture_slice_values, select_trusted_model
 from pitch_edge.models.base import MatchModel
 from pitch_edge.rag.documents import Document
 from pitch_edge.rag.generate import verify_citations
 from pitch_edge.rag.index import VectorIndex
 from pitch_edge.rag.query_parser import FixtureQuery, TopBetsQuery, parse_ask_intent
+from pitch_edge.research.summary import BASE_DISPLAY_FLOOR, load_status
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +93,7 @@ class QAState(BaseModel):
     trusted: dict[str, str] = Field(default_factory=dict)
     context_docs: dict[str, list[dict]] = Field(default_factory=dict)
     live_market: dict[str, dict] = Field(default_factory=dict)
+    evidence: dict[str, Any] = Field(default_factory=dict)
     message: str | None = None
     answer: Answer | None = None
     retry_count: int = 0
@@ -86,19 +102,32 @@ class QAState(BaseModel):
 _JUDGE_PROMPT = (
     "Below is a fully-computed batch of football fixtures. Every number (each model's "
     "probability, the market's no-vig probability, the edge, which model the backtest evidence "
-    "says to trust here) was already calculated deterministically — you are not estimating "
-    "anything, only explaining what is given, in plain language.\n\n"
+    "says to trust here, the evidence rung behind it) was already calculated deterministically — "
+    "you are not estimating anything, only explaining what is given, in plain language.\n\n"
+    "{evidence_block}\n"
     "{summary}\n"
     "{doc_block}\n"
+    "Evidence rules (these override everything else):\n"
+    "- For every fixture or 'bet' you narrate, state the evidence rung behind it (the `evidence` "
+    "tag on its line above; the research_status tool has the full ladder).\n"
+    "- If no strategy is at or above the display floor (research_status: "
+    "validated_edge_exists=false), say plainly in `overview` that no validated edge exists, and "
+    "present every candidate as one of the model-vs-market disagreements, not validated edges — "
+    "never as a bet, a pick or a recommendation. A significant backtest slice alone is not a "
+    "validated edge.\n"
+    "- Never invent a number: quote only numbers shown above or returned by a tool "
+    "(get_model_predictions, get_backtest_evidence, get_price_history, search_context, "
+    "research_status, paper_status).\n\n"
     "Fill in BOTH fields of the response schema:\n"
-    "1. `overview`: 2-3 sentences summarizing the batch (how many fixtures, whether any model "
-    "shows a real, significant edge here or whether none of them clearly beat the market).\n"
+    "1. `overview`: 2-3 sentences summarizing the batch (how many fixtures, and whether any "
+    "candidate is backed by a validated edge under the evidence rules above).\n"
     "2. `notes`: exactly {n_fixtures} entries, one per fixture listed above (same match_id), each "
     "a short grounded sentence citing only the numbers/context given above — never invent a "
     "number or a doc_id — plus its `citations` list (doc_ids actually used, empty if none). If a "
     "fixture's backtest evidence says NOT significant, say the evidence is inconclusive rather "
     "than implying confidence. Use the get_model_predictions/get_backtest_evidence/search_context "
-    "tools if you need to double check a number or look for more context before writing a note.\n"
+    "tools if you need to double check a number or look for more context before writing a note, "
+    "and research_status / paper_status for the evidence ladder and the forward paper record.\n"
     "Never suggest an action beyond describing what the numbers show — this is not a betting "
     "instruction."
 )
@@ -113,6 +142,13 @@ def _best_edge_row(match_id: str, edges: list[dict], trusted_model: str | None) 
     return max(rows, key=lambda r: r["edge"]) if rows else None
 
 
+def _evidence_tag(fixture: dict) -> str:
+    ev = fixture.get("evidence")
+    if not ev:
+        return ""
+    return f" [evidence: {ev['status']}; rung {ev['rung']}; display floor {ev['display_floor']}; {ev['label']}]"
+
+
 def _fixture_summary_line(fixture: dict, edges: list[dict], trusted_model: str | None) -> str:
     best = _best_edge_row(fixture["match_id"], edges, trusted_model)
     if best is None:
@@ -123,7 +159,35 @@ def _fixture_summary_line(fixture: dict, edges: list[dict], trusted_model: str |
         f"({fixture.get('league_code', '?')}): model={best['model']} outcome={best['outcome']} "
         f"model_probability={best['model_probability']:.1%} market_probability={best['market_probability']:.1%} "
         f"edge={best['edge']:+.1%} decimal_odds={best['decimal_odds']:.2f} ({trust_note})"
+        f"{_evidence_tag(fixture)}"
     )
+
+
+def _no_validated_edge_status(reason: str) -> dict[str, Any]:
+    """The status used when the ledgers cannot be read: the base floor and no validated edge."""
+    return {
+        "research": {
+            "display_floor": BASE_DISPLAY_FLOOR,
+            "validated_edge_exists": False,
+            "families": [],
+            "error": reason,
+        },
+        "paper": {"available": False, "reason": reason, "strategies": []},
+    }
+
+
+def _default_evidence_loader() -> dict[str, Any]:
+    return load_status().to_dict()
+
+
+def _evidence_block(evidence: dict[str, Any]) -> str:
+    research = evidence.get("research", {})
+    floor = research.get("display_floor", BASE_DISPLAY_FLOOR)
+    if research.get("validated_edge_exists"):
+        state = "At least one strategy is at or above it; only candidates tagged 'validated edge' are backed by it."
+    else:
+        state = f"No strategy is at or above it, so no validated edge exists: every candidate below is a {NOT_VALIDATED_LABEL}."
+    return f"Evidence ladder (research/STANDARDS.md): display floor {floor}. {state}\n"
 
 
 def _build_judge_agent(llm, tools: list):
@@ -144,7 +208,17 @@ def _structure_answer(llm, transcript: str, n_fixtures: int) -> Answer:
     )
 
 
-def _template_answer(candidates: list[dict], edges: list[dict], trusted: dict[str, str]) -> Answer:
+def _template_answer(
+    candidates: list[dict], edges: list[dict], trusted: dict[str, str], evidence: dict[str, Any] | None = None
+) -> Answer:
+    research = (evidence or {}).get("research", {})
+    overview = f"{len(candidates)} fixture(s) considered; no LLM available, showing the raw computed numbers."
+    if not research.get("validated_edge_exists"):
+        floor = research.get("display_floor", BASE_DISPLAY_FLOOR)
+        overview += (
+            f" No validated edge exists (no strategy is at or above the display floor {floor}): these are "
+            "model-vs-market disagreements, not validated edges."
+        )
     notes = [
         FixtureNote(
             match_id=f["match_id"],
@@ -154,11 +228,7 @@ def _template_answer(candidates: list[dict], edges: list[dict], trusted: dict[st
         )
         for f in candidates
     ]
-    return Answer(
-        overview=f"{len(candidates)} fixture(s) considered; no LLM available, showing the raw computed numbers.",
-        notes=notes,
-        backend="template",
-    )
+    return Answer(overview=overview, notes=notes, backend="template")
 
 
 # --------------------------------------------------------------------------------- node: parse_intent
@@ -194,6 +264,7 @@ def gather(
     top_bets_window_days: int,
     llm=None,
     wh=None,
+    evidence_loader: Callable[[], dict[str, Any]] | None = None,
 ) -> dict:
     as_of = pd.Timestamp(state.as_of)
     if state.intent == "top_bets":
@@ -231,8 +302,7 @@ def gather(
         as_of_naive = as_of.tz_localize(None) if as_of.tzinfo else as_of
         for match_id in candidates["match_id"]:
             quotes = [
-                q for q in provider.get_quotes(match_id)
-                if pd.Timestamp(q.timestamp).tz_localize(None) < as_of_naive
+                q for q in provider.get_quotes(match_id) if pd.Timestamp(q.timestamp).tz_localize(None) < as_of_naive
             ]
             if not quotes:
                 continue
@@ -303,6 +373,19 @@ def gather(
     ranked_ids = {f["match_id"] for f in ranked}
     live_market = {mid: m for mid, m in live_market.items() if mid in ranked_ids}
 
+    # Evidence status of the model behind each surviving candidate's number. Ranking above is
+    # unchanged by this; it only tags what the answer may call the number.
+    try:
+        evidence = (evidence_loader or _default_evidence_loader)()
+    except Exception as exc:  # noqa: BLE001 - an unreadable ledger must never block an answer
+        logger.warning("gather: evidence status unavailable (%s) — treating every candidate as unvalidated", exc)
+        evidence = _no_validated_edge_status(f"evidence status unavailable: {type(exc).__name__}")
+    model_by_match = {
+        f["match_id"]: (_best_edge_row(f["match_id"], edge_records, trusted.get(f["match_id"])) or {}).get("model")
+        for f in ranked
+    }
+    ranked = annotate_candidates(ranked, model_by_match, evidence.get("research", {}))
+
     return {
         "candidates": ranked,
         "predictions": predictions.to_dict(orient="records"),
@@ -310,6 +393,7 @@ def gather(
         "trusted": trusted,
         "context_docs": context_docs,
         "live_market": live_market,
+        "evidence": evidence,
     }
 
 
@@ -339,7 +423,12 @@ def judge(
     if docs:
         doc_lines = "\n".join(f"[{d['doc_id']}] {d['text']}" for d in docs)
         doc_block = f"\nRetrieved context (cite only these doc_ids, never invent one):\n{doc_lines}\n"
-    prompt = _JUDGE_PROMPT.format(summary=summary, doc_block=doc_block, n_fixtures=len(state.candidates))
+    prompt = _JUDGE_PROMPT.format(
+        evidence_block=_evidence_block(state.evidence),
+        summary=summary,
+        doc_block=doc_block,
+        n_fixtures=len(state.candidates),
+    )
     if state.retry_count > 0 and state.answer:
         prompt += (
             f"\n\nYour previous answer used numbers not found above: {state.answer.ungrounded_numbers}. "
@@ -350,7 +439,7 @@ def judge(
         agent_llm = llm or get_llm_for("deep")
         tools = make_evidence_tools(
             predictions, slice_evidence, index, pd.Timestamp(state.as_of), model_names, state.live_market
-        )
+        ) + make_status_tools(state.evidence)
         agent = _build_judge_agent(agent_llm, tools)
         result = agent.invoke({"messages": [HumanMessage(prompt)]}, config={"recursion_limit": JUDGE_RECURSION_LIMIT})
         transcript = str(result["messages"][-1].content)
@@ -371,11 +460,16 @@ def judge(
                 note.away_team = note.away_team or fx.get("away_team", "")
     except Exception as exc:  # noqa: BLE001 - a broken local LLM must never block an answer
         logger.warning("judge: LLM/tool failure (%s) — falling back to template", exc)
-        return {"answer": _template_answer(state.candidates, state.edges, state.trusted)}
+        return {"answer": _template_answer(state.candidates, state.edges, state.trusted, state.evidence)}
 
-    # The computed summary counts as a grounding source alongside the retrieved docs (`verify_citations`
-    # otherwise only knows about retrieved-doc text), and a citation must name a doc_id actually given.
-    grounding_docs = [Document(d["doc_id"], d["text"]) for d in docs] + [Document("computed", summary)]
+    # The computed summary and the two status tools' output count as grounding sources alongside the
+    # retrieved docs (`verify_citations` otherwise only knows about retrieved-doc text), and a citation
+    # must name a doc_id actually given.
+    grounding_docs = [Document(d["doc_id"], d["text"]) for d in docs] + [
+        Document("computed", summary + "\n" + _evidence_block(state.evidence)),
+        Document("research_status", status_json(state.evidence.get("research", {}))),
+        Document("paper_status", status_json(state.evidence.get("paper", {}))),
+    ]
     grounded_doc_ids = {d["doc_id"] for d in docs}
     ungrounded: list[str] = []
     for note in answer.notes:
@@ -416,17 +510,30 @@ def build_qa_graph(
     top_bets_window_days: int = 14,
     checkpointer=None,
     wh=None,
+    evidence_loader: Callable[[], dict[str, Any]] | None = None,
 ):
     """Compiles the graph above, closing over the fixed environment (`features`, `slice_evidence`,
     `index`, `models`) so `graph.invoke(QAState(question=..., as_of=...))` only needs the
-    per-question inputs."""
+    per-question inputs. `evidence_loader` returns the research/paper status dict
+    (`research.summary.StatusSnapshot.to_dict()` shape); by default it reads both ledgers read-only
+    from their default paths."""
     model_names = [m.name for m in models]
     g: StateGraph = StateGraph(QAState)
     g.add_node("parse_intent", lambda s: parse_intent(s, llm=llm))
     g.add_node("list_fixtures", lambda s: list_fixtures(s, features))
     g.add_node(
         "gather",
-        lambda s: gather(s, features, slice_evidence, index, models, top_bets_window_days, llm=llm, wh=wh),
+        lambda s: gather(
+            s,
+            features,
+            slice_evidence,
+            index,
+            models,
+            top_bets_window_days,
+            llm=llm,
+            wh=wh,
+            evidence_loader=evidence_loader,
+        ),
     )
     g.add_node("judge", lambda s: judge(s, pd.DataFrame(s.predictions), slice_evidence, index, model_names, llm=llm))
     g.add_node("cannot_answer", cannot_answer)

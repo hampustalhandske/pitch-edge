@@ -1,0 +1,58 @@
+id: r5-pm-micro-flb-v1
+family: polymarket-efficiency
+registered_at: 2026-10-20T21:40:00Z
+author: quant-researcher
+question: >
+  R1 (r1-pm-bias-v1) found Polymarket's kickoff-1h LAST-TRADE 1X2 price over-prices longshots (+0.37 pp)
+  and under-prices favourites (-0.61 pp) relative to the de-vigged Betfair Exchange close. Does the
+  favourite-longshot gap survive when Polymarket is priced at the order-book MID instead of the last trade?
+  If it vanishes at the mid, R1's gap was microstructure (takers printing longshot Yes at the ask).
+hypothesis:
+  h1: >
+    The FLB-signed gap s*(p_mid - q_close) is > 0, where s = +1 for longshots (q_close < 0.20) and -1 for
+    favourites (q_close > 0.60), p_mid = power-normalised Polymarket mid at kickoff - 1h, q_close = power
+    de-vigged Betfair Exchange close.
+  h0: mean FLB-signed gap at the mid = 0
+  direction: positive
+  disconfirming: >
+    95% match-day block-bootstrap CI of the mean FLB-signed mid gap includes 0 or is negative. Read together
+    with the secondary paired difference (last-trade gap minus mid gap on the same rows): if that is > 0
+    with CI excluding 0 and the mid gap is null, R1's gap is attributed to microstructure.
+decision_time: >
+  kickoff - 1h (kickoff = football-data UK-local kickoff converted to UTC, verified against PM close_at as in
+  r1-common). Book state = latest pm_orderbook_snapshots row with ts <= decision time (ts is when the book
+  state was observed; scraped_at is ignored). Last trade for the paired secondary = last pm_soccer_bars_1h
+  bar with hour_start + 1h <= decision time (r1-common PriceBook).
+universe: >
+  The R1 matched universe (r1-common load_matches: football-data matches with exactly one PM market per
+  outcome and verified kickoff) with kickoff in the order-book coverage 2026-04-09 -> 2026-09-29 (pmxt
+  archive to 2026-06-10, live clob poll 2026-09-29). All three outcome books must be two-sided, spread <=
+  0.05, snapshot age <= 24h, raw mid sum in [0.9, 1.1]; Betfair close booksum <= 1.05. Expected about 300
+  matches before filters, so n per segment is expected well below 300 (L2 n floor will likely fail; this is
+  a diagnostic of R1, stated in advance).
+window:
+  exploratory: [2023-09-01, 2026-04-08]
+  evaluation:  [2026-04-09, 2026-09-29]
+benchmark: Betfair Exchange close, power de-vigged, booksum <= 1.05 (as R1)
+primary_metric: mean_flb_signed_gap_mid
+secondary_metrics:
+  - mean_flb_signed_gap_lasttrade_same_rows
+  - paired_lasttrade_minus_mid_flb_signed
+  - mean_flb_signed_gap_microprice
+  - mean_gap_mid_draw
+costs: none (descriptive bias measurement, as r1-pm-bias-v1)
+grid:
+  segment: [longshot, favourite]
+min_n: 300
+literature_ceiling: >
+  R1 measured +0.37 pp (longshots) and -0.61 pp (favourites) on last trades; a mid gap larger in magnitude
+  than about 2 pp would be a data-error suspect. Bid-ask bounce alone (R1 Roll estimate sigma_e ~ 0.7 c)
+  could produce ~0.3 pp.
+notes: >
+  The exploratory window holds no order-book data (coverage starts 2026-04-09), so no outcome-bearing
+  exploration was possible; the design is R1's with the price swapped. The evaluation window overlaps R1's
+  evaluation window, whose last-trade numbers were already seen (that is the point: a paired replication).
+  Microprice = (bid * ask_depth_1c + ask * bid_depth_1c) / (ask_depth_1c + bid_depth_1c) using the lake's
+  depth-within-1c columns (per-level arrays are not readable through the lake API); rows where either depth
+  is 0 are dropped for that secondary only. Draw gap is two-sided and descriptive (R1 found it null).
+  Bootstrap: 5,000 match-day block draws, seed 20261020.

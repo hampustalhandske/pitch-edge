@@ -1,0 +1,60 @@
+id: r4-bsky-attention-size-v1
+family: crowd-attention
+registered_at: 2026-10-21T07:27:37Z
+author: quant-researcher
+question: >
+  Does pre-kickoff Bluesky attention to a club (posts matched by the club's search queries, known before the
+  decision hour H) predict the SIZE of Polymarket's subsequent move in that club's win market toward kickoff,
+  beyond Polymarket's own price level, recent move and trading activity?
+hypothesis:
+  h1: >
+    Adding log(1 + n_L) and abnormal attention abn_L of the club to the baseline lowers the walk-forward
+    out-of-sample MSE of y = |p_end - p_0|, i.e. Δ OOS R² (baseline minus full squared error, scaled by the OOS
+    target variance) > 0
+  h0: Δ OOS R² <= 0
+  direction: positive
+  disconfirming: 95% match-day block-bootstrap CI of Δ OOS R² includes 0 or is negative
+decision_time: >
+  H = kickoff - h for h = 24..2 hours (kickoff = the markets' common Polymarket close_at). Features use Polymarket
+  bars with known_at = hour_start + 1h <= H and Bluesky posts with indexed_at < H (hour buckets known at bucket
+  end); both asserted in code (r4-common/panel.py).
+universe: >
+  Polymarket 1X2 match groups (pm_soccer_match_map, one market per side, common close_at), kickoff in the windows
+  below, side in {home, away} whose club (club registry id) has an active Bluesky club search query and >= 14 days
+  of Bluesky baseline; rows need p_H, p_H-6h (<= 24h stale), p_0 (first bar with hour_start >= H, known by
+  min(H + 3h, kickoff)) and p_end (last bar known by kickoff, <= 3h stale). Reddit r/soccer match threads are not
+  used: 98.6% are created after kickoff - 1h (see REPORT).
+window:
+  exploratory: [2026-01-05, 2026-02-28]
+  evaluation:  [2026-03-01, 2026-10-19]
+benchmark: Polymarket's own last pre-kickoff bar (the target end point; hindsight, target only)
+primary_metric: delta_oos_r2
+metric_kind: score
+secondary_metrics: []
+costs: none (predictive measurement of Polymarket price dynamics; no position is taken)
+model: >
+  OLS, walk-forward: fold starts 2026-03-01 then the first of each month; each fold fits on every row with kickoff
+  before the fold start (exploratory rows included) and predicts the fold. Baseline regressors: intercept,
+  hours-to-kickoff fixed effects, p_H (1 - p_H), |p_H - p_H6|, log(1 + Polymarket trades in the 24h before H).
+  Full = baseline + log(1 + n_L) + abn_L, where n_L = club posts in [H - L, H), abn_L = log(1 + n_L) -
+  log(1 + rate * L), rate = club posts per hour over [max(2026-01-05, H - 24h - 28d), H - 24h). Decision = (match,
+  side); value = mean over its decision hours of (e_base^2 - e_full^2) / (mean over OOS rows of (y - mean_train y)^2).
+  Blocks = kickoff UTC date; 5,000 draws, seed 20261020.
+grid:
+  lookback_h: [6, 24]
+min_n: 300
+literature_ceiling: >
+  Social-media attention adds little to price-based volatility forecasts in liquid markets; Δ OOS R² above 0.02
+  (2% of the move variance) is a leakage suspect.
+notes: >
+  Target starts at the first trade after H (p_0), not at p_H, so last-trade bid-ask bounce at H (R1: sigma ~0.7
+  cents) is not shared between target and baseline features; exploratory bounce check: slope of the move on the
+  own 6h move is -0.048 [-0.133, 0.000] measured from p_H vs +0.045 [0.000, 0.097] from p_0. Bluesky posts come
+  from a retrospective search backfill (scraped 2026-10-20/21): deleted posts are missing, weekly windows read
+  92% of reported hits Jan-Jul and ~100% Aug-Oct; generic queries (Athletic, Derby, Spurs, Inter, Milan, city
+  names) carry non-football posts. Coverage is the lake's 266 clubs with active queries (mostly England, Italy,
+  Spain, Germany, France, Sweden): 20.7% of PM groups have >= 1 side, 8.3% both sides; joined matches are more
+  liquid (median 300 vs 65 trades in the 24h before kickoff - 1h). PM mapping is sparse after 2026-05 (few
+  league matches mapped in the 2026/27 season), so the evaluation is ~80% March-May 2026.
+  EXPLORATORY (kickoff 2026-01-20 -> 2026-02-28, not counted): 786 side-decisions, 39 days; in-sample crowd
+  coefficients all with CIs spanning 0; one pseudo-OOS split (train < 02-10) Δ OOS R² -0.0063 (L6), -0.0070 (L24).

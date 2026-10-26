@@ -170,9 +170,7 @@ def ingest_football_data(
     seasons = seasons or list(range(2005, 2026))
     counts: dict[str, int] = {}
     for league in leagues:
-        counts[league] = _run(
-            wh, f"football_data_co_uk:{league}", partial(_ingest_fd_league, wh, src, league, seasons)
-        )
+        counts[league] = _run(wh, f"football_data_co_uk:{league}", partial(_ingest_fd_league, wh, src, league, seasons))
     if extra_leagues:
         for stem in EXTRA_LEAGUE_FILES:
             counts[stem] = _run(wh, f"football_data_co_uk:new/{stem}", partial(_ingest_fd_extra_league, wh, src, stem))
@@ -187,7 +185,11 @@ def _ingest_fd_league(wh: Warehouse, src: FootballDataCoUkSource, league: str, s
     """Only re-fetch a season's file if it isn't already stored (from this same source) or is the
     most recent season, which is still being played and keeps gaining matches."""
     stored = (
-        set(wh.query("SELECT DISTINCT season FROM matches WHERE league_code = ? AND source = ?", [league, src.name])["season"])
+        set(
+            wh.query("SELECT DISTINCT season FROM matches WHERE league_code = ? AND source = ?", [league, src.name])[
+                "season"
+            ]
+        )
         if wh.table_exists("matches")
         else set()
     )
@@ -266,7 +268,11 @@ def ingest_club_elo(wh: Warehouse, dates: list[str] | None = None) -> int:
         )
         resolver = TeamNameResolver(teams)
         already = (
-            set(wh.query("SELECT DISTINCT CAST(date AS DATE) AS d FROM team_ratings WHERE source = 'club_elo'")["d"].astype(str))
+            set(
+                wh.query("SELECT DISTINCT CAST(date AS DATE) AS d FROM team_ratings WHERE source = 'club_elo'")[
+                    "d"
+                ].astype(str)
+            )
             if wh.table_exists("team_ratings")
             else set()
         )

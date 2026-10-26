@@ -120,7 +120,9 @@ def run_tick_timing_backtest(wh: Warehouse, cfg: TickTimingConfig | None = None)
                 continue
             edges = []
             for q in quotes:
-                mkt_probs = dict(zip(OUTCOMES, no_vig_probabilities(q.home_odds, q.draw_odds, q.away_odds), strict=True))
+                mkt_probs = dict(
+                    zip(OUTCOMES, no_vig_probabilities(q.home_odds, q.draw_odds, q.away_odds), strict=True)
+                )
                 edges.append(model_probs[favored] - mkt_probs[favored])
             entries = _pick_entries(edges, cfg)
             closing_odds = getattr(quotes[-1], f"{favored}_odds")
@@ -133,8 +135,11 @@ def run_tick_timing_backtest(wh: Warehouse, cfg: TickTimingConfig | None = None)
                 if not (cfg.min_odds <= entry_odds <= cfg.max_odds):
                     continue
                 stake = fractional_kelly_stake(
-                    model_probs[favored], entry_odds, bankroll[policy],
-                    fraction=cfg.kelly_fraction, max_stake_pct=cfg.max_stake_pct,
+                    model_probs[favored],
+                    entry_odds,
+                    bankroll[policy],
+                    fraction=cfg.kelly_fraction,
+                    max_stake_pct=cfg.max_stake_pct,
                 )
                 if stake <= 0:
                     continue

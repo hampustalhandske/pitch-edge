@@ -1,0 +1,82 @@
+id: closing-line-prediction-cross-book-linear-v1
+family: closing-line-prediction
+registered_at: 2026-10-20T22:12:00Z
+author: quant-researcher
+question: >
+  Does the full cross-book picture at the football-data open snapshot (each continuously covered book's
+  de-vigged deviation from Pinnacle's de-vigged open, book overrounds, cross-book dispersion) predict the
+  de-vigged Pinnacle close better than R3's consensus-gap OLS baseline (g_avg, g_max), in a linear model?
+hypothesis:
+  h1: >
+    The per-book linear model, re-fitted in the same season walk-forward as the R3 baseline, predicts the
+    de-vigged Pinnacle close better out of sample: mean delta_kl_bits = KL(close || p_hat_base) -
+    KL(close || p_hat_model) > 0 over the evaluation window.
+  h0: mean delta_kl_bits <= 0
+  direction: positive
+  disconfirming: >
+    95% match-day block-bootstrap CI of mean delta_kl_bits includes 0 or lies below it; or the sign is negative
+    in 2 of 3 chronological thirds; or, with any one division removed, the 95% CI includes 0 (STANDARDS L3e).
+decision_time: >
+  football-data.co.uk pre-closing ('open') snapshot: Friday afternoon for Fri-Mon games, Tuesday afternoon for
+  Tue-Thu games (notes.txt; R1 uses the latest Tue/Fri 18:00 Europe/London before kickoff as open_known_at).
+  Every feature is built only from that snapshot's open columns (PS, B365, BW, IW, WH, VC, BbAv/Avg, BbMx/Max
+  H/D/A). Asserted in code (r6lib.assert_open_only on every test fold): the feature builder can only read
+  allow-listed open columns, and features recomputed with every close/result/other column blanked must be
+  identical. Closes and results are targets only.
+universe: >
+  The 22 main football-data divisions, 2012-07 onward, rows of data/research/r2/audit_q3_raw.parquet with a
+  Pinnacle open, avg and max open, a Pinnacle close and a result (Pinnacle segment, to 2025-06-30), or a
+  Pinnacle open and a Betfair Exchange close (post segment). 97,644 + 2,929 matches (R3's universe was
+  97,645 + 2,929).
+window:
+  exploratory: [2012-07-01, 2019-06-30]
+  evaluation: [2019-07-01, 2025-06-30]
+  post_segment: [2025-07-01, 2026-10-19]
+benchmark: >
+  Target: de-vigged (power) Pinnacle close; post segment: de-vigged Betfair Exchange close. Comparison model:
+  the R3 consensus-gap baseline (per-outcome OLS of the logit move on [1, g_avg, g_max]) re-fitted on the same
+  training rows in the same walk-forward.
+primary_metric: delta_kl_bits
+metric_kind: probability
+secondary_metrics:
+  - delta_r2_move
+  - kl_gain_vs_open_bits
+  - delta_ll_result_bits
+  - delta_kl_bits_shin
+  - delta_kl_bits_post_betfair
+  - kl_gain_vs_open_bits_post_betfair
+costs: none (prediction of the close; no bet is placed or scored)
+grid:
+  estimator: [ols, ridge]
+min_n: 300
+literature_ceiling: >
+  delta_kl_bits above 0.001 bits (a quarter of the mean Pinnacle open->close KL of ~0.004 bits) or an
+  incremental OOS R^2 of the move above 5 percentage points is a leakage / snapshot-asynchrony suspect.
+notes: >
+  Code: research/studies/r6-cross-book-close/{r6lib,run}.py; per-match outputs data/research/r6/.
+  Core books (chosen by open-price coverage only, no outcomes or closes consulted): B365, BW, IW, WH, VC, each
+  with >= 90% open 1X2 coverage in every season 2012/13-2022/23. Excluded: LB, SJ, GB, BS (stop before
+  2019), 1XB, BF, BFE, CL (exist only from 2024/25, no training history). Known in advance: IW and VC have 0%
+  coverage in 2024/25 (IW 51% in 2023/24) and BW 63%, WH 75% in 2024/25.
+  Features per outcome o (all de-vigged with power): dev_b_o = logit p_b_open_o - logit p_pin_open_o for each
+  core book, clipped to [-0.5, 0.5]; a missing book is imputed by the mean deviation of the present core books
+  (g_avg_o if none) with an indicator miss_b; each core book's booksum - 1 (centred on its training mean, 0 when
+  missing); Pinnacle's booksum - 1; the max booksum; dispersion_o = std of logit p over Pinnacle and the present
+  core books; plus the baseline's g_avg_o and g_max_o (g_max = log(min(max/pin, 1.5))).
+  Target move_o = logit p_close_o - logit p_open_o; p_hat proportional to sigmoid(logit p_open + predicted move),
+  renormalised. Per-outcome models. Walk-forward by season (July-June): fit on all Pinnacle-segment seasons
+  before s (from 2012/13), predict s, for s = 2019/20..2024/25; the post segment is predicted by a model fitted
+  on every Pinnacle-segment season.
+  estimator=ols: least squares on all features. estimator=ridge: standardised features, unpenalised intercept,
+  lambda chosen from {1, 10, 100, 1e3, 1e4, 1e5} by MSE on the last training season of a fit on the earlier
+  training seasons, then refitted on all training seasons.
+  Metrics per match: delta_kl_bits (primary) as above; delta_r2_move (per-match (SSE_base - SSE_model) /
+  mean SSE_zero; mean = incremental OOS R^2 of the move); kl_gain_vs_open_bits = KL(close||p_open) -
+  KL(close||p_hat_model); delta_ll_result_bits = log2 p_hat_model(result) - log2 p_hat_base(result);
+  delta_kl_bits_shin = the primary with targets and features de-vigged by Shin; *_post_betfair = on the post
+  segment (recorded under window post_segment). Match-day block bootstrap, 2,000 draws, seed 20261020; league =
+  division for leave-one-league-out CIs.
+  Exploratory (labelled, pre-registration; walk-forward 2014/15-2018/19, n = 37,630, power; every variant listed
+  in research/studies/r6-cross-book-close/trials.csv): ols +1.22e-5 bits [+6.4e-6, +1.84e-5], ridge +1.59e-5
+  [+1.11e-5, +2.06e-5] (incremental R^2 +0.37 pp; baseline R^2 1.72%); by season ridge +0.1/+1.3/-0.1/+1.4/
+  +5.2 e-5. Mean open->close KL 0.00397 bits; the baseline removes 5.6e-5 of it.

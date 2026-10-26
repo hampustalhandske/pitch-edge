@@ -32,17 +32,39 @@ MATCHES_URL = "https://raw.githubusercontent.com/xgabora/Club-Football-Match-Dat
 ELO_URL = "https://raw.githubusercontent.com/xgabora/Club-Football-Match-Data-2000-2025/main/data/EloRatings.csv"
 
 COLUMN_MAP = {
-    "HomeElo": "home_elo", "AwayElo": "away_elo",
-    "Form3Home": "home_form3", "Form5Home": "home_form5", "Form3Away": "away_form3", "Form5Away": "away_form5",
-    "HTHome": "ht_home_goals", "HTAway": "ht_away_goals",
-    "HomeShots": "home_shots", "AwayShots": "away_shots", "HomeTarget": "home_shots_on_target",
-    "AwayTarget": "away_shots_on_target", "HomeFouls": "home_fouls", "AwayFouls": "away_fouls",
-    "HomeCorners": "home_corners", "AwayCorners": "away_corners", "HomeYellow": "home_yellows",
-    "AwayYellow": "away_yellows", "HomeRed": "home_reds", "AwayRed": "away_reds",
-    "OddHome": "MktH", "OddDraw": "MktD", "OddAway": "MktA",
-    "MaxHome": "MaxH", "MaxDraw": "MaxD", "MaxAway": "MaxA",
-    "Over25": "Mkt>2.5", "Under25": "Mkt<2.5", "MaxOver25": "Max>2.5", "MaxUnder25": "Max<2.5",
-    "HandiSize": "ah_line", "HandiHome": "ah_home_odds", "HandiAway": "ah_away_odds",
+    "HomeElo": "home_elo",
+    "AwayElo": "away_elo",
+    "Form3Home": "home_form3",
+    "Form5Home": "home_form5",
+    "Form3Away": "away_form3",
+    "Form5Away": "away_form5",
+    "HTHome": "ht_home_goals",
+    "HTAway": "ht_away_goals",
+    "HomeShots": "home_shots",
+    "AwayShots": "away_shots",
+    "HomeTarget": "home_shots_on_target",
+    "AwayTarget": "away_shots_on_target",
+    "HomeFouls": "home_fouls",
+    "AwayFouls": "away_fouls",
+    "HomeCorners": "home_corners",
+    "AwayCorners": "away_corners",
+    "HomeYellow": "home_yellows",
+    "AwayYellow": "away_yellows",
+    "HomeRed": "home_reds",
+    "AwayRed": "away_reds",
+    "OddHome": "MktH",
+    "OddDraw": "MktD",
+    "OddAway": "MktA",
+    "MaxHome": "MaxH",
+    "MaxDraw": "MaxD",
+    "MaxAway": "MaxA",
+    "Over25": "Mkt>2.5",
+    "Under25": "Mkt<2.5",
+    "MaxOver25": "Max>2.5",
+    "MaxUnder25": "Max<2.5",
+    "HandiSize": "ah_line",
+    "HandiHome": "ah_home_odds",
+    "HandiAway": "ah_away_odds",
 }
 
 
@@ -69,9 +91,9 @@ class ClubFootballMatchDataSource(MatchDataSource):
                 "date": pd.to_datetime(raw["MatchDate"], errors="coerce"),
                 "league_code": raw["Division"].astype(str),
                 "country": raw["Division"].astype(str).map(lambda c: _DIVISIONS.get(c, (None,))[0]),
-                "league": raw["Division"].astype(str).map(
-                    lambda c: f"{_DIVISIONS[c][0]} - {_DIVISIONS[c][1]}" if c in _DIVISIONS else c
-                ),
+                "league": raw["Division"]
+                .astype(str)
+                .map(lambda c: f"{_DIVISIONS[c][0]} - {_DIVISIONS[c][1]}" if c in _DIVISIONS else c),
                 "home_team": raw["HomeTeam"].astype(str).str.strip(),
                 "away_team": raw["AwayTeam"].astype(str).str.strip(),
                 "home_goals": pd.to_numeric(raw["FTHome"], errors="coerce"),
@@ -88,10 +110,14 @@ class ClubFootballMatchDataSource(MatchDataSource):
         start_year = out["date"].dt.year - (out["date"].dt.month < 7).astype(int)
         out["season"] = start_year.astype(str) + "/" + ((start_year + 1) % 100).map(lambda y: f"{y:02d}")
         out["match_id"] = (
-            "cfmd_" + out["league_code"] + "_" + out["date"].dt.strftime("%Y%m%d") + "_"
-            + out["home_team"].str.replace(r"[^A-Za-z0-9]+", "", regex=True) + "_"
+            "cfmd_"
+            + out["league_code"]
+            + "_"
+            + out["date"].dt.strftime("%Y%m%d")
+            + "_"
+            + out["home_team"].str.replace(r"[^A-Za-z0-9]+", "", regex=True)
+            + "_"
             + out["away_team"].str.replace(r"[^A-Za-z0-9]+", "", regex=True)
         )
         out = out.drop_duplicates(subset="match_id").reset_index(drop=True)
         return self.validate(out)
-

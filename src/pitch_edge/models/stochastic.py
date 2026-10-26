@@ -31,9 +31,16 @@ class StochasticStrengthModel(MatchModel):
 
     def __init__(self, n_sims: int = 2000, seed: int = 0):
         self.n_sims = n_sims
-        self._rng = np.random.default_rng(seed)
+        # One fixed set of standard-normal draws per model (common random numbers): every match is
+        # simulated with the same draws scaled by the fitted sigma, so a match's probabilities are a
+        # pure function of the fitted parameters and its own row — independent of batch size, batch
+        # composition, row order and how many predictions came before.
+        rng = np.random.default_rng(seed)
+        self._z_home = rng.standard_normal(n_sims)
+        self._z_away = rng.standard_normal(n_sims)
         self.sigma_: float = 100.0
         self.draw_rate_: float = 0.25
+        self.elo_fill_: float = 1500.0
 
     def fit(self, train: pd.DataFrame) -> StochasticStrengthModel:
         df = train.dropna(subset=["elo_home", "elo_away"]).sort_values("date")
@@ -45,17 +52,19 @@ class StochasticStrengthModel(MatchModel):
         ).sort_values(["team", "date"])
         delta = long.groupby("team")["elo"].diff().dropna()
         self.sigma_ = float(delta.std()) if len(delta) > 5 and delta.std() > 0 else 100.0
+        if long["elo"].notna().any():
+            self.elo_fill_ = float(long["elo"].mean())
         if "result" in df.columns and len(df):
             self.draw_rate_ = float((df["result"] == 1).mean())
         return self
 
     def predict_proba(self, X: pd.DataFrame) -> pd.DataFrame:
-        home_elo = X["elo_home"].fillna(X["elo_home"].mean()).to_numpy()
-        away_elo = X["elo_away"].fillna(X["elo_away"].mean()).to_numpy()
-        n = len(X)
-        home_noise = self._rng.normal(0.0, self.sigma_, size=(self.n_sims, n))
-        away_noise = self._rng.normal(0.0, self.sigma_, size=(self.n_sims, n))
-        diff = (home_elo + home_noise + HOME_ADVANTAGE_ELO) - (away_elo + away_noise)
+        """Monte Carlo outcome probabilities per row of X. A missing Elo is filled with the mean
+        training Elo (`elo_fill_`), never a statistic of X itself."""
+        home_elo = X["elo_home"].astype(float).fillna(self.elo_fill_).to_numpy()
+        away_elo = X["elo_away"].astype(float).fillna(self.elo_fill_).to_numpy()
+        noise = self.sigma_ * (self._z_home - self._z_away)
+        diff = (home_elo + HOME_ADVANTAGE_ELO - away_elo)[None, :] + noise[:, None]
 
         p_home_2way = 1.0 / (1.0 + 10.0 ** (-diff / 400.0))
         p_draw = self.draw_rate_ * np.exp(-((diff / DRAW_BUMP_SCALE) ** 2))

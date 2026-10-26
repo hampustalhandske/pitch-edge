@@ -1,0 +1,59 @@
+id: bookmaker-line-structure-live-soft-vs-sharp-v2
+family: bookmaker-line-structure
+registered_at: 2026-10-21T07:13:32Z
+author: quant-researcher (R6 draft), reviewed and registered by orchestrator
+question: >
+  Does replacing the live de-vigged Pinnacle price with an R6-style predicted close (Pinnacle plus the
+  informative books' deviations and the soft consensus) as the fair value change which soft-book prices
+  qualify, and do the bets that qualify under it beat the de-vigged Betfair Exchange close? Forward-only.
+hypothesis:
+  h1: >
+    (arm model_fair) mean CLV of model-fair bets vs the power-de-vigged Betfair Exchange close > 0; and
+    (paired) per-fixture CLV of model_fair minus pinnacle_fair, over fixtures where either arm bets (an arm
+    that does not bet scores 0), > 0.
+  h0: mean CLV <= 0 (and paired difference <= 0)
+  direction: positive
+  disconfirming: >
+    After >= 150 settled model_fair decisions, the 95% match-day block-bootstrap CI of mean CLV includes 0; or
+    the paired difference CI lies below 0 (the R6 adjustment removes good bets); or fewer than one qualifying
+    fixture per week.
+decision_time: >
+  The first the-odds-api response captured between 20 h and 76 h before kickoff (to match the horizon of the
+  football-data Fri/Tue snapshot the coefficients were fitted on; R6 found no gain on same-day snapshot rows).
+  Every input comes from that one response.
+universe: >
+  P1 collector fixtures (EPL, La Liga, Serie A, Bundesliga, Ligue 1, UCL, Eredivisie) with a complete Pinnacle
+  1X2 in the response. Soft books = non-exchange, non-Pinnacle books in the uk and eu regions.
+window:
+  exploratory: [2026-10-21, 2026-10-21]
+  evaluation: [2026-10-22, 2027-06-30]
+benchmark: power-de-vigged Betfair Exchange close from lake fd_matches (Pinnacle close where present as sensitivity)
+primary_metric: clv_log
+metric_kind: return
+secondary_metrics: [clv_paired_model_minus_pinnacle, roi, opportunity_frequency, clv_by_book, share_bets_informative_books]
+costs: none beyond the quoted decimal odds; stake limits not modelled
+grid:
+  fair_value: [pinnacle, r6_live_model]
+min_n: 150
+literature_ceiling: >
+  Forward CLV above +3% per bet is a data-error suspect (R2-Q3 max-odds upper bound +2.1%; single books
+  +0.5..+2.6% historically with data problems).
+notes: >
+  fair_value=pinnacle: p_fair = power-de-vigged live Pinnacle (the v1 rule, restricted to the v2 horizon).
+  fair_value=r6_live_model: per outcome o, logit q_o = logit p_pin_o + a_o + b_o * g_cons_o + sum_b
+  (c_b,o * dev_b,o + m_b,o * miss_b), p_fair = q / sum(q). dev_b,o = logit p_b_o - logit p_pin_o (power de-vig
+  of book b's own 1X2 in the response, clipped to [-0.5, 0.5]; missing -> 0 and miss_b = 1) for b in
+  {williamhill (WH), betvictor (VC), onexbet (1XB), betfair_sb_uk (BF)}; g_cons_o = logit of the power-de-vigged
+  mean implied probability across the response's soft books minus logit p_pin_o. Coefficients frozen from
+  data/research/r6/v2_live_coefficients.json (research/studies/r6-cross-book-close/v2_coefficients.py, sha256 57f7d4245ab002698d961b2ec0919284dcd92d6a75d2a9bd059aafeba170907c, OLS on
+  97,644 football-data Pinnacle-segment matches 2012/13-2024/25; record its sha256 at registration), e.g. home:
+  g_avg 0.227, VC 0.203, BF 0.182, 1XB 0.050, WH -0.063. Rule (both arms): back the best soft price for an
+  outcome when price > 1.02 / p_fair, price <= the response max for that outcome, price <= 1.10 x Pinnacle's
+  quote; one decision per fixture, largest edge. Both arms decide on the same response, so the paired
+  comparison is exact.
+  Known transfer risks, stated in advance: (1) the coefficients come from a Fri/Tue snapshot of a different
+  book set (football-data Avg covers a different book list than the-odds-api consensus); (2) 1XB and BF
+  coefficients rest on one season (2024/25); (3) VC (betvictor) has no football-data history after 2023/24;
+  (4) R6's gain is ~1e-4 bits on average and comes mainly from VC, so most fixtures get the same decision in
+  both arms. The expected mechanism is that model_fair drops bets at informative books (betvictor,
+  betfair_sb_uk) whose deviations Pinnacle tends to follow, and keeps bets at stale books (onexbet).

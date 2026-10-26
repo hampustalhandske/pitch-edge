@@ -2,7 +2,7 @@
 
 Provider is chosen by `Settings.llm_provider` (env `PITCH_EDGE_LLM_PROVIDER`, "ollama" or "groq"), so
 every call site (`rag/query_parser.py`, `agents/qa_context.py`, `agents/qa_graph.py`,
-`agents/tool_reviewer.py`, `rag/generate.py`) gets a swap-in-compatible `BaseChatModel` without its
+`rag/generate.py`) gets a swap-in-compatible `BaseChatModel` without its
 own code changing — both `ChatOllama` and `ChatGroq` support `.with_structured_output()` and
 `bind_tools`/`create_react_agent` the same way.
 
@@ -81,7 +81,7 @@ def _build_hf_fallback(settings: Settings) -> BaseChatModel | None:
 def get_llm(model: str | None = None, base_url: str | None = None) -> BaseChatModel:
     """A single, bare model — no fallback chain (that's `get_llm_for`'s job). Used directly by
     call sites that want one specific model (`rag/generate.py`'s local-first Ollama attempt,
-    `agents/tool_reviewer.py`)."""
+    `agents/evidence_tools.py`)."""
     settings = get_settings()
     if settings.llm_provider == "groq":
         return _build_groq(model or settings.groq_model, settings)

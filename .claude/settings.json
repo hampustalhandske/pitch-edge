@@ -1,11 +1,12 @@
 {
+  "enabledMcpjsonServers": ["lakehouse", "edgelab"],
   "hooks": {
     "SessionStart": [
       {
         "hooks": [
           {
             "type": "command",
-            "command": "uv sync --extra dev"
+            "command": "arch -arm64 uv sync --extra dev"
           }
         ]
       }
@@ -18,6 +19,10 @@
       "Bash(uv add:*)",
       "Bash(uv remove:*)",
       "Bash(uv lock:*)",
+      "Bash(arch -arm64 uv run:*)",
+      "Bash(arch -arm64 uv sync:*)",
+      "Bash(arch -arm64 uv add:*)",
+      "Bash(arch -arm64 uv lock:*)",
       "Bash(python:*)",
       "Bash(python3:*)",
       "Bash(git status:*)",
@@ -54,7 +59,22 @@
       "Edit(./tests/**)",
       "Edit(./reports/**)",
       "Edit(./scripts/**)",
-      "Edit(./pyproject.toml)"
+      "Edit(./pyproject.toml)",
+      "Write(./research/**)",
+      "Edit(./research/**)",
+      "Write(./data/research/**)",
+      "mcp__lakehouse__lakehouse_status",
+      "mcp__lakehouse__list_tables",
+      "mcp__lakehouse__describe_table",
+      "mcp__lakehouse__query_sql",
+      "mcp__lakehouse__list_recipes",
+      "mcp__lakehouse__run_recipe",
+      "mcp__lakehouse__ask_lakehouse",
+      "mcp__edgelab__list_strategies",
+      "mcp__edgelab__check_data",
+      "mcp__edgelab__dry_run",
+      "mcp__edgelab__run_status",
+      "mcp__edgelab__get_summary"
     ],
     "deny": [
       "Bash(git push:*)",

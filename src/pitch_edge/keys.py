@@ -24,14 +24,14 @@ class OptionalKey:
     unlocks: str
     signup: str
     next_command: str
-    kind: str = "api"  # "api" | "gcp"
+    kind: str = "api"  # "api"
 
 
 OPTIONAL_KEYS: tuple[OptionalKey, ...] = (
     OptionalKey(
         "API_FOOTBALL_KEY",
         "API-Football",
-        "injuries, confirmed lineups and substitutions — the first data the closing price does not already contain; turns the dossier's 'who is playing' section from provisional to confirmed",
+        "injuries, confirmed lineups and substitutions — the first data the closing price does not already contain; marks an upcoming fixture's starting XI as confirmed instead of provisional (features/live_lineups.py)",
         "https://dashboard.api-football.com/register",
         "uv run pitch-edge ingest",
     ),
@@ -55,22 +55,6 @@ OPTIONAL_KEYS: tuple[OptionalKey, ...] = (
         "a free, faster alternative to local Ollama for every `ask`-agent LLM call (set PITCH_EDGE_LLM_PROVIDER=groq) — a real recurring daily quota (1,000 requests/day, 200k tokens/day on the default openai/gpt-oss-20b model), not a one-time trial credit",
         "https://console.groq.com",
         'PITCH_EDGE_LLM_PROVIDER=groq uv run pitch-edge ask "top 4 bets"',
-    ),
-    OptionalKey(
-        "PITCH_EDGE_GCP_PROJECT",
-        "Google Cloud project",
-        "the GCS/BigQuery mirror and Cloud Run deployment in deploy/ (never required locally)",
-        "https://console.cloud.google.com",
-        "uv sync --extra cloud && uv run pitch-edge export",
-        kind="gcp",
-    ),
-    OptionalKey(
-        "PITCH_EDGE_GCS_BUCKET",
-        "GCS bucket",
-        "where the Parquet lake is mirrored when the GCP project is set",
-        "https://console.cloud.google.com/storage",
-        "uv run pitch-edge export",
-        kind="gcp",
     ),
 )
 
@@ -128,7 +112,6 @@ def status_summary(env: Mapping[str, str] | None = None, dotenv_path: str | Path
         "n_api_set": sum(r["set"] for r in api),
         "n_api_total": len(api),
         "anthropic_active": any(r["env"] == "ANTHROPIC_API_KEY" and r["set"] for r in rows),
-        "gcp_configured": all(r["set"] for r in rows if r["kind"] == "gcp"),
         "active": [r["name"] for r in rows if r["set"]],
         "missing": [r["env"] for r in missing],
         "next_unlock": missing[0] if missing else None,

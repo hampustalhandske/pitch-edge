@@ -59,7 +59,11 @@ class TransfermarktOpenSource:
         self.download()
         con = duckdb.connect(str(self.db_path), read_only=True)
         try:
-            sql = f"SELECT * FROM {table}" + (f" WHERE {where}" if where else "") + (f" LIMIT {int(limit)}" if limit else "")
+            sql = (
+                f"SELECT * FROM {table}"
+                + (f" WHERE {where}" if where else "")
+                + (f" LIMIT {int(limit)}" if limit else "")
+            )
             return con.execute(sql).df()
         finally:
             con.close()

@@ -95,7 +95,9 @@ def load_espn_soccer_data(
         if not path.exists():
             logger.warning("espn_soccer_data: missing %s, skipping table %s", path, table)
             continue
-        wh._conn.execute(f"CREATE OR REPLACE TABLE {table} AS SELECT * FROM read_csv_auto({_quote(str(path))}, union_by_name=true)")
+        wh._conn.execute(
+            f"CREATE OR REPLACE TABLE {table} AS SELECT * FROM read_csv_auto({_quote(str(path))}, union_by_name=true)"
+        )
         counts[table] = wh.count(table)
 
     for table, dirname in GLOB_DATA_DIRS.items():

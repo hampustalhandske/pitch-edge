@@ -1,0 +1,46 @@
+id: r5-xv-arb-v1
+family: cross-venue
+registered_at: 2026-10-20T21:30:53Z
+author: quant-researcher
+question: >
+  Do riskless Kalshi/Polymarket combinations on soccer 1X2 (same outcome Yes on one venue + No on the other;
+  or Yes on all three outcomes / No on all three, each leg on its cheaper venue) appear after taker fees, and
+  do they still pay when executed one hour later?
+hypothesis:
+  h1: >
+    Mean paper P&L per signal, per unit of guaranteed payout, is > 0 when a combination whose all-in edge at
+    hour H exceeds theta is bought with the same legs at the H + 1h quotes.
+  h0: mean P&L per signal <= 0
+  direction: positive
+  disconfirming: 95% match-day block-bootstrap CI of mean P&L per signal includes 0 or is negative
+decision_time: >
+  signal at hour H from quotes known at H (Kalshi candle end_period_ts = H; Polymarket book in force at H);
+  execution at H + 1h quotes, H + 1h <= kickoff
+universe: as r5-xv-agreement-v1, events with kickoff in the evaluation window
+window:
+  exploratory: [2025-08-01, 2025-12-31]
+  evaluation:  [2026-01-01, 2026-10-19]
+benchmark: none (riskless combination; P&L is fixed at execution by the payout)
+primary_metric: pnl_per_signal_book
+secondary_metrics:
+  - pnl_per_signal_proxy
+costs: >
+  Every leg at the ask (Yes) or 1 - bid (No) plus taker fee: Kalshi 0.07 a(1-a) (fee_multiplier 1),
+  Polymarket 0.05 a(1-a). Primary uses the true Polymarket book (coverage 2026-04-09 -> 2026-06-10 and
+  2026-09-29 only); the proxy secondary uses Polymarket last trade +/- max(0.5c, half the hour's high-low),
+  fresh trade required, over the whole evaluation window.
+grid:
+  type: [cross, dutch]
+  theta: [0.0, 0.01, 0.02]
+min_n: 300
+literature_ceiling: >
+  Riskless cross-venue edges after fees on liquid events should be rare and at most a cent or two; a mean
+  P&L above 5c per unit would be a mapping, timing or resolution-rule suspect.
+notes: >
+  P&L ignores size at the touch (Kalshi candles carry no depth; the lake's per-level Polymarket arrays are
+  unreadable), resolution-rule differences between venues (both settle on 90 minutes plus stoppage time per
+  their rules), Kalshi per-order cent rounding of fees, capital lock-up until settlement and withdrawal
+  costs. A signal whose legs lack a quote at H + 1h is unfilled and not scored (counts reported). Each
+  (event, hour, type) signal is one decision; blocks = match-day; 5,000 draws, seed 20261020. Returns are
+  per unit payout, flagged return_like for DSR. Every grid point is run; a grid point with fewer than two
+  filled signals cannot be scored by run_trial and is reported as not run. Exploratory window (labelled exploratory, not counted) has no Polymarket book, so the primary pricing could not be explored. Proxy pricing there: cross mean P&L per signal -0.48c (n=435, theta 0), +0.48c (n=90, 0.01), +2.6c (n=36, 0.02); dutch -1.3c / -1.1c / -1.0c. Exploration changed one rule: a dutch signal requires both venues to quote all three outcomes at H (without it, book-priced dutch signals were Kalshi-only arbs whenever the Polymarket book was missing).

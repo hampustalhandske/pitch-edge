@@ -1,0 +1,47 @@
+id: r1-pm-accuracy-v1
+family: polymarket-efficiency
+registered_at: 2026-10-20T20:45:00Z
+author: quant-researcher
+question: >
+  Is Polymarket's 1X2 price (three binary markets, power-normalised) at kickoff-1h and kickoff-24h a worse
+  forecast of the realised result than the de-vigged Betfair Exchange close? And is PM at kickoff-24h worse
+  than the de-vigged sharp open?
+hypothesis:
+  h1: mean paired log-loss difference LL(PM) - LL(benchmark) in bits is > 0 (Polymarket less accurate)
+  h0: no difference
+  direction: positive
+  disconfirming: 95% match-day block-bootstrap CI of the mean paired difference includes or lies below 0
+decision_time: kickoff - 1h and kickoff - 24h (PM last trade whose hourly bar ended by then)
+universe: >
+  football-data matches linked by pm_soccer_match_map (match_method club_and_date) with exactly one PM market
+  per outcome (home/draw/away) and a verified kickoff (fd kickoff_time Europe/London -> UTC within 30 min of
+  every PM close_at); 1,915 of 1,977 linked matches.
+window:
+  exploratory: [2023-09-01, 2025-10-31]   # 510 matches, 132 match-days
+  evaluation:  [2025-11-01, 2026-10-19]   # 1,405 matches, 226 match-days (counts only, chosen before scoring)
+benchmark: >
+  Betfair Exchange close (betfair_ex_*_close) de-vigged by the power method, used only when booksum <= 1.05.
+  Sharp open = Pinnacle open de-vigged where present, else Betfair Exchange open (booksum <= 1.05).
+  Pinnacle close as a sensitivity where present (coverage ends 2025-2026-01).
+primary_metric: logloss_diff_bits_pm_minus_bench
+secondary_metrics: [brier_diff, pinnacle_close_sensitivity, multiplicative_normalisation, staleness_sensitivity]
+costs: none (forecast-accuracy comparison, not a trade)
+filters:
+  max_stale_hours: 24        # oldest of the three last trades at most 24h before the decision time
+  raw_sum_min: 0.9           # sum of the three raw last-trade prices
+  raw_sum_max: 1.1
+grid:
+  comparison:
+    - {pm_hours_before_kickoff: 1, benchmark: betfair_close}
+    - {pm_hours_before_kickoff: 24, benchmark: betfair_close}
+    - {pm_hours_before_kickoff: 24, benchmark: sharp_open}
+min_n: 300
+literature_ceiling: >
+  PM vs sharp gaps are plausible (thin liquidity, retail flow). A PM deficit above 0.10 bits/match vs the
+  close would be a data-error suspect. Note PM at T-1h has one hour less information than the close, so a
+  small positive difference is expected even under equal efficiency.
+notes: >
+  Data-quality checks done before registration (no outcomes or closing values scored): drop log, kickoff
+  verification (1,912/1,977 exact-minute agreement fd vs PM close_at), coverage, staleness, volume, and an
+  exploratory-window-only check that football-data's open odds sit closest to PM prices 3-6h before the
+  assumed collection time (Tue/Fri 18:00 London), i.e. the known_at rule is conservative.

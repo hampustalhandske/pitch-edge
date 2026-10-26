@@ -1,0 +1,36 @@
+id: r1-pm-bias-v1
+family: polymarket-efficiency
+registered_at: 2026-10-20T20:45:00Z
+author: quant-researcher
+question: >
+  Relative to the de-vigged Betfair Exchange close, does Polymarket's power-normalised 1X2 price at
+  kickoff-1h over-price longshots, under-price favourites, or mis-price the draw?
+hypothesis:
+  h1: longshots (close prob < 0.20) mean gap PM - close > 0; favourites (close prob > 0.60) mean gap < 0; draw mean gap != 0
+  h0: mean gap = 0 in each segment
+  direction: per segment (see grid)
+  disconfirming: CI includes 0 or has the opposite sign; or sign flips in 2 of 3 chronological thirds
+decision_time: kickoff - 1h
+universe: as r1-pm-accuracy-v1, with all three PM prices passing its filters and a valid Betfair Exchange close
+window:
+  exploratory: [2023-09-01, 2025-10-31]
+  evaluation:  [2025-11-01, 2026-10-19]
+benchmark: Betfair Exchange close de-vigged (power), booksum <= 1.05
+primary_metric: mean_prob_gap_pm_minus_bf_close
+secondary_metrics: [bucket_table, raw_unnormalised_prices]
+costs: none (descriptive bias measurement; tradability is r1-pm-gap-trade-v1)
+decision_hours_before_kickoff: 1
+filters:
+  max_stale_hours: 24
+  raw_sum_min: 0.9
+  raw_sum_max: 1.1
+bucket_edges: [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 1.0]
+grid:
+  segment:
+    - {name: longshot, max_prob: 0.20, direction: positive}
+    - {name: favourite, min_prob: 0.60, direction: negative}
+    - {name: draw, direction: two-sided}
+min_n: 300
+literature_ceiling: >
+  Favourite-longshot bias in sharp closes is ~1-3% of implied probability at the extremes; PM vs sharp
+  segment gaps above ~5 percentage points would be a data-error suspect.

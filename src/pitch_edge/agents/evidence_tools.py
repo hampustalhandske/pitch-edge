@@ -1,12 +1,16 @@
 """Stage 2 of the `ask` agent's read-only tool set: what each model predicted, what the real
-backtest evidence says about trusting a model in this fixture's circumstances, and any further
-retrieved context — everything the `judge` node's tool-calling agent may look up before writing
-its answer. Every tool validates its own arguments against a closed set before touching any data,
+backtest evidence says about trusting a model in this fixture's circumstances, any further
+retrieved context, and where every strategy stands on the `research/STANDARDS.md` evidence ladder
+and in the forward paper ledger — everything the `judge` node's tool-calling agent may look up
+before writing its answer. Every tool validates its own arguments against a closed set before touching any data,
 and every lookup is bounded (a fixed `k`, a capped query length) — an LLM-generated argument can
 only ever read, never reach an unbounded query or an unknown model/slice.
 """
 
 from __future__ import annotations
+
+import json
+from typing import Any
 
 import pandas as pd
 from langchain_core.tools import tool
@@ -92,10 +96,41 @@ def make_evidence_tools(
         kept = [
             (doc, score)
             for doc, score in hits
-            if not any(doc.metadata.get(key, "") >= as_of_str for key in ("date", "published_at") if doc.metadata.get(key))
+            if not any(
+                doc.metadata.get(key, "") >= as_of_str for key in ("date", "published_at") if doc.metadata.get(key)
+            )
         ][:MAX_SEARCH_K]
         if not kept:
             return "no matching documents"
         return "\n".join(f"[{doc.doc_id}] {doc.text[:400]}" for doc, _score in kept)
 
     return [get_model_predictions, get_backtest_evidence, get_price_history, search_context]
+
+
+def status_json(payload: Any) -> str:
+    """The compact JSON the status tools return (also what the judge's answer is grounded against)."""
+    return json.dumps(payload, separators=(",", ":"), sort_keys=True, default=str)
+
+
+def make_status_tools(status: dict[str, Any]) -> list:
+    """`research_status` and `paper_status`: argument-free tools returning, as compact JSON, the two
+    halves of a `research.summary.StatusSnapshot.to_dict()` taken once for this question."""
+    research_json = status_json(status.get("research", {}))
+    paper_json = status_json(status.get("paper", {}))
+
+    @tool
+    def research_status() -> str:
+        """Every research family's best evidence rung (L0-L5 ladder), its champion strategy, each
+        hypothesis' headline (metric, estimate, 95% CI, n) and audit/edgelab reviews, plus the
+        `display_floor`: the minimum rung for any number to be presented as an edge.
+        `validated_edge_exists` is false when no strategy is at or above that floor."""
+        return research_json
+
+    @tool
+    def paper_status() -> str:
+        """The forward paper-trading ledger per strategy: decisions and settled bets in the
+        registered evaluation window, mean closing-line value with its 95% CI (null until enough
+        settled bets), exploratory counts, and whether the L5 sample size is met."""
+        return paper_json
+
+    return [research_status, paper_status]

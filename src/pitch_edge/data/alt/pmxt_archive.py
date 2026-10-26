@@ -155,7 +155,10 @@ class PMXTArchiveSource:
                 cursor = next_cursor
             logger.info(
                 "discover_soccer_markets_for_day: %s closed=%s pages=%d markets_so_far=%d",
-                day_str, closed, page, len(rows),
+                day_str,
+                closed,
+                page,
+                len(rows),
             )
         return pd.DataFrame(rows.values())
 

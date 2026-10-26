@@ -164,7 +164,13 @@ def transfermarkt_context(wh: Warehouse, matches: pd.DataFrame) -> pd.DataFrame:
     return out[["match_id", *CONTEXT_COLUMNS]]
 
 
-NEWS_FEATURES = ["news_sent_home", "news_sent_away", "news_sent_diff", "news_injury_items_home", "news_injury_items_away"]
+NEWS_FEATURES = [
+    "news_sent_home",
+    "news_sent_away",
+    "news_sent_diff",
+    "news_injury_items_home",
+    "news_injury_items_away",
+]
 
 
 def news_context(wh: Warehouse, matches: pd.DataFrame, window_days: int = 7) -> pd.DataFrame:
