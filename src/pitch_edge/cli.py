@@ -327,15 +327,6 @@ def setup(
 
 
 @app.command()
-def artifacts() -> None:
-    """Build dashboard artifacts: team strengths, feature importance, data universe."""
-    from pitch_edge.artifacts import build_all_artifacts
-
-    with _wh() as wh:
-        rprint(build_all_artifacts(wh))
-
-
-@app.command()
 def export(out_dir: str = "") -> None:
     """Export every warehouse table to Parquet (the GCS/BigQuery hand-off format)."""
     with _wh() as wh:

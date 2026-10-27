@@ -56,7 +56,6 @@ TABLE_KEYS: dict[str, list[str]] = {
     "api_football_injuries": ["league_code", "season", "fixture_id", "team", "player"],
     "api_football_lineups": ["fixture_id", "team", "player", "slot"],
     "fixture_predictions": ["fixture_key", "model_name", "version"],
-    "dossiers": ["fixture_key", "version"],
     "live_odds": ["match_id", "bookmaker", "market", "side", "snapshot_ts"],
     "dim_soccer_markets": ["condition_id"],
     "pmxt_orderbook": ["condition_id", "asset_id", "timestamp_received", "side", "price", "size"],

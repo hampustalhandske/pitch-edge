@@ -2,8 +2,8 @@
 name: case-study
 description: >
   Run a named pitch-edge test (a walk-forward backtest, a feature-group ablation, or the
-  agentic replay-eval) and turn its results into an honest, industry-standard case-study
-  write-up at reports/<label>/CASE_STUDY.md, then refresh the root CASE_STUDY.md index. Reads
+  ablation) and turn its results into an honest, industry-standard case-study
+  write-up at reports/<label>/CASE_STUDY.md, then refresh the reports/CASE_STUDY.md index. Reads
   only the local machine-readable output under data/backtest/ and data/artifacts/ (never
   writes raw data into reports/ — that directory holds nothing but case studies). Triggers on:
   case study, write a case study, run a backtest and report on it, evaluate this test, honest
@@ -27,7 +27,7 @@ This skill is for going beyond that auto one-pager — running (or reading) a sp
 writing the kind of case-study narrative a reviewer would expect: the question being tested, the
 setup, the headline result read plainly (including when the model loses, which on this project's
 public-data slices it usually does), the caveats that actually matter, and a verdict. It replaces
-`reports/<label>/CASE_STUDY.md` with that fuller write-up and keeps the root `CASE_STUDY.md` as a
+`reports/<label>/CASE_STUDY.md` with that fuller write-up and keeps `reports/CASE_STUDY.md` as a
 short index linking to every test that has one.
 
 ## Non-negotiables
@@ -37,7 +37,7 @@ short index linking to every test that has one.
   file so a reviewer can check it.
 - **Losing results are published exactly like winning ones.** This project's whole point is
   honesty about whether public data beats the closing price — see the root `CLAUDE.md`
-  "Non-negotiables" and the root `CASE_STUDY.md`'s own history. Don't soften a negative
+  "Non-negotiables" and the `reports/CASE_STUDY.md` index's own history. Don't soften a negative
   `edge_bits` number or bury it.
 - **`reports/` holds only `<label>/CASE_STUDY.md` files and the root index — nothing else.** Any
   CSV/JSON/parquet a test produces belongs under `data/backtest/` or `data/artifacts/` (already
@@ -55,7 +55,6 @@ short index linking to every test that has one.
 |---|---|---|
 | Walk-forward backtest | `pitch-edge backtest --label <name> [--leagues ...] [--models ...] [--min-date ...]` | `data/backtest/<name>/{backtest_summary.csv, calibration.csv, by_league.csv, preamble.txt, model_card_*.json}` — also already produces the auto one-pager at `reports/<name>/CASE_STUDY.md` |
 | Feature-group ablation | `pitch-edge ablation --groups <a,b,c,...>` | `data/artifacts/ablation.csv` — no automatic report; this skill is what turns it into one |
-| Agentic replay-eval | `pitch-edge replay-eval [--as-of YYYY-MM-DD]` | `data/backtest/replay/{replay_eval.csv, replay_eval_summary.csv}` (train-only fold evidence under `data/backtest/replay_train/`) — no automatic report |
 
 ## Steps
 
@@ -70,8 +69,8 @@ short index linking to every test that has one.
    starting point for the headline numbers but not the finished write-up.
 4. **Write `reports/<label>/CASE_STUDY.md`** (Write tool, overwriting the auto one-pager) with:
    - **Question** — one line, stated as it would have been before looking at results if this is
-     a pre-registered test (compare the "Result 7" pre-registration pattern in the root
-     `CASE_STUDY.md` for the house style).
+     a pre-registered test (compare the "Result 7" pre-registration pattern in
+     `reports/CASE_STUDY.md` for the house style).
    - **Setup** — data slice, leagues/divisions, date range, row counts, walk-forward config
      (retrain-every-days, edge threshold), and any staking rule used.
    - **Headline result** — the actual table(s): model vs market log-loss / edge_bits, best
@@ -82,7 +81,7 @@ short index linking to every test that has one.
    - **Verdict** — one paragraph, no hedging beyond what the caveats already justify.
    Keep it to roughly one page — one headline table, one staking table, nothing per-division or
    per-strategy (that detail stays in the local CSVs for anyone who wants to dig in).
-5. **Update the root `CASE_STUDY.md`** — add or refresh a single-line index entry linking to
+5. **Update `reports/CASE_STUDY.md`** — add or refresh a single-line index entry linking to
    `reports/<label>/CASE_STUDY.md` with its one-line verdict. Only add an entry once the report
    file actually exists; never describe a test that hasn't been run.
 6. **Tell the user the headline number plainly** in your reply — including if it's a loss.

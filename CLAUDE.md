@@ -83,7 +83,7 @@ uv run ruff check . && uv run ruff format . && uv run mypy src
 uv run pitch-edge serve               # dashboard — one page, a question box, an Evidence section
 uv run pitch-edge ask "top 4 bets"    # the only Q&A entrypoint; also "<team> vs <team>", "what's on <day>"
 uv run pitch-edge refresh [--fast]    # ingest → features → backtests → RAG
-uv run pitch-edge {setup|ingest|features|backtest|ablation|rag-eval|artifacts|health|export|schedule}
+uv run pitch-edge {setup|ingest|features|backtest|ablation|rag-eval|health|export|schedule}
 uv run pitch-edge {ingest-pmxt|map-pmxt|backtest-timing}   # Polymarket order-book archive + tick-timing backtest
 uv run pitch-edge lake-sync [--only …] [--full-refresh]   # mirror lakehouse tables into lake_* tables
 uv run pitch-edge research {register|status|grade|ledger|import-trials|review}   # ledger + ladder
@@ -145,4 +145,3 @@ opens only short-lived read-only connections (`_read_cached` / `_query_cached`, 
   instead of local Ollama.
 - **Stubs by design:** stadium audio (no licensed feed), OpenSky charter attribution. The vendored WhoScored
   scraper (`vendor/whoscored/`, see `vendor/NOTICE.md`) is not wired into ingestion.
-- `pitch-edge artifacts` still writes dashboard-artifact JSONs that the current dashboard does not read.

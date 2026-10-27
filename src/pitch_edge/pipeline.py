@@ -340,7 +340,4 @@ def full_refresh(
             summary["backtest"] = results_table(results).to_dict(orient="records")
             summary["calibration"] = calibration_table(results).to_dict(orient="records")
         summary["rag_docs"] = build_rag_index(wh).count()
-        from pitch_edge.artifacts import build_all_artifacts
-
-        summary["artifacts"] = build_all_artifacts(wh, features if not features.empty else None)
     return summary
