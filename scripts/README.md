@@ -12,7 +12,12 @@ an order.
   (the-odds-api, regions uk,eu, 2 credits per league; each league at most once per 23.5 h, never while fewer
   than 60 credits remain, league list trimmed so the projected spend stays ≤ 450 credits/month), then
   `paper decide` (every registered paper strategy).
-- **Once a day:** `paper settle` against the lake's closing prices (last run time in `data/paper/.last_settle`).
+- **Every hour, after `decide`:** `paper settle` against the lake's closing prices, so a decision settles in the
+  first cycle after the lake has its close.
+- **Missed cycles:** a cycle that starts more than 1.5 x the interval after the previous one is logged as
+  `missed N cycles since <ts>`. `paper status` lists cycles observed vs expected and the longest gaps (derived
+  from `decide_log`); `paper report` prints each primary segment's `window_coverage` (share of evaluation-window
+  hours with a cycle) next to its CLV. Gaps are reported, never filled.
 - **Log:** `data/logs/paper_loop.log`; launchd's own stdout/stderr go to `data/logs/paper_loop.launchd.log`.
 - **Single instance:** the script writes its pid to `data/paper/paper_loop.pid` and refuses to start while that
   pid is alive; the pidfile is removed on exit.
@@ -43,8 +48,8 @@ launchctl bootout gui/$(id -u)/local.pitch-edge.paper-loop
 ```
 
 Without launchd (e.g. for a one-off session): `nohup caffeinate -i scripts/paper_loop.sh >/dev/null 2>&1 &`,
-stopped with `kill $(cat data/paper/paper_loop.pid)`. The interval and settlement period can be overridden with
-`PAPER_LOOP_INTERVAL_S` (default 3600) and `PAPER_SETTLE_EVERY_S` (default 86400).
+stopped with `kill $(cat data/paper/paper_loop.pid)`. The interval can be overridden with
+`PAPER_LOOP_INTERVAL_S` (default 3600).
 
 ## Warehouse summary
 

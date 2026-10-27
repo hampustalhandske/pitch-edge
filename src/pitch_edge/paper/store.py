@@ -15,7 +15,9 @@ Tables:
 - `provisional_settlements`: at most one row per decision without a lake close after the grace period
   (our own post-decision snapshot, or `none`); superseded in reporting by a later final settlement.
 - `decision_flags`: append-only annotations (`void` for postponed matches or false fixture merges).
-- `decide_log`: one row per strategy run (opportunity frequency: fixtures evaluated / qualifying).
+- `decide_log`: one row per strategy run (opportunity frequency: fixtures evaluated / qualifying). All
+  strategies of one loop cycle share the cycle's `decided_at`, so its distinct values are the cycle record
+  (`cycle_starts`).
 - `collect_log`: one row per collector call, including the-odds-api credits remaining (budget guard).
 
 All timestamps are stored as naive UTC `TIMESTAMP` and returned as tz-aware UTC pandas columns.
@@ -669,6 +671,12 @@ class PaperStore:
 
     def decide_log(self) -> pd.DataFrame:
         return self._df("SELECT * FROM decide_log ORDER BY decided_at, strategy_id")
+
+    def cycle_starts(self) -> list[datetime]:
+        """Time of every loop cycle that ran the strategies, oldest first (tz-aware UTC): the distinct
+        `decided_at` values of `decide_log`."""
+        rows = self.con.execute("SELECT DISTINCT decided_at FROM decide_log ORDER BY decided_at").fetchall()
+        return [r[0].replace(tzinfo=UTC) for r in rows]
 
     def consecutive_errors(self, source: str, scope: str) -> tuple[int, datetime | None]:
         """Number of `error` calls for (`source`, `scope`) since its last fetched call, and when the latest

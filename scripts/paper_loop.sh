@@ -8,16 +8,16 @@
 # Every hour: collect Polymarket + Kalshi books, collect the-odds-api (every book in regions uk,eu, 2 credits
 # per league; the collector calls each league at most once per 23.5 h, never while credits remaining < 60,
 # and trims the league list so the projected monthly spend stays <= 450), then run every strategy.
-# Once a day: settle finished decisions against the lake's closing prices.
+# Every hour, after that: settle finished decisions against the lake's closing prices, so a decision settles
+# in the first cycle after the lake has its close. A cycle that starts more than 1.5 x the interval after the
+# previous one (the Mac slept) is logged as "missed N cycles since <ts>".
 # Log: data/logs/paper_loop.log. Stop: kill the PID in data/paper/paper_loop.pid (the trap removes the
 # pidfile; a second copy refuses to start while that pid is alive).
 set -u
 cd "$(dirname "$0")/.." || exit 1
 
 INTERVAL_S="${PAPER_LOOP_INTERVAL_S:-3600}"
-SETTLE_EVERY_S="${PAPER_SETTLE_EVERY_S:-86400}"
 LOG="data/logs/paper_loop.log"
-STAMP="data/paper/.last_settle"
 PIDFILE="data/paper/paper_loop.pid"
 mkdir -p data/logs data/paper
 
@@ -39,17 +39,20 @@ trap 'exit 0' TERM INT
 pe() { arch -arm64 uv run pitch-edge "$@" >>"$LOG" 2>&1; }
 log() { echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) $*" >>"$LOG"; }
 
-log "paper loop started (pid $$, interval ${INTERVAL_S}s, settle every ${SETTLE_EVERY_S}s)"
+log "paper loop started (pid $$, interval ${INTERVAL_S}s)"
+last_start=0
 while true; do
+  cycle_start=$(date +%s)
+  if [ "$last_start" -gt 0 ] && [ $((cycle_start - last_start)) -gt $((INTERVAL_S * 3 / 2)) ]; then
+    log "missed $(( (cycle_start - last_start + INTERVAL_S / 2) / INTERVAL_S - 1 )) cycles since $(date -u -r "$last_start" +%Y-%m-%dT%H:%M:%SZ)"
+  fi
+  last_start=$cycle_start
   log "cycle start"
   pe paper collect --sources polymarket,kalshi || log "collect polymarket,kalshi exited non-zero"
   pe -v paper collect --sources odds_api || log "collect odds_api exited non-zero"
   pe paper decide || log "decide exited non-zero"
+  pe paper settle || log "settle exited non-zero"
   now=$(date +%s)
-  last=$(cat "$STAMP" 2>/dev/null || echo 0)
-  if [ $((now - last)) -ge "$SETTLE_EVERY_S" ]; then
-    if pe paper settle; then echo "$now" > "$STAMP"; else log "settle exited non-zero"; fi
-  fi
   log "cycle end"
   # Wall-clock schedule: wait in short steps until the next cycle is due, so after the machine wakes from sleep
   # (lid closed) an overdue cycle starts within a minute instead of after the remainder of a frozen hour-long sleep.

@@ -151,7 +151,8 @@ def settle(
 @paper_app.command()
 def report(n_boot: int = 2000) -> None:
     """Per strategy and segment (primary / exploratory / unregistered): decisions, settlements, mean CLV on
-    lake closes with a match-day block-bootstrap CI, ROI, and opportunity frequency. Read-only."""
+    lake closes with a match-day block-bootstrap CI, ROI, evaluation-window coverage (share of hours with a
+    loop cycle), and opportunity frequency. Read-only."""
     from pitch_edge.paper.report import report_notes, summarise, v2_summary
 
     store = PaperStore.open_read_only(paper_db_path())
@@ -198,7 +199,10 @@ def report(n_boot: int = 2000) -> None:
 
 @paper_app.command()
 def status() -> None:
-    """Row counts, quotes per source, the-odds-api credits remaining. Read-only."""
+    """Row counts, quotes per source, the-odds-api credits remaining, and loop cycles observed vs expected
+    with the longest gaps. Read-only."""
+    from pitch_edge.paper.report import CYCLE_INTERVAL, cycle_gaps
+
     store = PaperStore.open_read_only(paper_db_path())
     if store is None:
         rprint(f"No paper ledger yet (no quotes collected) at {paper_db_path()}")
@@ -217,4 +221,15 @@ def status() -> None:
         ).fetchall():
             t.add_row(f"quotes[{src}]", f"{n} rows, {fx} fixtures, last {last} UTC")
         t.add_row("odds_api credits remaining", str(store.budget("odds_api")))
+        starts = store.cycle_starts()
+        gaps = cycle_gaps(starts, CYCLE_INTERVAL)
+        if starts:
+            expected = round((starts[-1] - starts[0]) / CYCLE_INTERVAL) + 1
+            t.add_row(
+                "cycles observed vs expected",
+                f"{len(starts)} of {expected} since {starts[0]:%Y-%m-%d %H:%M} UTC (last {starts[-1]:%Y-%m-%d %H:%M})",
+            )
+            t.add_row("cycle gaps", f"{len(gaps)} gap(s), {sum(g.missed for g in gaps)} missed cycles")
         rprint(t)
+        for g in sorted(gaps, key=lambda g: g.missed, reverse=True)[:5]:
+            rprint(f"gap {g.start:%Y-%m-%d %H:%M} -> {g.end:%Y-%m-%d %H:%M} UTC: {g.missed} missed cycles")

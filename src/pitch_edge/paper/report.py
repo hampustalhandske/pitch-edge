@@ -13,10 +13,17 @@ Within a segment the CLV metric (mean CLV, 95% block-bootstrap CI by match-day v
 Provisional settlements (our own snapshot or no close) are counted and averaged separately and never enter
 the metric. Void decisions and fixtures in leagues without a lake close/result source (UCL) are counted
 as `n_void` / `n_no_benchmark` and excluded from every metric.
+
+The loop runs one cycle per hour but the machine sleeps, so cycles are missed and market snapshots cannot be
+backfilled. `cycle_gaps` and `window_coverage` measure that from the cycle record (`PaperStore.cycle_starts`);
+the primary segment carries its `window_coverage` next to the CLV results. Gaps are reported, never filled,
+and the CLV computation does not depend on them.
 """
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+from datetime import UTC, datetime, time, timedelta
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -24,7 +31,7 @@ import numpy as np
 import pandas as pd
 
 from pitch_edge.paper.fixtures import FD_DIVISIONS
-from pitch_edge.paper.store import PaperStore
+from pitch_edge.paper.store import PaperStore, utc_now
 from pitch_edge.research.stats import block_bootstrap
 
 COLUMNS = [
@@ -43,9 +50,43 @@ COLUMNS = [
     "n_match_days",
     "roi",
     "provisional_mean_clv",
+    "window_coverage",
     "registration_cut",
 ]
+CYCLE_INTERVAL = timedelta(hours=1)
+GAP_FACTOR = 1.5
 NO_BENCHMARK_LEAGUES = ("UCL",)
+
+
+@dataclass(frozen=True)
+class CycleGap:
+    """Two consecutive loop cycles further apart than `GAP_FACTOR` x the interval; `missed` cycles never ran."""
+
+    start: datetime  # the cycle before the gap
+    end: datetime  # the cycle after the gap
+    missed: int
+
+
+def cycle_gaps(starts: list[datetime], interval: timedelta = CYCLE_INTERVAL) -> list[CycleGap]:
+    """Gaps in a sorted list of cycle start times. Consecutive starts more than `GAP_FACTOR` x `interval`
+    apart are a gap that missed round(gap / interval) - 1 cycles."""
+    gaps = []
+    for a, b in zip(starts, starts[1:], strict=False):
+        if b - a > GAP_FACTOR * interval:
+            gaps.append(CycleGap(a, b, round((b - a) / interval) - 1))
+    return gaps
+
+
+def window_coverage(
+    starts: list[datetime], window_start: datetime, window_end: datetime, interval: timedelta = CYCLE_INTERVAL
+) -> float:
+    """Share of the `interval`-long slots from `window_start` to `window_end` that contain at least one
+    cycle start. Only whole slots count; NaN when the window holds none. Cycles outside the window are ignored."""
+    n_slots = int((window_end - window_start) / interval)
+    if n_slots <= 0:
+        return float("nan")
+    hit = {int((t - window_start) / interval) for t in starts if window_start <= t < window_start + n_slots * interval}
+    return len(hit) / n_slots
 
 
 class LedgerLike(Protocol):
@@ -108,8 +149,14 @@ def summarise(
     ledger: LedgerLike | None = None,
     n_boot: int = 2000,
     seed: int = 0,
+    now: datetime | None = None,
+    interval: timedelta = CYCLE_INTERVAL,
 ) -> pd.DataFrame:
-    """One row per (strategy, segment) with columns `COLUMNS`; empty when nothing has been decided."""
+    """One row per (strategy, segment) with columns `COLUMNS`; empty when nothing has been decided.
+
+    `window_coverage` (primary segments only, else NaN) is the share of hours between the later of the
+    evaluation window start and the ledger registration and the earlier of the window end and `now` that
+    contain a loop cycle."""
     decisions = store.decisions()
     if decisions.empty:
         return pd.DataFrame(columns=COLUMNS)
@@ -127,7 +174,10 @@ def summarise(
     df["void"] = df["decision_id"].isin(store.voided_decision_ids())
     df["no_benchmark"] = df["fixture_key"].map(_league).isin(NO_BENCHMARK_LEAGUES)
 
+    now = now or utc_now()
+    starts = store.cycle_starts()
     cuts: dict[str, str] = {}
+    coverage: dict[str, float] = {}
     segments = []
     for hyp in df["hypothesis_id"].unique():
         reg = ledger.registration(str(hyp))
@@ -139,6 +189,9 @@ def summarise(
         recorded = pd.Timestamp(reg["recorded_at"])
         recorded = recorded.tz_localize("UTC") if recorded.tzinfo is None else recorded.tz_convert("UTC")
         cuts[str(hyp)] = f"evaluation {window[0]}..{window[1]}, after ledger registration {recorded.isoformat()}"
+        win_start = max(datetime.combine(window[0], time.min, tzinfo=UTC), recorded.to_pydatetime())
+        win_end = min(datetime.combine(window[1], time.min, tzinfo=UTC) + timedelta(days=1), now)
+        coverage[str(hyp)] = window_coverage(starts, win_start, win_end, interval)
         sub = df[mask]
         day = sub["decided_at"].dt.date
         primary = (day >= window[0]) & (day <= window[1]) & (sub["decided_at"] > recorded)
@@ -153,6 +206,7 @@ def summarise(
                 "hypothesis_id": hyp,
                 "segment": seg,
                 **_segment_row(g, n_boot, seed),
+                "window_coverage": coverage.get(str(hyp), np.nan) if seg == "primary" else np.nan,
                 "registration_cut": cuts.get(str(hyp), ""),
             }
         )
@@ -175,6 +229,16 @@ def report_notes(rep: pd.DataFrame) -> list[str]:
         "is tautological for live data (the best soft price is itself one of the response's quotes), so it never "
         "binds; only the <= 1.10 x sharp-price cap can reject a price.",
     ]
+    notes.append(
+        "L5 (forward) evidence is reported with its coverage: the loop runs hourly but the machine sleeps, so "
+        "some hours have no cycle and their snapshots are lost. window_coverage is the share of hours in a "
+        "primary segment's evaluation window with a cycle; gaps are never filled and CLV is computed on the "
+        "decisions that were made. `paper status` lists the gaps."
+    )
+    if "window_coverage" in rep.columns:
+        for r in rep[rep["segment"] == "primary"].itertuples():
+            if pd.notna(r.window_coverage):
+                notes.append(f"{r.strategy_id} primary: {r.window_coverage:.0%} of evaluation-window hours covered.")
     cuts = sorted({c for c in rep.get("registration_cut", pd.Series(dtype=str)) if c})
     for c in cuts:
         notes.append(f"primary segment = {c}.")
