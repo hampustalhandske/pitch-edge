@@ -2,8 +2,8 @@
 
 `q(sql, params)` runs one SELECT through `pitch_edge.lake.client.Lake` and returns a pandas DataFrame,
 retrying when the API answers 503 (the lake allows two concurrent queries shared with other users).
-`describe(table)` returns the table's metadata. Credentials come from LAKEHOUSE_* in the repo's .env,
-loaded here into the process environment without printing them.
+Credentials come from LAKEHOUSE_* in the repo's .env, loaded here into the process environment without
+printing them.
 """
 
 from __future__ import annotations
@@ -45,8 +45,3 @@ def _with_retry(fn, *args, attempts: int = 20):  # type: ignore[no-untyped-def]
 def q(sql: str, params: list[Any] | None = None) -> pd.DataFrame:
     """One read-only query -> DataFrame (all rows)."""
     return _with_retry(lambda lake, s, p: lake.sql(s, p), sql, params)
-
-
-def describe(table: str) -> dict[str, Any]:
-    """Columns, key columns, date ranges, point-in-time rule and caveats of a lake table."""
-    return _with_retry(lambda lake, t: lake.describe(t), table)
