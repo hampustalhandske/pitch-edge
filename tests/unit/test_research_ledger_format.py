@@ -1,0 +1,64 @@
+"""The research ledger's hash-chain format is shared with other projects' ledgers, which recompute it
+independently: these fixed vectors fail if the columns, the canonical JSON or the chain hash change.
+
+Format: row_json = json.dumps({column: canonical value}, sort_keys=True, separators=(",", ":")), with
+datetimes as naive-UTC isoformat, NaN as the string "NaN" and None as null; row_hash =
+sha256_hex(f"{prev_hash}|{table}|{row_json}"); the first entry's prev_hash is "0" * 64."""
+
+from datetime import datetime
+
+from pitch_edge.research.ledger import GENESIS, _chain_hash, _row_json
+
+REGISTRATION = {
+    "id": "demo-v1",
+    "family": "demo",
+    "sha256": "ab" * 32,
+    "path": "research/registry/demo-v1.yaml",
+    "registered_at": datetime(2026, 10, 28, 1, 2, 3),
+    "recorded_at": datetime(2026, 10, 28, 1, 2, 4, 500000),
+}
+TRIAL = {
+    "trial_id": "t1",
+    "hypothesis_id": "demo-v1",
+    "family": "demo",
+    "config_json": '{"theta":0.02}',
+    "config_hash": "cd" * 32,
+    "git_sha": "0" * 40,
+    "data_snapshot": "lake@2026-10-28",
+    "run_at": datetime(2026, 10, 28, 2, 0, 0),
+    "n": 300,
+    "metric_name": "clv_log",
+    "metric_value": 0.0123,
+    "ci_lo": float("nan"),
+    "ci_hi": None,
+    "p_value": 0.01,
+    "direction": "positive",
+    "extra_json": "{}",
+}
+REGISTRATION_HASH = "13c98f3cdd15afc3fd9573cd933721ee65a81746ae35992fe81d064f361d3894"
+TRIAL_HASH = "1887978452d3a9f6fde6560cf0fafbd63acf36bf81a3b20ae06dd1eb2ad1d623"
+
+
+def test_genesis_is_64_zeros():
+    assert GENESIS == "0" * 64
+
+
+def test_registration_row_json_is_sorted_compact_naive_iso():
+    assert _row_json("registrations", REGISTRATION) == (
+        '{"family":"demo","id":"demo-v1","path":"research/registry/demo-v1.yaml",'
+        '"recorded_at":"2026-10-28T01:02:04.500000","registered_at":"2026-10-28T01:02:03",'
+        f'"sha256":"{"ab" * 32}"}}'
+    )
+
+
+def test_chain_hash_vectors():
+    first = _chain_hash(GENESIS, "registrations", REGISTRATION)
+    assert first == REGISTRATION_HASH
+    assert _chain_hash(first, "trials", TRIAL) == TRIAL_HASH
+
+
+def test_trial_row_json_encodes_nan_as_string_and_none_as_null():
+    row_json = _row_json("trials", TRIAL)
+    assert '"ci_lo":"NaN"' in row_json
+    assert '"ci_hi":null' in row_json
+    assert '"n":300,' in row_json
