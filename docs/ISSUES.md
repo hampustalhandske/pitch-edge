@@ -312,3 +312,18 @@ projects; M8 traceability; S2 lake capacity; S4 decimal-odds instrument with CLV
   snapshot file. The first two are done with mocked tests; the study pulls are open.
 - Blocked by: none. Blocks: none.
 - Commits: see git log for `PE-25`.
+
+## PE-26 Post-2025 segments have no sharp close from 2026-04-17 to 05-04
+- Status: open
+- Priority: nice (honest reporting)
+- Raised by: lakehouse (LK-42)
+- Evidence: `fd_matches` has no Betfair Exchange close on any match from 2026-04-20 to 2026-05-03 and on about
+  half the matches of 04-17, 04-19 and 05-04 (about 830 matches, every division); RUS has none in 2026. The
+  post segments of R2-Q1, R2-Q2, R2-Q3, R3 and R6 (2024-08 or 2025-07 to 2026-10-19) score against that close.
+  Their eligibility filters require a valid close, so those matches are dropped, never scored against a soft
+  close. Paper decisions start on 2026-10-20 and are unaffected.
+- Acceptance: each affected report states the gap and its match count beside the post-segment numbers. If
+  LK-42 fills the columns, a reproduction run on the filled data is reported as a sensitivity; the recorded
+  first run stays the result of record.
+- Blocked by: LK-42. Blocks: none.
+- Commits: none yet.
