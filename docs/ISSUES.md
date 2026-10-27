@@ -260,3 +260,30 @@ projects; M8 traceability; S2 lake capacity; S4 decimal-odds instrument with CLV
   chain, so a shared checker can tell the versions apart.
 - Blocked by: none. Blocks: AT-40.
 - Commits: none yet.
+
+## PE-22 R3 features drop ClubElo and xG for clubs with two football-data spellings
+- Status: done
+- Priority: should (wrong numbers on the next data pull)
+- Raised by: lakehouse audit (PE-A1)
+- Evidence: `research/studies/r3-common/features.py` `fd_team_keys` inverts football-data key -> club_id and
+  keeps one spelling per club, and the ClubElo and Understat merges joined on the raw panel key. After the
+  lake's club-registry merge four clubs have two spellings (Sparta Rotterdam, Oster, Estrela, Torpedo
+  Moscow), so matches written the other way would get NaN Elo and xG. The local R3 snapshot predates the
+  merge and has no club with two spellings, so recorded R3 results are unaffected.
+- Acceptance: both merges go through the club_id, so every spelling of a club gets the same features; on the
+  current snapshot the change leaves every panel key as it is.
+- Result: `canonical_key` maps panel and feature keys to one spelling per club_id before both merges; all 622
+  snapshot keys are unchanged, and two spellings of one club merge in a synthetic check.
+- Blocked by: none. Blocks: none.
+- Commits: see git log for `PE-22`.
+
+## PE-23 Unused lake helpers in study code
+- Status: done
+- Priority: nice (simplicity)
+- Raised by: lakehouse audit (PE-A2, PE-A3)
+- Evidence: `research/studies/r3-common/lake.py` `describe` called `Lake.describe`, which the client does not
+  have, and had no callers. `research/studies/r2-common/lake_sql.py` had no callers and defaulted to the JSON
+  format, which the API caps at 10,000 rows.
+- Acceptance: both are deleted; studies read the lake through `pitch_edge.lake.client.Lake`.
+- Blocked by: none. Blocks: none.
+- Commits: see git log for `PE-23`.

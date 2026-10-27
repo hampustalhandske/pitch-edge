@@ -82,11 +82,18 @@ def assert_point_in_time(panel: pd.DataFrame, known_col: str) -> int:
 
 
 def fd_team_keys() -> tuple[dict[str, int], dict[int, str]]:
-    """football_data source_id 'Country:Name' -> club_id, and back."""
+    """football_data source_id 'Country:Name' -> club_id, and back. A club with several football-data
+    spellings keeps one of them in the back map; pass panel keys through `canonical_key` before merging."""
     csm = pd.read_parquet(D / "club_source_map.parquet")
     f = csm[csm.source == "football_data"]
     fwd = dict(zip(f.source_id, f.club_id, strict=True))
     return fwd, {v: k for k, v in fwd.items()}
+
+
+def canonical_key(keys: pd.Series, fwd: dict[str, int], back: dict[int, str]) -> pd.Series:
+    """Map each fd team key to its club's one spelling in `back`, so every spelling of a club merges with
+    the same ClubElo / Understat rows; keys without a club_id stay as they are."""
+    return keys.map(fwd).map(back).fillna(keys)
 
 
 # --------------------------------------------------------------------------------------- universe
@@ -222,10 +229,13 @@ def club_elo(panel: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
     extra = _clubelo_overlap_map(ce)
     n_csm = ce.loc[ce["fd_key"].notna(), "club_slug"].nunique()
     ce["fd_key"] = ce["fd_key"].fillna(ce["club_slug"].map(extra))
-    ce = ce.dropna(subset=["fd_key"]).drop_duplicates(["fd_key", "date"]).sort_values("date")
+    ce = ce.dropna(subset=["fd_key"])
+    ce["fd_key"] = canonical_key(ce["fd_key"], fwd, back)
+    ce = ce.drop_duplicates(["fd_key", "date"]).sort_values("date")
     out = {}
     for side in ("home", "away"):
         left = panel[["snapshot_date", f"{side}_key"]].copy()
+        left[f"{side}_key"] = canonical_key(left[f"{side}_key"], fwd, back)
         left["i"] = np.arange(len(left))
         left["by"] = left["snapshot_date"] - pd.Timedelta(days=1)  # rows dated <= snapshot - 1 day
         left = left.sort_values("by")
@@ -255,7 +265,7 @@ def club_elo(panel: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
 
 def xg_luck(panel: pd.DataFrame) -> pd.DataFrame:
     csm = pd.read_parquet(D / "club_source_map.parquet")
-    _, back = fd_team_keys()
+    fwd, back = fd_team_keys()
     us_map = csm[csm.source == "understat"]
     us_to_fd = {int(s): back.get(c) for s, c in zip(us_map.source_id, us_map.club_id, strict=True)}
     us = pd.read_parquet(D / "us_team_matches.parquet")
@@ -290,6 +300,7 @@ def xg_luck(panel: pd.DataFrame) -> pd.DataFrame:
     out = {}
     for side in ("home", "away"):
         left = panel[["snapshot_date", f"{side}_key"]].copy()
+        left[f"{side}_key"] = canonical_key(left[f"{side}_key"], fwd, back)
         left["i"] = np.arange(len(left))
         left["by"] = left["snapshot_date"] - pd.Timedelta(days=1)
         left = left.sort_values("by")
