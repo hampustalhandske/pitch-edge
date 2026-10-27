@@ -78,6 +78,9 @@ class Lake:
     holds at most one of the service's query slots. When the service is busy (HTTP 503), `sql_batches`
     waits for `Retry-After` seconds (`BUSY_FALLBACK_S` if absent, at most `BUSY_MAX_WAIT_S`) and re-sends,
     up to `BUSY_RETRIES` times, then raises `LakehouseError`.
+
+    `version` is the lake build (`X-Lakehouse-Version` header) that answered the last successful query, or
+    None before the first one or when the service sends no version; record it with whatever a pull writes.
     """
 
     def __init__(
@@ -88,6 +91,7 @@ class Lake:
         sleep: Callable[[float], None] = time.sleep,
     ) -> None:
         self._sleep = sleep
+        self.version: str | None = None
         self.base_url = (base_url or os.getenv("LAKEHOUSE_API_URL") or DEFAULT_URL).rstrip("/")
         self._http = httpx.Client(
             base_url=self.base_url,
@@ -112,6 +116,7 @@ class Lake:
                     logger.warning("lake busy (HTTP 503); retry %d/%d in %.0fs", attempt + 1, BUSY_RETRIES, delay)
                 else:
                     _raise_for_status(response)
+                    self.version = response.headers.get("X-Lakehouse-Version")
                     yield from pa.ipc.open_stream(io.BufferedReader(_ResponseReader(response)))
                     return
             self._sleep(delay)

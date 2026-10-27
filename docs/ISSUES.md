@@ -300,3 +300,14 @@ projects; M8 traceability; S2 lake capacity; S4 decimal-odds instrument with CLV
   its per-call cost is measured in the same profile. The submitted R2-Q3 folders stay as submitted.
 - Blocked by: PE-9. Blocks: none.
 - Commits: none yet.
+
+## PE-25 Record which lake build answered a pull
+- Status: in-progress
+- Priority: should (M8)
+- Raised by: lakehouse (LK-1: the API reports a committed build in `X-Lakehouse-Version`)
+- Evidence: study pulls and lake-sync record the pull time and row counts but not the lake build, so a
+  result cannot be traced to the lake code that produced its data.
+- Acceptance: `Lake.version` holds the build that answered the last query (done, with a mocked test); new
+  study pulls write it into their snapshot file, and lake-sync writes it into `lake_sync_runs`.
+- Blocked by: none. Blocks: none.
+- Commits: see git log for `PE-25`.

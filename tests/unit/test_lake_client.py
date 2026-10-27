@@ -42,6 +42,20 @@ def test_503_then_200_waits_retry_after_and_succeeds():
 
 
 @pytest.mark.unit
+def test_version_is_the_build_that_answered_the_last_query():
+    responses = [
+        httpx.Response(200, headers={"X-Lakehouse-Version": "856ab2f64e97"}, content=_arrow_body()),
+        httpx.Response(200, content=_arrow_body()),
+    ]
+    lake = _lake(lambda request: responses.pop(0), [])
+    assert lake.version is None
+    lake.sql("SELECT 1")
+    assert lake.version == "856ab2f64e97"
+    lake.sql("SELECT 1")
+    assert lake.version is None
+
+
+@pytest.mark.unit
 def test_repeated_503_raises_after_the_cap():
     calls: list[int] = []
 
