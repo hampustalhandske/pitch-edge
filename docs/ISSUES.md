@@ -287,3 +287,16 @@ projects; M8 traceability; S2 lake capacity; S4 decimal-odds instrument with CLV
 - Acceptance: both are deleted; studies read the lake through `pitch_edge.lake.client.Lake`.
 - Blocked by: none. Blocks: none.
 - Commits: see git log for `PE-23`.
+
+## PE-24 Exported strategies filter pandas frames on every stake call
+- Status: open
+- Priority: nice (S2)
+- Raised by: pitch-edge (E1 profile, with edgelab EL-32)
+- Evidence: in a profile of edgelab's backtest of the R2-Q3 bet365 strategy (2018-08 to 2020-03, 14,064
+  bars), the strategy's `stake` and `_forecast_now` (`research/audits/edgelab-r2q3/strategies/*/strategy.py`)
+  took about 12% of runtime, 6.9 ms per call, filtering arrow-backed pandas frames each time. The rest is
+  edgelab's per-bar view build, filed as EL-32.
+- Acceptance: the next strategy pitch-edge exports indexes its features by (ts, symbol) once at load, and
+  its per-call cost is measured in the same profile. The submitted R2-Q3 folders stay as submitted.
+- Blocked by: PE-9. Blocks: none.
+- Commits: none yet.
