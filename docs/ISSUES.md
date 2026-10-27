@@ -160,7 +160,9 @@ projects; M8 traceability; S2 lake capacity; S4 decimal-odds instrument with CLV
   lists UCL.
 - Acceptance: either UCL leaves the paper strategies' universe (stated as a deviation in the report), or a sharp
   UCL close source is found and used.
-- Blocked by: none. Blocks: none.
+- Lead: the lake's planned OddsPapi recorder (LK-45) would give Pinnacle and Singbet UCL price paths from
+  2026-01 with kickoff times, and FotMob the scores (LK-27).
+- Blocked by: LK-45. Blocks: none.
 - Commits: none yet.
 
 ## PE-14 Paper strategies that cannot produce evidence
@@ -321,9 +323,11 @@ projects; M8 traceability; S2 lake capacity; S4 decimal-odds instrument with CLV
   half the matches of 04-17, 04-19 and 05-04 (about 830 matches, every division); RUS has none in 2026. The
   post segments of R2-Q1, R2-Q2, R2-Q3, R3 and R6 (2024-08 or 2025-07 to 2026-10-19) score against that close.
   Their eligibility filters require a valid close, so those matches are dropped, never scored against a soft
-  close. Paper decisions start on 2026-10-20 and are unaffected.
-- Acceptance: each affected report states the gap and its match count beside the post-segment numbers. If
-  LK-42 fills the columns, a reproduction run on the filled data is reported as a sensitivity; the recorded
-  first run stays the result of record.
-- Blocked by: LK-42. Blocks: none.
+  close. Paper decisions start on 2026-10-20 and are unaffected. football-data never published these closes
+  (the lake re-read the source files on 2026-10-27), so the lake matches its source and the recorded runs
+  stand.
+- Acceptance: each affected report states the gap and its match count beside the post-segment numbers. If the
+  lake's OddsPapi backfill (LK-45) gives a sharp close for the span, a run on it is reported as a sensitivity;
+  the recorded first run stays the result of record.
+- Blocked by: none. Blocks: none.
 - Commits: none yet.
