@@ -60,13 +60,18 @@ def feature_truncation() -> dict:
                 cols_unexplained.add(c)
     ev = full[(full["date"] >= "2019-07-01") & (full["date"] <= "2025-06-30")].dropna(subset=["referee"])
     ev_dup_rows = int(ev.duplicated(["referee", "date"], keep=False).sum())
-    return {"cut": str(CUT.date()), "rows_compared": int(len(a)), "columns_compared": len(cols),
-            "columns_differing": {c: n for c, n in differing_used.items() if c in cols_unexplained},
-            "used_columns_differing_only_on_same_day_referee_pairs": {
-                c: n for c, n in differing_used.items() if c not in cols_unexplained},
-            "differing_rows_not_a_same_day_referee_pair": sorted(set(unexplained)),
-            "unused_group_columns_differing": differing_unused,
-            "evaluation_window_rows_in_same_day_referee_pairs": ev_dup_rows}
+    return {
+        "cut": str(CUT.date()),
+        "rows_compared": int(len(a)),
+        "columns_compared": len(cols),
+        "columns_differing": {c: n for c, n in differing_used.items() if c in cols_unexplained},
+        "used_columns_differing_only_on_same_day_referee_pairs": {
+            c: n for c, n in differing_used.items() if c not in cols_unexplained
+        },
+        "differing_rows_not_a_same_day_referee_pair": sorted(set(unexplained)),
+        "unused_group_columns_differing": differing_unused,
+        "evaluation_window_rows_in_same_day_referee_pairs": ev_dup_rows,
+    }
 
 
 def prediction_truncation() -> dict:
@@ -96,12 +101,17 @@ def fold_discipline() -> dict:
 
 
 def main() -> None:
-    res = {"feature_truncation": feature_truncation(), "prediction_truncation": prediction_truncation(),
-           "fold_discipline": fold_discipline()}
+    res = {
+        "feature_truncation": feature_truncation(),
+        "prediction_truncation": prediction_truncation(),
+        "fold_discipline": fold_discipline(),
+    }
     (OUT / "pit.json").write_text(json.dumps(res, indent=2))
     print(json.dumps(res, indent=2))
     ft = res["feature_truncation"]
-    assert not ft["columns_differing"] and not ft["differing_rows_not_a_same_day_referee_pair"], "feature builder is not truncation-invariant"
+    assert not ft["columns_differing"] and not ft["differing_rows_not_a_same_day_referee_pair"], (
+        "feature builder is not truncation-invariant"
+    )
     for m, r in res["prediction_truncation"].items():
         assert r["max_abs_diff"] < 1e-9, f"{m}: predictions depend on later rows ({r['max_abs_diff']})"
 

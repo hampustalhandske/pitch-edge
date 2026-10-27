@@ -24,7 +24,7 @@ from pitch_edge.models import DixonColesMatchModel, GBDTMatchModel, StochasticSt
 
 OUT = Path(__file__).resolve().parents[3] / "data" / "research" / "r7"
 EVAL_END = pd.Timestamp("2025-06-30")
-CFG = dict(min_train_matches=400, retrain_every_days=14, calibrate=True, strategies=[])
+CFG = {"min_train_matches": 400, "retrain_every_days": 14, "calibrate": True, "strategies": []}
 
 MODELS = {
     "dixon_coles": DixonColesMatchModel,

@@ -33,9 +33,17 @@ REPO = HERE.parents[2]
 OUT = REPO / "data" / "research" / "r7"
 SLUG = {"dixon_coles": "dixon-coles", "gbdt": "gbdt", "stochastic_strength": "stochastic-strength"}
 SRC = REPO / "src" / "pitch_edge"
-CODE_FILES = [HERE / "run.py", HERE / "generate.py", HERE / "pit.py", HERE / "snapshot.py",
-              SRC / "backtest" / "engine.py", SRC / "models" / "poisson.py", SRC / "models" / "gbdt.py",
-              SRC / "models" / "stochastic.py", SRC / "models" / "calibration.py"]
+CODE_FILES = [
+    HERE / "run.py",
+    HERE / "generate.py",
+    HERE / "pit.py",
+    HERE / "snapshot.py",
+    SRC / "backtest" / "engine.py",
+    SRC / "models" / "poisson.py",
+    SRC / "models" / "gbdt.py",
+    SRC / "models" / "stochastic.py",
+    SRC / "models" / "calibration.py",
+]
 EXPLORATORY = (pd.Timestamp("2015-07-01"), pd.Timestamp("2019-06-30"))
 EVALUATION = (pd.Timestamp("2019-07-01"), pd.Timestamp("2025-06-30"))
 SEED, N_BOOT = 20261021, 2000
@@ -82,7 +90,11 @@ def edge_frame(d: pd.DataFrame) -> pd.DataFrame:
     ar = np.arange(len(d))
     raw = np.clip(take(d, [f"raw_{o}" for o in OUTCOMES]), EPS, 1.0)
     cal = np.clip(take(d, [f"p_{o}" for o in OUTCOMES]), EPS, 1.0)
-    pc, pcs, mo = take(d, [f"pc_{o}" for o in OUTCOMES]), take(d, [f"pcs_{o}" for o in OUTCOMES]), take(d, [f"mo_{o}" for o in OUTCOMES])
+    pc, pcs, mo = (
+        take(d, [f"pc_{o}" for o in OUTCOMES]),
+        take(d, [f"pcs_{o}" for o in OUTCOMES]),
+        take(d, [f"mo_{o}" for o in OUTCOMES]),
+    )
     out = d[["match_id", "date", "league_code"]].copy()
     out["edge_bits"] = np.log2(raw[ar, y]) - np.log2(pc[ar, y])
     out["edge_bits_shin"] = np.log2(raw[ar, y]) - np.log2(pcs[ar, y])
@@ -110,7 +122,7 @@ def _bets(d: pd.DataFrame, sel: np.ndarray, k: np.ndarray, edge: np.ndarray) -> 
     pc, pcs = take(d, [f"pc_{o}" for o in OUTCOMES]), take(d, [f"pcs_{o}" for o in OUTCOMES])
     ar = np.arange(len(d))
     taken, p_c, p_s = odds[ar, k], pc[ar, k], pcs[ar, k]
-    won = (d["result"].to_numpy(dtype=int) == k)
+    won = d["result"].to_numpy(dtype=int) == k
     out = d[["match_id", "date", "league_code"]].copy()
     out["outcome"] = np.array(OUTCOMES)[k]
     out["edge"] = edge[ar, k]
@@ -133,20 +145,33 @@ def top4_frame(d: pd.DataFrame, start: pd.Timestamp) -> pd.DataFrame:
 
 
 def per_decision(frame: pd.DataFrame, col: str) -> pd.DataFrame:
-    return pd.DataFrame({
-        "decision_id": frame["match_id"].to_numpy(),
-        "block": frame["date"].dt.strftime("%Y-%m-%d").to_numpy(),
-        "value": frame[col].to_numpy(dtype=float),
-        "league": frame["league_code"].to_numpy(),
-    })
+    return pd.DataFrame(
+        {
+            "decision_id": frame["match_id"].to_numpy(),
+            "block": frame["date"].dt.strftime("%Y-%m-%d").to_numpy(),
+            "value": frame[col].to_numpy(dtype=float),
+            "league": frame["league_code"].to_numpy(),
+        }
+    )
 
 
 def record(reg, config, frame, col, metric, extra, ledger, window="evaluation"):
     pdf = per_decision(frame, col)
     for attempt in range(30):
         try:
-            res = run_trial(reg, config, pdf, metric, ledger, extra["data_snapshot"], extra, n_boot=N_BOOT, seed=SEED,
-                            window=window, code_files=CODE_FILES)
+            res = run_trial(
+                reg,
+                config,
+                pdf,
+                metric,
+                ledger,
+                extra["data_snapshot"],
+                extra,
+                n_boot=N_BOOT,
+                seed=SEED,
+                window=window,
+                code_files=CODE_FILES,
+            )
             break
         except duckdb.IOException as exc:
             if "lock" not in str(exc).lower():
@@ -154,8 +179,10 @@ def record(reg, config, frame, col, metric, extra, ledger, window="evaluation"):
             time.sleep(min(2 + 2 * attempt, 30))
     else:
         raise RuntimeError("ledger stayed locked")
-    print(f"  {metric:28s} {window:11s} {res.metric_value:+.5g} [{res.ci_lo:+.5g}, {res.ci_hi:+.5g}] p={res.p_value:.4f} "
-          f"n={res.n} blocks={res.n_blocks}")
+    print(
+        f"  {metric:28s} {window:11s} {res.metric_value:+.5g} [{res.ci_lo:+.5g}, {res.ci_hi:+.5g}] p={res.p_value:.4f} "
+        f"n={res.n} blocks={res.n_blocks}"
+    )
     return res
 
 
@@ -193,42 +220,76 @@ def main() -> None:
     full = p.set_index("match_id")
     cut = cut.set_index("match_id")
     common = cut.index.intersection(full.index)
-    rep_diff = float(np.abs(full.loc[common, [f"raw_{o}" for o in OUTCOMES]].to_numpy(dtype=float)
-                           - cut.loc[common, [f"raw_{o}" for o in OUTCOMES]].to_numpy(dtype=float)).max())
-    clean = bool(rep_diff < 1e-9 and not pit["feature_truncation"]["columns_differing"]
-                 and not pit["feature_truncation"]["differing_rows_not_a_same_day_referee_pair"]
-                 and pit["prediction_truncation"][model]["max_abs_diff"] < 1e-9
-                 and all(pit["fold_discipline"][model][k] for k in ("train_before_fold", "fold_before_match", "within_14d")))
-    snapshot = (f"warehouse load_feature_frame(min_date=2015-07-01) 2026-10-21 features.parquet sha256:{sha(OUT / 'features.parquet')}; "
-                f"pred_{model}.parquet sha256:{sha(OUT / f'pred_{model}.parquet')}")
+    rep_diff = float(
+        np.abs(
+            full.loc[common, [f"raw_{o}" for o in OUTCOMES]].to_numpy(dtype=float)
+            - cut.loc[common, [f"raw_{o}" for o in OUTCOMES]].to_numpy(dtype=float)
+        ).max()
+    )
+    clean = bool(
+        rep_diff < 1e-9
+        and not pit["feature_truncation"]["columns_differing"]
+        and not pit["feature_truncation"]["differing_rows_not_a_same_day_referee_pair"]
+        and pit["prediction_truncation"][model]["max_abs_diff"] < 1e-9
+        and all(pit["fold_discipline"][model][k] for k in ("train_before_fold", "fold_before_match", "within_14d"))
+    )
+    snapshot = (
+        f"warehouse load_feature_frame(min_date=2015-07-01) 2026-10-21 features.parquet sha256:{sha(OUT / 'features.parquet')}; "
+        f"pred_{model}.parquet sha256:{sha(OUT / f'pred_{model}.parquet')}"
+    )
     slug = SLUG[model]
-    reg = load(REPO / "research" / "registry" / f"outcome-models-{slug}-{'edge-bits' if kind == 'edge' else 'bet-rule'}-v1.yaml")
+    reg = load(
+        REPO
+        / "research"
+        / "registry"
+        / f"outcome-models-{slug}-{'edge-bits' if kind == 'edge' else 'bet-rule'}-v1.yaml"
+    )
     print(reg.id, "clean:", clean, "| rerun max diff", rep_diff)
     d_all = p[p["has_pair"]].copy()
     dropped_all = int((~p["has_pair"]).sum())
     d_all = add_markets(d_all)
-    summary: dict = {"model": model, "hypothesis": reg.id, "clean": clean, "snapshot": snapshot,
-                     "n_predicted_total": int(len(p)), "n_without_pinnacle_pair": dropped_all}
+    summary: dict = {
+        "model": model,
+        "hypothesis": reg.id,
+        "clean": clean,
+        "snapshot": snapshot,
+        "n_predicted_total": int(len(p)),
+        "n_without_pinnacle_pair": dropped_all,
+    }
     config = reg.expand_grid()[0]
     season = np.where(p["date"].dt.month >= 7, p["date"].dt.year, p["date"].dt.year - 1)
     cov = p.assign(season=season).groupby(["league_code", "season"])["has_pair"].agg(["size", "sum"])
     cov.rename(columns={"size": "predicted", "sum": "with_pinnacle_pair"}).reset_index().to_csv(
-        OUT / f"{model}_coverage.csv", index=False)
+        OUT / f"{model}_coverage.csv", index=False
+    )
     for window, (lo, hi) in (("evaluation", EVALUATION), ("exploratory", EXPLORATORY)):
         d = d_all[(d_all["date"] >= lo) & (d_all["date"] <= hi)].reset_index(drop=True)
         pw = p[(p["date"] >= lo) & (p["date"] <= hi)]
-        miss = pw.groupby("league_code")["has_pair"].agg(["size", "sum"]).rename(columns={"size": "predicted", "sum": "with_pair"})
-        extra_base = {"clean": clean, "data_snapshot": snapshot, "pit_assertion": json.dumps(pit)[:1500],
-                      "n_matches_in_window": int(len(pw)), "n_dropped_no_pinnacle_pair": int(len(pw) - len(d)),
-                      "retrain_every_days": 14, "rerun_max_abs_prob_diff_vs_cut_run": rep_diff}
+        miss = (
+            pw.groupby("league_code")["has_pair"]
+            .agg(["size", "sum"])
+            .rename(columns={"size": "predicted", "sum": "with_pair"})
+        )
+        extra_base = {
+            "clean": clean,
+            "data_snapshot": snapshot,
+            "pit_assertion": json.dumps(pit)[:1500],
+            "n_matches_in_window": int(len(pw)),
+            "n_dropped_no_pinnacle_pair": int(len(pw) - len(d)),
+            "retrain_every_days": 14,
+            "rerun_max_abs_prob_diff_vs_cut_run": rep_diff,
+        }
         print(f"-- {window}: {len(d)} matches with complete Pinnacle pair ({len(pw) - len(d)} dropped of {len(pw)})")
         if kind == "edge":
             f = edge_frame(d)
             f.to_parquet(OUT / f"{model}_edge_{window}.parquet")
-            extra = {**extra_base, "within_ceiling": bool(f["edge_bits"].mean() < EDGE_CEILING_BITS),
-                     "open_vs_close_bits_mean": float(f["open_vs_close_bits"].mean()),
-                     "n_calibrated_prob_clipped": int(f["calibrated_prob_clipped"].sum()),
-                     "coverage_by_league": miss.reset_index().to_dict("records")}
+            extra = {
+                **extra_base,
+                "within_ceiling": bool(f["edge_bits"].mean() < EDGE_CEILING_BITS),
+                "open_vs_close_bits_mean": float(f["open_vs_close_bits"].mean()),
+                "n_calibrated_prob_clipped": int(f["calibrated_prob_clipped"].sum()),
+                "coverage_by_league": miss.reset_index().to_dict("records"),
+            }
             res = record(reg, config, f, "edge_bits", "edge_bits", extra, ledger, window)
             summary[f"{window}_primary"] = [res.metric_value, res.ci_lo, res.ci_hi, res.n, res.n_blocks, res.p_value]
             if window == "evaluation":
@@ -238,16 +299,25 @@ def main() -> None:
                 st = stability(f, "edge_bits")
                 st.to_csv(OUT / f"{model}_edge_stability.csv", index=False)
                 print(st.to_string(index=False, float_format=lambda x: f"{x:+.4f}"))
-                ob = block_bootstrap(f["open_vs_close_bits"].to_numpy(), f["date"].dt.strftime("%Y-%m-%d").to_numpy(),
-                                     n_boot=N_BOOT, seed=SEED)
+                ob = block_bootstrap(
+                    f["open_vs_close_bits"].to_numpy(),
+                    f["date"].dt.strftime("%Y-%m-%d").to_numpy(),
+                    n_boot=N_BOOT,
+                    seed=SEED,
+                )
                 summary["open_vs_close_bits"] = [ob.estimate, ob.lo, ob.hi]
         else:
             b = bet_frame(d)
             b.to_parquet(OUT / f"{model}_bets_{window}.parquet")
-            extra = {**extra_base, "within_ceiling": bool(b["clv_log"].mean() < CLV_CEILING),
-                     "n_bets": int(len(b)), "bets_per_match": float(len(b) / max(len(d), 1)),
-                     "outcome_mix": b["outcome"].value_counts().to_dict(), "mean_edge": float(b["edge"].mean()),
-                     "mean_odds": float(b["odds"].mean())}
+            extra = {
+                **extra_base,
+                "within_ceiling": bool(b["clv_log"].mean() < CLV_CEILING),
+                "n_bets": int(len(b)),
+                "bets_per_match": float(len(b) / max(len(d), 1)),
+                "outcome_mix": b["outcome"].value_counts().to_dict(),
+                "mean_edge": float(b["edge"].mean()),
+                "mean_odds": float(b["odds"].mean()),
+            }
             res = record(reg, config, b, "clv_log", "clv_log", extra, ledger, window)
             summary[f"{window}_primary"] = [res.metric_value, res.ci_lo, res.ci_hi, res.n, res.n_blocks, res.p_value]
             if window == "evaluation":
@@ -256,7 +326,16 @@ def main() -> None:
                     summary[m] = [r2.metric_value, r2.ci_lo, r2.ci_hi, r2.n, r2.p_value]
                 t4 = top4_frame(d, EVALUATION[0])
                 t4.to_parquet(OUT / f"{model}_top4.parquet")
-                r4 = record(reg, config, t4, "clv_log", "clv_log_top4_per_window", {"clean": clean, "data_snapshot": snapshot}, ledger, window)
+                r4 = record(
+                    reg,
+                    config,
+                    t4,
+                    "clv_log",
+                    "clv_log_top4_per_window",
+                    {"clean": clean, "data_snapshot": snapshot},
+                    ledger,
+                    window,
+                )
                 summary["clv_log_top4_per_window"] = [r4.metric_value, r4.ci_lo, r4.ci_hi, r4.n, r4.p_value]
                 st = stability(b, "clv_log")
                 st.to_csv(OUT / f"{model}_bet_stability.csv", index=False)

@@ -10,9 +10,18 @@ REG = Path(__file__).resolve().parents[2] / "registry"
 REGISTERED_AT = sys.argv[1]
 
 MODELS = {
-    "dixon_coles": ("dixon-coles", "Dixon-Coles (DixonColesMatchModel: one bivariate-Poisson fit per league, xi=0.0018, 730-day lookback)"),
-    "gbdt": ("gbdt", "GBDT (GBDTMatchModel(include_market=False): sklearn HistGradientBoosting, 300 iters, depth 4, no market features)"),
-    "stochastic_strength": ("stochastic-strength", "stochastic_strength (StochasticStrengthModel: Elo with Ornstein-Uhlenbeck Monte-Carlo noise, 2000 sims)"),
+    "dixon_coles": (
+        "dixon-coles",
+        "Dixon-Coles (DixonColesMatchModel: one bivariate-Poisson fit per league, xi=0.0018, 730-day lookback)",
+    ),
+    "gbdt": (
+        "gbdt",
+        "GBDT (GBDTMatchModel(include_market=False): sklearn HistGradientBoosting, 300 iters, depth 4, no market features)",
+    ),
+    "stochastic_strength": (
+        "stochastic-strength",
+        "stochastic_strength (StochasticStrengthModel: Elo with Ornstein-Uhlenbeck Monte-Carlo noise, 2000 sims)",
+    ),
 }
 
 COMMON_DECISION = """\

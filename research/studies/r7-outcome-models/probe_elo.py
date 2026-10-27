@@ -4,6 +4,7 @@ For every team's consecutive appearances i -> i+1, regress the change in its ext
 on the surprise of match i+1 (points scored minus the Elo-expected score from the pre-match rating). A pre-match rating
 moves with surprise i and not with surprise i+1; a post-match rating does the opposite.
 """
+
 import numpy as np
 import pandas as pd
 
@@ -13,12 +14,20 @@ f = f[(f["date"] < "2019-07-01") & f["home_elo"].notna() & f["away_elo"].notna()
 rows = []
 for side, opp, hadv in (("home", "away", 60.0), ("away", "home", -60.0)):
     elo, oelo = f[f"{side}_elo"], f[f"{opp}_elo"]
-    exp = 1 / (1 + 10 ** ((oelo - elo - hadv) / 400.0)) if side == "home" else 1 / (1 + 10 ** ((oelo + 60.0 - elo) / 400.0))
+    exp = (
+        1 / (1 + 10 ** ((oelo - elo - hadv) / 400.0))
+        if side == "home"
+        else 1 / (1 + 10 ** ((oelo + 60.0 - elo) / 400.0))
+    )
     if side == "home":
         score = np.where(f.home_goals > f.away_goals, 1.0, np.where(f.home_goals == f.away_goals, 0.5, 0.0))
     else:
         score = np.where(f.away_goals > f.home_goals, 1.0, np.where(f.home_goals == f.away_goals, 0.5, 0.0))
-    rows.append(pd.DataFrame({"team": f[f"{side}_team"], "date": f["date"], "mid": f["match_id"], "elo": elo, "surprise": score - exp}))
+    rows.append(
+        pd.DataFrame(
+            {"team": f[f"{side}_team"], "date": f["date"], "mid": f["match_id"], "elo": elo, "surprise": score - exp}
+        )
+    )
 L = pd.concat(rows).sort_values(["team", "date", "mid"])
 g = L.groupby("team")
 L["d_next"] = g["elo"].shift(-1) - L["elo"]
