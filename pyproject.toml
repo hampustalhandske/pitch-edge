@@ -84,7 +84,10 @@ filterwarnings = ["ignore::DeprecationWarning", "ignore::FutureWarning"]
 [tool.ruff]
 line-length = 120
 target-version = "py311"
-extend-exclude = ["src/pitch_edge/vendor"]  # third-party source, see vendor/NOTICE.md
+extend-exclude = [
+    "src/pitch_edge/vendor",  # third-party source, see vendor/NOTICE.md
+    "research/audits/edgelab-r2q3/strategies",  # strategy code exactly as submitted to edgelab
+]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "C4"]

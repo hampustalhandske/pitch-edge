@@ -1,0 +1,23 @@
+{
+  "slug": "pitch-edge-r2q3-bet365",
+  "title": "R2-Q3 stale soft open (bet365_open) negative control",
+  "authors": [
+    "pitch-edge"
+  ],
+  "year": 2026,
+  "source_url": null,
+  "ssrn_id": null,
+  "status": "run",
+  "asset_class": "prediction_market",
+  "frequency": "1h",
+  "tags": [
+    "prediction-market",
+    "pitch-edge"
+  ],
+  "data": {
+    "source": "Exported by pitch_edge.edgelab.export from the pitch-edge warehouse.",
+    "rebuild": "Re-run the pitch-edge export for the same cut-off."
+  },
+  "notes": "",
+  "latest_run": "2026-10-24_1630_2c65a816"
+}

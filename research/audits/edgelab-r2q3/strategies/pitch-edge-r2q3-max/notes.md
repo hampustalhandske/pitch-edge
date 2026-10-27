@@ -1,0 +1,66 @@
+# R2-Q3 stale soft open (max_open)
+
+Pitch-edge study R2-Q3 (`bookmaker-line-structure-stale-soft-open-v1`) as an edgelab prediction-market
+strategy. Price = the market-maximum open quote, an upper bound across many books (pitch-edge: CLV +2.08% [1.91, 2.26], n = 11,172, 2019-07 to 2025-06; the auditor signed it only as a quoted-price fact).
+
+## Rule (one trial, theta = 0.02, no sweep)
+
+At the football-data pre-closing ("open") snapshot of each match, for the three outcomes:
+`edge = log(p_pin_open * odds)` with `p_pin_open` the power-de-vigged Pinnacle open probability and `odds` the
+football-data market-maximum open odds. Back the single outcome with the largest edge if `edge > 0.02`. Quotes above 1.5 x the Pinnacle
+open are data errors: that outcome is never the candidate. Flat stake of 0.005 of NAV per bet, held to resolution.
+
+## Modelling the bookmaker market as binary markets (every choice)
+
+- One binary Yes market per match, `<division>-<yyyymmdd>-<home>-<away>:<win_home|draw|win_away>`, for the
+  match's candidate outcome only: the outcome with the largest edge `log(p_pin_open * odds)` among the three,
+  after the 1.5 x data-error cap, if that edge is positive. This selection uses the open quotes alone (known at
+  the snapshot time) and is made in the export, not inside edgelab. Reason: edgelab's bar loop costs time per live
+  market per hour, and a first design with all three outcomes per match (288,898 markets for the max source,
+  sibling comparison inside the strategy) had not finished one dry-run pass after more than 200 CPU-minutes.
+  The strategy still applies the registered threshold (theta = 0.02) to the quoted price and decides the fill;
+  candidates with an edge in (0, 0.02] are markets the strategy declines. Resolution from `ft_result`,
+  `resolved_at` = kickoff + 3 h.
+- Universe: the 22 main football-data divisions (`mmz4281/`), 2012-07-27 (first quote) to 2025-06-01 (the
+  data-fit span rule needs the first and last quote within 5 days of the range ends), matches with all of Pinnacle open, Pinnacle close and the price source's three open odds
+  > 1 and a result: the study's own eligibility function. The study's evaluation window is 2019-07 to
+  2025-06; edgelab is given the exploratory era 2012-2019 as well to reach the usable years the data-fit rule
+  needs, and 20% of the window (the last ~2.6 years) is the locked holdout, so edgelab's headline is scored
+  mostly on 2012-2022.
+- Snapshot time `open_known_at` = latest Tuesday or Friday 18:00 Europe/London strictly before kickoff (the
+  r1-common helper). It is the latest moment the open odds can have been collected, used as both the book
+  timestamp and the `known_at` of `pe_model_p`.
+- Kickoff = `kickoff_time` (UK local) where recorded (46% of the matches: 2019/20 onward). Elsewhere (all of
+  2012-2019) the default is 15:00 UK local on Saturday and Sunday and 19:45 on Monday to Friday. This differs
+  from the brief's flat 15:00: a flat 15:00 would place Tuesday, Friday and Monday evening matches' snapshot four
+  days earlier (the previous Friday or Tuesday) than football-data collects. The default only moves the timing
+  of the snapshot, not any price.
+- Matches with less than 1 h 30 min between the snapshot and kickoff cannot be filled one bar later before
+  kickoff and are left out of the dataset (1,307 of 97,644 eligible matches); the entry window enforces the same limit.
+- Ask (Yes) = 1 / odds of the price source. Bid = ask x (1 - 0.02): a fixed 2% relative spread, mid = ask x 0.99.
+  The bid never matters for a back bet; it only sets the mid the position is marked at and the stake size
+  (`shares = fraction x NAV / mid`, paid at the ask, so the cash staked is 1.01 x the fraction). Depth is 1e7 shares
+  per side: stake limits are not modelled.
+- Persistence assumption: the open quote stayed available for at least one hour. The book has snapshots at the
+  snapshot hour and the next hour with the same prices (edgelab fills one bar after the decision, and the
+  policy accepts only a quote less than one bar old). A dry-run variant (`max-nopersist`) replaces the
+  later quote with Pinnacle's own open price (the soft quote is gone) to show the sensitivity; it is not counted.
+- No closing snapshot. edgelab's data-fit density rule needs a market's quotes to cover at least 90% of the hourly
+  buckets between its first and last quote, so a snapshot just before kickoff would force an hourly series for every
+  market (about 9 million rows). Each market has two snapshots, the open hour and the next hour. A position is
+  marked at the open mid until it settles; edgelab has no CLV and the close enters nothing it computes. The
+  pitch-edge side of the reconciliation holds the close.
+- `pe_model_p` = `p_pin_open` (power de-vig of Pinnacle open) with `ts = known_at` = the snapshot time. The strategy
+  declares only this feature and acts on the bar where it is stamped (`ts == decision_time`), so the decision hour
+  is the snapshot hour of the data.
+- Fees: no Polymarket fee. The dataset carries no `market_type` feature, so edgelab does not charge the
+  Polymarket sports taker-fee curve; the margin is in the price. The grading policy's flat commission (1 bp of
+  notional) still applies; the policy is not edited.
+- The sizing is flat (0.5% of NAV, max weight per market 1%), not Kelly: the study scores unit stakes.
+
+## What edgelab can and cannot show here
+
+Quoted-price fact only. The auditor signed the max-odds CLV as a description of quoted prices; executability
+(stake limits, stale or erroneous quotes, whether the price existed at the Pinnacle open) cannot be tested from
+this data, and the persistence assumption above is the whole fill model. edgelab scores realised P&L (stake x
+outcome), not CLV, so a CLV-positive strategy whose ROI is noisy can still grade `inconclusive`.

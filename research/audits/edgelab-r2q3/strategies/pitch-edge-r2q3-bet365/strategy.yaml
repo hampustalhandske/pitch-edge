@@ -1,0 +1,43 @@
+# Pre-registered before any counted run: 1 trial(s) in the grid below.
+# The grading: block is appended by `edgelab strategy init pitch-edge-r2q3-bet365 --asset-class prediction_market`.
+name: "R2-Q3 stale soft open (bet365_open) negative control"
+version: "1.0.0"
+author: "pitch-edge"
+created: 2026-10-20
+strategy: strategies/pitch-edge-r2q3-bet365/strategy.py:PitchEdgeR2q3Bet365
+params:
+  universe: {kind: index, index: polymarket_soccer, point_in_time: false}
+  schedule:
+    frequency: "1h"
+    decision_time: null
+    rebalance: every_bar
+    calendar: "24/7"
+    bars_per_year: 8760
+  risk_limits: {max_gross: 1.0, max_net: 1.0, max_weight_per_instrument: 0.01}
+  rebalance_band: 0.02
+  on_missing_data: hold
+  order_timing: open
+  entry_window: {earliest_before_event: PT100H, latest_before_event: PT1H30M}
+  trade_in_play: false
+  edge_threshold: 0.02
+  stake_fraction: 0.005
+  quote_half_spread: 0.01
+parameters:
+  grid: {}
+hypothesis:
+  rationale: >
+    Back the outcome whose bet365 open odds most exceeds the power-de-vigged Pinnacle open fair price when the edge is above 2%. Negative control: a single named book's open quote is not a stale soft line (the study rejected it), so edgelab should not find an edge. Null: mean net return per bet <= 0.
+  null_hypothesis: "mean net return per bet <= 0"
+  alternative_hypothesis: "mean net return per bet > 0"
+  primary_metric: sharpe
+  threshold: 0.0
+  alpha: 0.05
+  sided: one
+  benchmark: {kind: risk_free, annual_rate: 0.0}
+data:
+  provider: parquet
+  range: {start: 2012-07-27, end: 2025-06-01}
+  frequency: "1h"
+  params: {path: "data/research/r2/edgelab/r2q3-bet365"}
+capital: 100000.0
+seed: 20261020
