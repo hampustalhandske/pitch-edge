@@ -22,7 +22,9 @@ inserts the lake's rows, so re-running a sync over the same window yields identi
 `synced_at`) and rows removed or re-keyed upstream disappear. A failed window leaves the table unchanged. Every mirrored
 row keeps the lake's own `scraped_at` and gains `synced_at` (UTC, when this pull wrote it).
 
-The lake is read only through its HTTP API (`pitch_edge.lake.client.Lake`).
+The lake is read only through its HTTP API (`pitch_edge.lake.client.Lake`). A sync is strictly sequential
+(mirrors one after another, windows one after another, no threads), so it holds at most one of the API's
+query slots at any time.
 """
 
 from __future__ import annotations
