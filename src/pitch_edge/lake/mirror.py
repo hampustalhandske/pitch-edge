@@ -280,7 +280,8 @@ _RUNS_DDL = (
 )
 _STATE_DDL = (
     "CREATE TABLE IF NOT EXISTS lake_sync_state (run_id VARCHAR, table_name VARCHAR, window_start VARCHAR, "
-    "window_end VARCHAR, rows BIGINT, completed_at TIMESTAMP, PRIMARY KEY (run_id, window_start, window_end))"
+    "window_end VARCHAR, rows BIGINT, completed_at TIMESTAMP, lake_version VARCHAR, "
+    "PRIMARY KEY (run_id, window_start, window_end))"
 )
 
 
@@ -295,6 +296,7 @@ def _open_run(
     conn = wh._conn  # noqa: SLF001
     conn.execute(_RUNS_DDL)
     conn.execute(_STATE_DDL)
+    conn.execute("ALTER TABLE lake_sync_state ADD COLUMN IF NOT EXISTS lake_version VARCHAR")
     row = conn.execute(
         "SELECT run_id, synced_at FROM lake_sync_runs WHERE table_name = ? AND finished_at IS NULL "
         "AND full_refresh = ? AND since IS NOT DISTINCT FROM ? ORDER BY started_at DESC LIMIT 1",
@@ -315,11 +317,14 @@ def _open_run(
     return run_id, synced_at, set()
 
 
-def _checkpoint_sql(run_id: str, spec: MirrorSpec, window: tuple[str, str], rows: int) -> tuple[str, list[Any]]:
-    """The statement that marks one window of a sync run as completed."""
+def _checkpoint_sql(
+    run_id: str, spec: MirrorSpec, window: tuple[str, str], rows: int, lake_version: str | None
+) -> tuple[str, list[Any]]:
+    """The statement that marks one window of a sync run as completed, with the lake build that served it."""
     return (
-        "INSERT OR REPLACE INTO lake_sync_state VALUES (?, ?, ?, ?, ?, now()::TIMESTAMP)",
-        [run_id, spec.table, window[0], window[1], rows],
+        "INSERT OR REPLACE INTO lake_sync_state (run_id, table_name, window_start, window_end, rows, completed_at, "
+        "lake_version) VALUES (?, ?, ?, ?, ?, now()::TIMESTAMP, ?)",
+        [run_id, spec.table, window[0], window[1], rows, lake_version],
     )
 
 
@@ -331,13 +336,15 @@ def _store(
     window: tuple[str, str] = ("", ""),
     purge_all: bool = False,
     run_id: str | None = None,
+    lake_version: str | None = None,
 ) -> int:
     """Atomically replace one window of `spec.table` with `data`; returns rows written.
 
     In a single transaction: stored rows whose window column lies in `[window[0], window[1])` (every
     row if `purge_all`, or for an unwindowed mirror) are deleted, rows sharing a key with the incoming
     batch are deleted, the batch (latest `scraped_at` per key, NULLs last) is inserted with `synced_at`,
-    and, when `run_id` is given, the window is checkpointed in `lake_sync_state` — so a checkpoint exists
+    and, when `run_id` is given, the window is checkpointed in `lake_sync_state` with `lake_version`, the
+    lake build that served it — so a checkpoint exists
     exactly when the window's data was committed. Any exception rolls the transaction back and leaves the
     table unchanged. `data` of None means the lake returned no rows, which still clears the window."""
     conn = wh._conn  # noqa: SLF001 - the warehouse exposes no raw execute
@@ -383,7 +390,7 @@ def _store(
             row = conn.execute("SELECT count(*) FROM lake_stage").fetchone()
             written = int(row[0]) if row else 0
         if run_id is not None:
-            conn.execute(*_checkpoint_sql(run_id, spec, window, written))
+            conn.execute(*_checkpoint_sql(run_id, spec, window, written, lake_version))
         conn.execute("COMMIT")
         began = False
         return written
@@ -453,13 +460,14 @@ def sync_mirror(
             continue
         query, params = render_query(spec, win)
         data = _fetch(lake, query, params, sleep)
+        version = getattr(lake, "version", None)
         if data is not None and data.num_rows == 0:
             data = None
         if data is None and not wh.table_exists(spec.table):
-            wh._conn.execute(*_checkpoint_sql(run_id, spec, win, 0))  # noqa: SLF001
+            wh._conn.execute(*_checkpoint_sql(run_id, spec, win, 0, version))  # noqa: SLF001
             continue
         purge = full_refresh and i == 0
-        total += _store(wh, spec, data, synced_at, win, purge_all=purge, run_id=run_id)
+        total += _store(wh, spec, data, synced_at, win, purge_all=purge, run_id=run_id, lake_version=version)
         if data is not None:
             logger.info("%s window %s..%s: %d rows (total %d)", spec.table, win[0], win[1], data.num_rows, total)
     assert_unique(wh, spec)

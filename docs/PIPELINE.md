@@ -31,8 +31,8 @@ file is refused; a change means a new id.
 
 Inputs come from the owner's lakehouse through its HTTP API (`pitch_edge.lake.client.Lake`, one token per
 project, one query at a time), either pulled directly by the study code or mirrored into the local DuckDB
-warehouse by `pitch-edge lake-sync` (`lake_*` tables, checkpointed per window). A pull records the lake build
-that answered it (`Lake.version`, from the `X-Lakehouse-Version` header). Every input row carries a
+warehouse by `pitch-edge lake-sync` (`lake_*` tables, checkpointed per window with the lake build that served
+each window in `lake_sync_state.lake_version`; `Lake.version` gives it to direct pulls). Every input row carries a
 `known_at` timestamp, and the study asserts `known_at <= decision_time` in code. Known traps (snapshot
 timing of football-data's "open", the 2019/20 source change, the Pinnacle-close end date, stale prediction-market
 books, last-trade bounce) are listed in the research-protocol skill and must be handled in the study code.

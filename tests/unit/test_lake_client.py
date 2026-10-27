@@ -1,4 +1,5 @@
-"""Mocked tests for the lake HTTP client's busy handling and the sync's one-query-at-a-time rule."""
+"""Mocked tests for the lake HTTP client (busy handling, build version) and the sync (one query at a time,
+lake build recorded per window)."""
 
 from __future__ import annotations
 
@@ -116,3 +117,32 @@ def test_sync_never_overlaps_lake_queries(tmp_path):
     assert lake.queries >= len(names)
     assert lake.max_active == 1
     assert set(names) <= set(MIRRORS)
+
+
+class _VersionedLake:
+    """Answers every query with one row and reports a fixed lake build, as `Lake.version` does."""
+
+    version = "856ab2f64e97"
+
+    def sql_batches(self, query, params=None):
+        yield pa.RecordBatch.from_pylist([{"coach_id": 1, "name": "x"}])
+
+
+@pytest.mark.unit
+def test_sync_records_the_lake_build_per_window(tmp_path):
+    with Warehouse(tmp_path / "w.duckdb") as wh:
+        run_lake_sync(wh, _VersionedLake(), only=["tm_managers"], sleep=lambda s: None)
+        versions = wh._conn.execute("SELECT DISTINCT lake_version FROM lake_sync_state").fetchall()
+    assert versions == [("856ab2f64e97",)]
+
+
+@pytest.mark.unit
+def test_sync_adds_the_version_column_to_an_existing_state_table(tmp_path):
+    with Warehouse(tmp_path / "w.duckdb") as wh:
+        wh._conn.execute(
+            "CREATE TABLE lake_sync_state (run_id VARCHAR, table_name VARCHAR, window_start VARCHAR, "
+            "window_end VARCHAR, rows BIGINT, completed_at TIMESTAMP, PRIMARY KEY (run_id, window_start, window_end))"
+        )
+        run_lake_sync(wh, _VersionedLake(), only=["tm_managers"], sleep=lambda s: None)
+        versions = wh._conn.execute("SELECT DISTINCT lake_version FROM lake_sync_state").fetchall()
+    assert versions == [("856ab2f64e97",)]
