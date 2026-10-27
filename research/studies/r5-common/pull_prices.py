@@ -6,7 +6,8 @@ Writes:
   pm_bars.parquet         pm_soccer_bars_1h rows for the PM conditions of those events, hour_start in
                           [ko - 73h, ko] (a bar is known at hour_start + 1h)
   pm_book.parquet         pm_orderbook_snapshots rows (top of book and depth summaries; the per-level array
-                          columns cannot be read through the lake API, every such query fails lake-side)
+                          columns come back as JSON text and only within a narrow condition_id and ts filter,
+                          an unfiltered read runs out of memory lake-side)
                           for (a) the R1 matched universe and (b) the PM conditions of verified Kalshi events,
                           restricted to matches kicking off inside the book's coverage, ts in [ko - 72h, ko]
   snapshot_prices.json    pull time and row counts
