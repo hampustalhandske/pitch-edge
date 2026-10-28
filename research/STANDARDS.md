@@ -20,7 +20,7 @@ Nothing here ever places a real bet. The top rung is *paper* trading.
 | Market | Decision price | Benchmark / close |
 |---|---|---|
 | Bookmaker 1X2, matches ≤ 2025-09 | Pinnacle opening (`pinnacle_*_open`) | Pinnacle closing, de-vigged (power method; Shin as sensitivity). Complete through 2025-09, ~30% in late 2025, none from 2026-02. |
-| Bookmaker 1X2, matches ≥ 2025-10 | Pinnacle opening where present, else best of `max_*_open` | Betfair Exchange closing (`betfair_ex_*_close`, coverage from 2024-08), de-vigged. Over the overlap 2024-08 → 2025-09 report both, so the switch of benchmark is itself measured. |
+| Bookmaker 1X2, matches ≥ 2025-10 | Pinnacle opening where present, else the Betfair Exchange opening (book sum in [1.00, 1.05], below); `max_*_open` only for families registered before 2026-10-28 | Betfair Exchange closing (`betfair_ex_*_close`, coverage from 2024-08), de-vigged. Over the overlap 2024-08 → 2025-09 report both, so the switch of benchmark is itself measured. |
 | Forward paper trades | live quote at `decided_at` (the-odds-api Pinnacle/Betfair/Smarkets; Polymarket/Kalshi books) | Betfair Exchange close from the lake; Polymarket last pre-kickoff bar |
 | Polymarket soccer | hourly bar close at decision hour, plus the taker fee 0.05·p·(1−p) and half the bar's high-low as a spread proxy | Polymarket last pre-kickoff bar, and the sharp bookmaker close for the same match |
 | Kalshi soccer | hourly candle at decision hour, with Kalshi fees | as Polymarket |
@@ -35,6 +35,18 @@ have a median of 1.02, but 23% exceed 1.05 and 11% exceed 1.10, many at 1.01-1.1
 The registration declares the screen in its universe. A pre-2026-10-28 registration keeps its own rule, and the
 report states the share of its decisions that would fail the band. The first such case, H1
 `soft-open-vs-betfair-fav-open-v1`, was found after that hypothesis was scored.
+
+**Rules for every family registered after 2026-10-28.**
+1. **One named venue.** Every bet is priced at one named venue's quote at decision time: a single bookmaker's
+   column (e.g. `bet365_*_open`), the Betfair Exchange, Polymarket or Kalshi (edgelab's E2 P5). A best price across
+   books (football-data's `max_*`) is never the price taken, not even as a labelled upper bound. It may appear
+   only as a placebo or reference line beside the named-venue result. Line shopping at the max price inflated H1, H2
+   and H3 of `soft-open-vs-betfair`.
+2. **Count the test bets before registering.** Before a registration is recorded, the rule's bets on the
+   evaluation window are counted outcome-blind: from decision-time inputs only, with no close and no result of the
+   decision match, the same way H2's train count was taken. A family whose expected test bets are below its
+   `min_n` does not register as a test on that window. It waits for forward paper data. H2 expected 300-400 test
+   bets and got 5.
 
 Primary metrics, chosen at registration: **CLV** (log of taken odds over de-vigged closing odds, averaged
 per bet), **log-loss edge in bits** vs the de-vigged close (`backtest/slices.py` convention), or **Brier
