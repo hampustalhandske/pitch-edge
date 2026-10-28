@@ -411,7 +411,7 @@ projects; M8 traceability; S2 lake capacity; S4 decimal-odds instrument with CLV
 - Commits: see git log for `PE-27`.
 
 ## PE-28 The warehouse spine has no 2026/27 football-data matches
-- Status: in-progress (code fixed; the next `ingest` loads the season)
+- Status: done
 - Priority: should (`ask` and the dashboard answer from a stale current season)
 - Raised by: coordinator, after the PE-12 decision
 - Evidence (2026-10-28, read-only): in the 11 backtest leagues the warehouse's football-data rows end 2026-05-02 to
@@ -423,5 +423,10 @@ projects; M8 traceability; S2 lake capacity; S4 decimal-odds instrument with CLV
 - Acceptance: the defaults reach the season under way (`latest_season_start`); after the next `pitch-edge ingest`,
   each of the 11 leagues' last match is within a week of the lake's `fd_matches`, and `pitch-edge health` shows it.
   Until that ingest runs, `ask` and the dashboard state the last match date of each league they answer from.
-- Blocked by: an ingest run (warehouse single-writer; heavy, so not alongside another project's job). Blocks: none.
+- Result (2026-10-28): `ingest_football_data` for season 2026 (22 main divisions, no extra leagues, no duplicate
+  purge, warehouse backed up first) added 1,981 matches and 90,712 odds rows; the 11 leagues now end 2026-10-24 to
+  10-26, later than the lake mirror (10-11 to 10-19). The features stage was not re-run. The 301 `cfmd_` 2026/27
+  matches now duplicate football-data fixtures; the next full `ingest` purges them as duplicates (PE-12's purge),
+  while the other `cfmd_`-only rows stay.
+- Blocked by: none. Blocks: none.
 - Commits: see git log for `PE-28`.
