@@ -302,3 +302,80 @@ def test_a_broken_evidence_loader_falls_back_to_no_validated_edge(monkeypatch):
     assert state.evidence["research"]["display_floor"] == "L4"
     assert state.evidence["research"]["validated_edge_exists"] is False
     assert state.candidates[0]["evidence"]["validated_edge"] is False
+
+
+# --------------------------------------------------------------------------- data freshness line
+
+_LAST_DATES = {"E0": pd.Timestamp("2024-04-20")}
+
+
+def test_top_bets_answer_carries_the_stale_data_line(monkeypatch):
+    from pitch_edge.agents.qa_data import data_freshness_notes
+
+    monkeypatch.setattr(
+        qg, "freshness_for", lambda wh, leagues, as_of: data_freshness_notes(_LAST_DATES, leagues, as_of)
+    )
+    monkeypatch.setattr(qg, "_build_judge_agent", lambda llm, tools: (_ for _ in ()).throw(RuntimeError("no llm")))
+    llm = _StubLLM(AskIntent(intent="top_bets", n=2))
+    graph = build_qa_graph(_features_frame(), _slice_evidence(), _FakeIndex(), _models(), llm=llm)
+    state = ask_question(graph, "top bets", pd.Timestamp("2024-05-25"))
+
+    assert state.answer is not None
+    assert state.data_notes == ["Data for E0 ends 2024-04-20 (35 days before 2024-05-25)"]
+
+
+def test_top_bets_answer_omits_the_line_when_data_is_fresh(monkeypatch):
+    from pitch_edge.agents.qa_data import data_freshness_notes
+
+    fresh = {"E0": pd.Timestamp("2024-05-22")}
+    monkeypatch.setattr(qg, "freshness_for", lambda wh, leagues, as_of: data_freshness_notes(fresh, leagues, as_of))
+    monkeypatch.setattr(qg, "_build_judge_agent", lambda llm, tools: (_ for _ in ()).throw(RuntimeError("no llm")))
+    llm = _StubLLM(AskIntent(intent="top_bets", n=2))
+    graph = build_qa_graph(_features_frame(), _slice_evidence(), _FakeIndex(), _models(), llm=llm)
+    state = ask_question(graph, "top bets", pd.Timestamp("2024-05-25"))
+
+    assert state.answer is not None
+    assert state.data_notes == []
+
+
+def test_fixtures_on_day_reads_the_warehouse_for_the_stale_data_line(warehouse):
+    warehouse.upsert(
+        "matches",
+        pd.DataFrame(
+            {
+                "match_id": ["old"],
+                "date": pd.to_datetime(["2024-04-20 15:00"]),
+                "league_code": ["E0"],
+                "home_team": ["H"],
+                "away_team": ["A"],
+            }
+        ),
+        keys=["match_id"],
+    )
+    llm = _StubLLM(AskIntent(intent="fixtures_on_day", day="2024-06-01"))
+    graph = build_qa_graph(_features_frame(), _slice_evidence(), _FakeIndex(), _models(), llm=llm, wh=warehouse)
+    stale = ask_question(graph, "what's on 2024-06-01", pd.Timestamp("2024-05-25"))
+    assert stale.data_notes == ["Data for E0 ends 2024-04-20 (35 days before 2024-05-25)"]
+    fresh = ask_question(graph, "what's on 2024-06-01", pd.Timestamp("2024-04-25"))
+    assert fresh.data_notes == []
+
+
+def test_a_day_without_fixtures_still_carries_the_stale_data_line(warehouse):
+    warehouse.upsert(
+        "matches",
+        pd.DataFrame(
+            {
+                "match_id": ["old"],
+                "date": pd.to_datetime(["2024-04-20 15:00"]),
+                "league_code": ["E0"],
+                "home_team": ["H"],
+                "away_team": ["A"],
+            }
+        ),
+        keys=["match_id"],
+    )
+    llm = _StubLLM(AskIntent(intent="fixtures_on_day", day="2031-01-01"))
+    graph = build_qa_graph(_features_frame(), _slice_evidence(), _FakeIndex(), _models(), llm=llm, wh=warehouse)
+    state = ask_question(graph, "what's on 2031-01-01", pd.Timestamp("2024-05-25"))
+    assert state.message == "No fixtures found for 2031-01-01."
+    assert state.data_notes == ["Data for E0 ends 2024-04-20 (35 days before 2024-05-25)"]

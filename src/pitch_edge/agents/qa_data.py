@@ -34,6 +34,7 @@ ASK_MODEL_HYPOTHESES: dict[str, str | None] = {
     "gbdt": "outcome-models-gbdt-bet-rule-v1",
     "stochastic_strength": "outcome-models-stochastic-strength-bet-rule-v1",
 }
+STALE_DATA_DAYS = 7  # a league's data is flagged when it ends more than this many days before the as-of date
 NOT_VALIDATED_LABEL = "model-vs-market disagreement, not a validated edge"
 VALIDATED_LABEL = "validated edge"
 
@@ -193,3 +194,47 @@ def annotate_candidates(
         {**c, "evidence": candidate_evidence(model_by_match.get(c["match_id"]), research, model_hypotheses)}
         for c in candidates
     ]
+
+
+def last_match_dates(wh) -> dict[str, pd.Timestamp]:
+    """Read-only: the date of the latest match per `league_code` in the warehouse `matches` table
+    (a TIMESTAMP column, truncated to the day). Empty when the table is missing or has no rows."""
+    if not wh.table_exists("matches"):
+        return {}
+    df = wh.query(
+        "SELECT league_code, CAST(MAX(date) AS DATE) AS last_date FROM matches "
+        "WHERE league_code IS NOT NULL AND date IS NOT NULL GROUP BY league_code"
+    )
+    return {str(r.league_code): pd.Timestamp(r.last_date) for r in df.itertuples()}
+
+
+def data_freshness_notes(
+    last_dates: dict[str, pd.Timestamp], leagues: list[str], as_of: pd.Timestamp, max_gap_days: int = STALE_DATA_DAYS
+) -> list[str]:
+    """One line per league (sorted by code) whose data ends more than `max_gap_days` before `as_of`,
+    e.g. "Data for E0 ends 2026-09-03 (55 days before 2026-10-28)". Leagues with no known last date,
+    or whose data reaches within `max_gap_days` of `as_of` (or beyond it), produce no line."""
+    as_day = (
+        pd.Timestamp(as_of).tz_localize(None).normalize()
+        if pd.Timestamp(as_of).tzinfo
+        else pd.Timestamp(as_of).normalize()
+    )
+    notes: list[str] = []
+    for league in sorted(set(leagues)):
+        last = last_dates.get(league)
+        if last is None:
+            continue
+        gap = (as_day - pd.Timestamp(last).normalize()).days
+        if gap > max_gap_days:
+            notes.append(f"Data for {league} ends {pd.Timestamp(last).date()} ({gap} days before {as_day.date()})")
+    return notes
+
+
+def freshness_for(wh, leagues: list[str], as_of: pd.Timestamp) -> list[str]:
+    """`data_freshness_notes` for the warehouse `wh`; empty when `wh` is None or cannot be read."""
+    if wh is None or not leagues:
+        return []
+    try:
+        return data_freshness_notes(last_match_dates(wh), leagues, as_of)
+    except Exception:  # noqa: BLE001 - an unreadable warehouse must never block an answer
+        return []

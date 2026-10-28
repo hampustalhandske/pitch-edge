@@ -41,6 +41,7 @@ from pitch_edge.agents.qa_context import structure_context
 from pitch_edge.agents.qa_data import (
     NOT_VALIDATED_LABEL,
     annotate_candidates,
+    freshness_for,
     market_edges,
     pmxt_market_edges,
     resolve_fixture,
@@ -94,6 +95,7 @@ class QAState(BaseModel):
     context_docs: dict[str, list[dict]] = Field(default_factory=dict)
     live_market: dict[str, dict] = Field(default_factory=dict)
     evidence: dict[str, Any] = Field(default_factory=dict)
+    data_notes: list[str] = Field(default_factory=list)
     message: str | None = None
     answer: Answer | None = None
     retry_count: int = 0
@@ -244,14 +246,22 @@ def parse_intent(state: QAState, llm=None) -> dict:
 
 
 # --------------------------------------------------------------------------------- node: list_fixtures
-def list_fixtures(state: QAState, features: pd.DataFrame) -> dict:
+def list_fixtures(state: QAState, features: pd.DataFrame, wh=None) -> dict:
     day = pd.Timestamp(state.day)
     d = pd.to_datetime(features["date"])
     rows = features[(d.dt.date == day.date())]
     if rows.empty:
-        return {"message": f"No fixtures found for {state.day}."}
+        known = [str(x) for x in features["league_code"].dropna().unique()] if "league_code" in features.columns else []
+        return {
+            "message": f"No fixtures found for {state.day}.",
+            "data_notes": freshness_for(wh, known, pd.Timestamp(state.as_of)),
+        }
     lines = [f"- {r['home_team']} vs {r['away_team']} ({r.get('league_code', '?')})" for _, r in rows.iterrows()]
-    return {"message": f"Fixtures on {state.day}:\n" + "\n".join(lines)}
+    leagues = [str(x) for x in rows["league_code"].dropna()] if "league_code" in rows.columns else []
+    return {
+        "message": f"Fixtures on {state.day}:\n" + "\n".join(lines),
+        "data_notes": freshness_for(wh, leagues, pd.Timestamp(state.as_of)),
+    }
 
 
 # --------------------------------------------------------------------------------- node: gather
@@ -394,6 +404,7 @@ def gather(
         "context_docs": context_docs,
         "live_market": live_market,
         "evidence": evidence,
+        "data_notes": freshness_for(wh, [str(f["league_code"]) for f in ranked if f.get("league_code")], as_of),
     }
 
 
@@ -520,7 +531,7 @@ def build_qa_graph(
     model_names = [m.name for m in models]
     g: StateGraph = StateGraph(QAState)
     g.add_node("parse_intent", lambda s: parse_intent(s, llm=llm))
-    g.add_node("list_fixtures", lambda s: list_fixtures(s, features))
+    g.add_node("list_fixtures", lambda s: list_fixtures(s, features, wh=wh))
     g.add_node(
         "gather",
         lambda s: gather(

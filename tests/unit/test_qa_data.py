@@ -163,3 +163,49 @@ def test_annotate_candidates_adds_evidence_without_changing_the_candidates():
     assert out[1]["evidence"]["model"] is None
     assert out[1]["evidence"]["validated_edge"] is False
     assert "evidence" not in candidates[0]  # inputs untouched
+
+
+# --------------------------------------------------------------------------- data freshness
+
+
+def _matches_warehouse(warehouse) -> None:
+    warehouse.upsert(
+        "matches",
+        pd.DataFrame(
+            {
+                "match_id": ["a", "b", "c"],
+                "date": pd.to_datetime(["2026-08-01 15:00", "2026-09-03 19:45", "2026-10-17 12:30"]),
+                "league_code": ["E0", "E0", "D1"],
+                "home_team": ["H1", "H2", "H3"],
+                "away_team": ["A1", "A2", "A3"],
+            }
+        ),
+        keys=["match_id"],
+    )
+
+
+def test_last_match_dates_is_the_latest_day_per_league(warehouse):
+    from pitch_edge.agents.qa_data import last_match_dates
+
+    _matches_warehouse(warehouse)
+    assert last_match_dates(warehouse) == {"E0": pd.Timestamp("2026-09-03"), "D1": pd.Timestamp("2026-10-17")}
+
+
+def test_last_match_dates_is_empty_without_a_matches_table(warehouse):
+    from pitch_edge.agents.qa_data import last_match_dates
+
+    assert last_match_dates(warehouse) == {}
+
+
+def test_data_freshness_notes_only_flag_gaps_over_a_week():
+    from pitch_edge.agents.qa_data import data_freshness_notes
+
+    last = {"E0": pd.Timestamp("2026-09-03"), "D1": pd.Timestamp("2026-10-21"), "I1": pd.Timestamp("2026-10-27")}
+    notes = data_freshness_notes(last, ["E0", "D1", "I1", "XX"], pd.Timestamp("2026-10-28 18:00"))
+    assert notes == ["Data for E0 ends 2026-09-03 (55 days before 2026-10-28)"]  # D1 is exactly 7 days: fresh
+
+
+def test_data_freshness_notes_ignore_data_that_runs_past_the_as_of_date():
+    from pitch_edge.agents.qa_data import data_freshness_notes
+
+    assert data_freshness_notes({"E0": pd.Timestamp("2026-09-03")}, ["E0"], pd.Timestamp("2025-01-01")) == []

@@ -53,6 +53,12 @@ def banner(text: str, kind: str = "note") -> None:
     ).classes("w-full")
 
 
+def render_data_notes(notes: list[str]) -> None:
+    """One warning banner line per league whose warehouse data ends well before the as-of date."""
+    for line in notes:
+        banner(line, "warn")
+
+
 def section_title(text: str, caption: str = "") -> None:
     ui.label(text).style("font-size:1.15rem; font-weight:600; letter-spacing:-.01em;")
     if caption:
@@ -96,11 +102,13 @@ def build_ask() -> None:
             ui.label(f"as of {state.as_of.date()}").style(f"color:{INK['muted']}; font-size:.78rem;")
             if state.message:
                 ui.markdown(state.message.replace("_", "\\_"))
+                render_data_notes(state.data_notes)
                 return
             if state.answer is None:
                 ui.label("No answer produced.").style(f"color:{INK['muted']};")
                 return
             ui.markdown(state.answer.overview.replace("_", "\\_"))
+            render_data_notes(state.data_notes)
             badge = (
                 "all figures matched a source"
                 if state.answer.citations_grounded

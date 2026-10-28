@@ -203,6 +203,8 @@ def ask(
     rprint(f"[dim]as of {cutoff.date()}[/dim]\n")
     if state.message:
         rprint(state.message)
+        for line in state.data_notes:
+            rprint(f"[yellow]{line}[/yellow]")
         return
     if state.answer is None:
         rprint("[yellow]no answer produced[/yellow]")
@@ -210,6 +212,8 @@ def ask(
     rprint(f"[bold]{state.answer.overview}[/bold] [dim](backend={state.answer.backend})[/dim]\n")
     for note in state.answer.notes:
         rprint(f"  [dim]{note.match_id} {note.home_team} vs {note.away_team}:[/dim] {note.take}")
+    for line in state.data_notes:
+        rprint(f"[yellow]{line}[/yellow]")
     if not state.answer.citations_grounded:
         rprint(f"\n[yellow]ungrounded numbers flagged: {state.answer.ungrounded_numbers}[/yellow]")
 
