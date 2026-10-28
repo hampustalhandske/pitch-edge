@@ -212,7 +212,7 @@ projects; M8 traceability; S2 lake capacity; S4 decimal-odds instrument with CLV
 - Commits: none.
 
 ## PE-17 Export the research ledger for edgelab's trial-count check
-- Status: open
+- Status: done
 - Priority: must (M5)
 - Raised by: edgelab (EL-4)
 - Evidence: EL-4 verifies a declared trial count by recomputing pitch-edge's hash chain. The chain is global
@@ -221,8 +221,16 @@ projects; M8 traceability; S2 lake capacity; S4 decimal-odds instrument with CLV
   family had 338 trial rows, 300 distinct grid points and 355 tests.
 - Acceptance: `pitch-edge research` exports the chain from genesis to a given entry with the row bodies, and the
   family's test keys behind N, in the form EL-4 specifies; a test recomputes the chain from the export alone.
-- Blocked by: EL-4 (format). Blocks: PE-8.
-- Commits: none yet.
+- Result: `pitch-edge research export-ledger --family <f> --upto <row_hash> --out <file>.jsonl` in the shape
+  agreed with edgelab: every chain entry from genesis to `--upto` (all tables and families) as
+  `{table, row_canonical, prev_hash, row_hash}` with the exact hashed string, then the family's unchained rows
+  (`chained: false`), then a summary (n_tests, distinct (hypothesis_id, config_hash), return-kind count,
+  test_keys `"<hypothesis_id>|<config_hash>"`). Tests recompute the chain from the file and show that one changed
+  byte breaks every later hash. On a copy of the live ledger all 672 entries recompute; bookmaker-line-structure
+  has 338 trials, 300 distinct keys, 46 return-kind and 1 unchained row (the gates' N of 355 also counts windows
+  and imported keys, so it is at least the distinct count edgelab recomputes).
+- Blocked by: none. Blocks: PE-8.
+- Commits: see git log for `PE-17`.
 
 ## PE-18 The hourly settle queries the lake once per open decision
 - Status: done

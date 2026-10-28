@@ -18,7 +18,7 @@ from rich.table import Table
 from pitch_edge.research.gates import grade as grade_hypothesis
 from pitch_edge.research.importer import import_trials_csv
 from pitch_edge.research.ledger import REVIEW_KINDS, Ledger, ProtocolError
-from pitch_edge.research.registry import load
+from pitch_edge.research.registry import load, resolve_registry_path
 
 research_app = typer.Typer(help="Pre-registered hypotheses, the trials ledger and the L0-L5 evidence ladder.")
 
@@ -29,6 +29,7 @@ ALIAS_OPTION = typer.Option(
     [], "--alias", help="CSV_NAME=REGISTERED_PRIMARY_METRIC (exact string; repeatable), added to the built-in aliases"
 )
 LEDGER_OPTION = typer.Option(None, "--ledger", help="Ledger file (default: <data_dir>/research/ledger.duckdb)")
+EXPORT_OUT_OPTION = typer.Option(..., "--out", help="JSONL file to write")
 
 
 def _console() -> Console:
@@ -140,6 +141,38 @@ def ledger_rows(
     if not reviews.empty:
         reviews = reviews.assign(detail_json=reviews["detail_json"].map(lambda s: json.dumps(json.loads(s))))
         _print_table(reviews, f"{hypothesis_id}: reviews")
+
+
+@research_app.command("export-ledger")
+def export_ledger(
+    family: str = typer.Option(..., "--family", help="Family whose trials the summary line counts"),
+    upto: str = typer.Option(..., "--upto", help="row_hash of the last chain entry to export"),
+    out: Path = EXPORT_OUT_OPTION,
+    ledger: Path | None = LEDGER_OPTION,
+) -> None:
+    """Write the hash chain from genesis to --upto, the family's unchained rows and a trial-count summary as
+    JSONL, for an independent recount of the family's tests (see `Ledger.export_chain`)."""
+    led = _ledger(ledger)
+    kinds: dict[str, str | None] = {}
+    for _, r in led.registrations(family).iterrows():
+        try:
+            kinds[r["id"]] = load(resolve_registry_path(r["path"])).metric_kind
+        except (OSError, ValueError):
+            kinds[r["id"]] = None
+    try:
+        lines = led.export_chain(family, upto, kinds)
+    except ProtocolError as exc:
+        _console().print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text("".join(json.dumps(line, sort_keys=True) + "\n" for line in lines))
+    s = lines[-1]["summary"]
+    n_chain = sum(1 for line in lines if "row_hash" in line)
+    n_legacy = sum(1 for line in lines if line.get("chained") is False)
+    _console().print(
+        f"{out}: {n_chain} chain entries, {n_legacy} unchained {family} rows; {s['n_tests']} trials, "
+        f"{s['n_distinct_hypothesis_config']} distinct (hypothesis, config)"
+    )
 
 
 @research_app.command("import-trials")

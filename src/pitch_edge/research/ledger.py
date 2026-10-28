@@ -15,7 +15,8 @@ Tables:
 - `reviews` — independent reviews: `audit` (skeptic-auditor), `edgelab`, `paper` (forward test).
 - `ledger_chain` — one entry per row written through this class, in write order:
   row_hash = sha256(prev_hash | table | canonical JSON of the row). `verify_chain` recomputes it, so an
-  edited or deleted row, or a row inserted around this class, is detectable.
+  edited or deleted row, or a row inserted around this class, is detectable. `export_chain` writes the
+  chain out with the exact hashed strings, so another project can recompute it from the file alone.
 
 `record_trial` validates every row before writing it (registered grid point, registered metric and
 direction, unchanged registration file, 0 <= p <= 1, ci_lo <= estimate <= ci_hi, p consistent with the
@@ -36,7 +37,7 @@ import math
 import random
 import time
 import uuid
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
@@ -491,11 +492,11 @@ class Ledger:
 
     # ------------------------------------------------------------------ integrity
 
-    def verify_chain(self) -> ChainReport:
-        """Recompute the hash chain over every chained row and find rows written around this class."""
+    def _snapshot(self) -> tuple[dict[str, dict[str, list[dict[str, Any]]]], list[tuple[Any, ...]]] | None:
+        """Every row by table and row key, and the chain entries in order; None when there is no ledger file."""
         with self._reader() as con:
             if con is None:
-                return ChainReport(ok=True, n_chained=0)
+                return None
             tables = {t: self._has_table(con, t) for t in (*_COLUMNS, "ledger_chain")}
             rows: dict[str, list[dict[str, Any]]] = {}
             for t, cols in _COLUMNS.items():
@@ -511,11 +512,18 @@ class Ledger:
                 if tables["ledger_chain"]
                 else []
             )
-
         by_key: dict[str, dict[str, list[dict[str, Any]]]] = {t: {} for t in _COLUMNS}
         for t, rs in rows.items():
             for r in rs:
                 by_key[t].setdefault(_row_key(t, r), []).append(r)
+        return by_key, chain
+
+    def verify_chain(self) -> ChainReport:
+        """Recompute the hash chain over every chained row and find rows written around this class."""
+        snapshot = self._snapshot()
+        if snapshot is None:
+            return ChainReport(ok=True, n_chained=0)
+        by_key, chain = snapshot
 
         broken: list[str] = []
         chained: dict[str, set[str]] = {t: set() for t in _COLUMNS}
@@ -551,3 +559,84 @@ class Ledger:
             unchained_after_start=after,
             legacy_unchained=legacy,
         )
+
+    def export_chain(
+        self, family: str, upto: str, metric_kinds: Mapping[str, str | None] | None = None
+    ) -> list[dict[str, Any]]:
+        """The ledger as lines another project can verify on its own, for one family's trial count.
+
+        Lines, in order:
+        - every chain entry from genesis to the entry whose `row_hash` is `upto`, of every table and family:
+          `{"table", "row_canonical", "prev_hash", "row_hash"}`, where `row_canonical` is the exact string that
+          was hashed, so `sha256(f"{prev_hash}|{table}|{row_canonical}") == row_hash` (genesis `prev_hash` is
+          64 zeros);
+        - the family's rows that were never chained (written before the chain existed):
+          `{"table", "row_canonical", "chained": false}`;
+        - `{"summary": {family, upto, n_tests, n_distinct_hypothesis_config, n_return_kind, test_keys}}` over the
+          family's trial rows in the lines above; `test_keys` are the sorted distinct `"<hypothesis_id>|<config_hash>"`
+          and `n_return_kind` counts those whose hypothesis has metric kind `return` in `metric_kinds` (None when
+          `metric_kinds` is not given).
+
+        Trial rows carry `family`, `hypothesis_id` and `config_hash`; registrations carry `id` and `family`.
+        Raises `ProtocolError` when the chain does not verify up to `upto` or `upto` is not in it.
+        """
+        snapshot = self._snapshot()
+        if snapshot is None:
+            raise ProtocolError(f"no ledger at {self.path}")
+        by_key, chain = snapshot
+        lines: list[dict[str, Any]] = []
+        family_rows: list[tuple[str, dict[str, Any]]] = []
+        hypotheses = {str(r["id"]) for rs in by_key["registrations"].values() for r in rs if r["family"] == family}
+
+        def in_family(table: str, row: dict[str, Any]) -> bool:
+            if table == "reviews":
+                return str(row["hypothesis_id"]) in hypotheses
+            return row["family"] == family
+
+        prev, reached = GENESIS, False
+        for seq, table, key, prev_hash, row_hash, _ in chain:
+            if prev_hash != prev:
+                raise ProtocolError(f"chain:{seq}: prev_hash does not link to the previous entry")
+            row = next((r for r in by_key[table].get(key, []) if _chain_hash(prev_hash, table, r) == row_hash), None)
+            if row is None:
+                raise ProtocolError(f"{table}:{key}: no stored row matches chain entry {seq}")
+            lines.append(
+                {"table": table, "row_canonical": _row_json(table, row), "prev_hash": prev_hash, "row_hash": row_hash}
+            )
+            if in_family(table, row):
+                family_rows.append((table, row))
+            prev = row_hash
+            if row_hash == upto:
+                reached = True
+                break
+        if not reached:
+            raise ProtocolError(f"{upto} is not a row_hash in the chain")
+
+        chained_keys = {(table, key) for _, table, key, _, _, _ in chain}
+        for table, keyed in by_key.items():
+            for key, rs in sorted(keyed.items()):
+                if (table, key) in chained_keys:
+                    continue
+                for r in rs:
+                    if in_family(table, r):
+                        lines.append({"table": table, "row_canonical": _row_json(table, r), "chained": False})
+                        family_rows.append((table, r))
+
+        trials = [r for table, r in family_rows if table == "trials"]
+        keys = sorted({f"{r['hypothesis_id']}|{r['config_hash']}" for r in trials})
+        n_return = (
+            None if metric_kinds is None else sum(1 for k in keys if metric_kinds.get(k.split("|", 1)[0]) == "return")
+        )
+        lines.append(
+            {
+                "summary": {
+                    "family": family,
+                    "upto": upto,
+                    "n_tests": len(trials),
+                    "n_distinct_hypothesis_config": len(keys),
+                    "n_return_kind": n_return,
+                    "test_keys": keys,
+                }
+            }
+        )
+        return lines
