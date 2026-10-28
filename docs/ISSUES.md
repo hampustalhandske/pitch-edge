@@ -307,14 +307,16 @@ projects; M8 traceability; S2 lake capacity; S4 decimal-odds instrument with CLV
 - Commits: none yet.
 
 ## PE-25 Record which lake build answered a pull
-- Status: in-progress
+- Status: done
 - Priority: should (M8)
 - Raised by: lakehouse (LK-1: the API reports a committed build in `X-Lakehouse-Version`)
 - Evidence: study pulls and lake-sync record the pull time and row counts but not the lake build, so a
   result cannot be traced to the lake code that produced its data.
 - Acceptance: `Lake.version` holds the build that answered the last query; lake-sync records it per window
   in `lake_sync_state.lake_version` (existing warehouses gain the column); new study pulls write it into their
-  snapshot file. The first two are done with mocked tests; the study pulls are open.
+  snapshot file. The first two are done with mocked tests. The study rule is in the research-protocol skill
+  (`data_snapshot` and the snapshot file name the lake build); finished studies' pulls predate the header and
+  are left as they are.
 - Blocked by: none. Blocks: none.
 - Commits: see git log for `PE-25`.
 

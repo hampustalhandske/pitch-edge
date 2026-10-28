@@ -53,6 +53,9 @@ literature_ceiling: gap of a few percentage points at most for liquid matches
   configs and unregistered metrics, recomputes the bootstrap to record `reproduced`, hashes the code (archived
   when the tree is dirty), and writes one hash-chained ledger row. The **first** run per config is the result of
   record; a rerun must reproduce it exactly. Every registered grid point counts in BH/DSR (unrun = p 1).
+- `data_snapshot` names the pull: its date and the lake build that served it (`Lake.version`, the API's
+  `X-Lakehouse-Version`, e.g. `lake 856ab2f64e97 pulled 2026-10-28`). The pull script also writes that build into
+  its snapshot file next to the row counts.
 - Ledger writes retry on DuckDB lock contention; still read back your trial with
   `pitch-edge research ledger --id <id>`. Other commands: `status`, `grade <id> [--config-hash]`,
   `import-trials`, `review` (records an audit / edgelab / paper verdict, optionally scoped to a config subset).
