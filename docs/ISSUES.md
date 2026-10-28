@@ -162,6 +162,12 @@ projects; M8 traceability; S2 lake capacity; S4 decimal-odds instrument with CLV
   ingest.
 - Owner decision: no code ingests the roughly 52,000 remaining `cfmd_`-only matches any more, so a freshly built
   warehouse would not have them while this one does. The owner decides whether to re-add the source or drop the rows.
+- Readers of the `cfmd_`-only rows (measured read-only): the six `outcome-models-*-v1` registrations train on 1,489 of
+  them through `load_feature_frame` (1,188 in 2023/24, the season with no football-data Pinnacle close, and 301 in
+  2026/27; never scored, since they have no Pinnacle price); `ask` and the dashboard take the only 2026/27 fixtures
+  of the 11 backtest leagues from them; 39 of those matches are in `pmxt_match_map`; `model_predictions` and
+  `backtest_bets` hold rows for them. Owner decision (2026-10-28): keep every `cfmd_`-only row until another source
+  covers 2023/24 and 2026/27 for those leagues.
 - Commits: see git log for `PE-12`.
 
 ## PE-13 UCL paper decisions have no benchmark
@@ -373,7 +379,7 @@ projects; M8 traceability; S2 lake capacity; S4 decimal-odds instrument with CLV
 - Commits: none yet.
 
 ## PE-27 Propose new hypotheses tradable on current data
-- Status: in-progress (waiting for the owner's approval)
+- Status: in-progress (registered; scoring next)
 - Priority: should (owner goal: more strategies tested on data we have)
 - Raised by: coordinator, round 2
 - Evidence: Betfair historical data is not obtainable from Sweden and no paid datasets are bought, so new tests
@@ -384,5 +390,12 @@ projects; M8 traceability; S2 lake capacity; S4 decimal-odds instrument with CLV
 - Result so far: `research/proposals/2026-10-28-new-hypotheses.md` (commit 5ff6d18) proposes H1 favourite rule,
   H2 end-of-season motivation rule, H3 soft-books-only closing-line model (ML), H4 Pinnacle-to-bet365 lag on
   OddsPapi paths (after LK-45).
-- Blocked by: owner approval; H4 also LK-45. Blocks: none.
+- Registered (owner approved all four, 2026-10-28): family `soft-open-vs-betfair`, one test config each, so the
+  family N is 4: `soft-open-vs-betfair-fav-open-v1` (H1), `-late-season-stakes-v1` (H2), `-gbm-close-v1` (H3),
+  `-exchange-lag-v1` (H4; Pinnacle steam against Betfair Exchange lag). Each registration's `selection:` block fixes
+  how its parameters are chosen on the exploratory window; those candidate runs are kept in the study's
+  `trials.csv`, not on the ledger, and only the selected config is scored once on the evaluation window. Next: score
+  H1 and H3; count H2's train-window bets before any outcome is read, then score; score H4 after the LK-45 backfill.
+  H1's selected config can fall below `min_n` 300 (about 200 bets at θ = 1%).
+- Blocked by: H4 on LK-45. Blocks: none.
 - Commits: see git log for `PE-27`.

@@ -1,0 +1,79 @@
+id: soft-open-vs-betfair-late-season-stakes-v1
+family: soft-open-vs-betfair
+registered_at: 2026-10-28T07:56:45Z
+author: quant-researcher
+study_dir: research/studies/soft-open-vs-betfair-late-season-stakes
+question: >
+  In the last 5 rounds of a league season, is the side that still has something at stake (title, European places,
+  relegation) under-priced at the best soft open against an opponent with nothing at stake, measured by CLV against
+  the de-vigged Betfair Exchange close?
+hypothesis:
+  h1: mean clv_log > 0 for the rule below with the selected theta, scored once on the evaluation window.
+  h0: mean clv_log <= 0.
+  direction: positive
+  disconfirming: >
+    95% match-day block-bootstrap CI of mean clv_log includes 0 or is below it; or the sign is negative in 2 of 3
+    chronological thirds; or, with any one division removed, the CI includes 0.
+decision_time: >
+  The football-data.co.uk pre-closing snapshot (1-3 days before kickoff). The standings are built only from matches
+  played strictly before that snapshot's matchday (results with a date earlier than the match date).
+point_in_time:
+  features: [fd results of earlier matches (date < match date), pinnacle_*_open (train), betfair_ex_*_open (test), max_*_open]
+  forbidden_as_features: [any *_close column, the match's own ft_* result, results of matches on or after the match date]
+  assertion: code asserts every result used in a table has date < the match date and no *_close column is read before scoring
+universe: >
+  fd_matches main-league divisions, matches in the last 5 rounds of the season for both teams, with the price source
+  and the fair reference present.
+data_snapshot: lake fd_matches pull taken when the study script runs; the build id is recorded in the ledger row
+window:
+  exploratory: [2012-07-01, 2024-06-30]   # train: theta is selected here only
+  evaluation:  [2025-07-01, 2026-10-19]   # test: scored once
+  evaluation_exclusion: [2026-04-17, 2026-05-04]   # football-data has no Betfair close there (PE-26); matches dropped
+  gap_note: 2024-07-01 to 2025-06-30 is in neither window (a buffer between selection and test)
+strategy:
+  rule: >
+    Last 5 rounds: both teams have at most 5 league matches left including this one (season length = 2*(teams-1) with
+    teams = distinct teams in the division-season). Zones at fixed rank boundaries, the same for every division:
+    champion (rank 1), top 4, top 6, and the relegation line (the bottom 3). A team has something at stake when its
+    best possible final rank (1 + rivals whose current points exceed its maximum attainable points) and worst possible
+    final rank (1 + rivals whose maximum attainable points are at least its current points) fall in different zones;
+    otherwise it has nothing at stake. Bet only when exactly one side has something at stake; take that side to win
+    (home or away outcome) at max_*_open. fair = power de-vig of the open of the reference book (Pinnacle on train,
+    Betfair Exchange on test). edge = log(max_side_open * p_fair_open[side]); bet 1 unit if edge > theta. At most one
+    bet per match.
+  data_quality_rule: >
+    A quote with max_side_open / reference_side_open > 1.5 is a data error and the match is not eligible (the R2-Q3
+    rule).
+  upper_bound_warning: >
+    max_*_open is a quoted price, not an achievable one (STANDARDS known traps).
+selection:
+  where: exploratory window only (2012-07-01 to 2024-06-30), benchmark the de-vigged Pinnacle close; nothing from the evaluation window is read
+  candidates: {theta: [0.0, 0.02, 0.05]}
+  bet_count_first: >
+    Step 1, before any outcome or closing price is looked at: for each candidate theta count the train bets (this uses
+    only the earlier-results standings, the opens and the stake rule; no own-match result, no close) and append the
+    three counts with a timestamp to research/studies/soft-open-vs-betfair-late-season-stakes/trials.csv. Step 2 only
+    then computes CLV. A candidate with fewer than 300 train bets is ineligible.
+  criterion: highest mean clv_log against the de-vigged Pinnacle close on the train window, among eligible candidates
+  tie_break: lower theta
+  fallback: if no candidate has 300 train bets, theta = 0.0
+  scoring: the selected theta is scored once on the evaluation window through run_trial with config {}; the others are never scored there
+  record: candidate train results go to research/studies/soft-open-vs-betfair-late-season-stakes/trials.csv (exploratory, not ledger trials)
+benchmark: de-vigged (power) Betfair Exchange close for the test; Pinnacle close for the train selection only
+primary_metric: clv_log = log(odds_taken * p_close_devig[o]), mean per bet
+metric_kind: return
+secondary_metrics: [roi (flat stakes, never primary), n_bets, share of last-5-round matches with exactly one side at stake]
+costs: the soft book margin is inside the taken price; no commission
+grid: {}   # one counted test
+min_n: 300
+literature_ceiling: >
+  As H1: max-odds CLV above +2% per bet is a leakage or data-error suspect. Motivation effects in closing lines are
+  small; a soft open could be slow to price them.
+uncertainty: block bootstrap by match-day, 2,000 resamples, percentile 95% CI
+stability: chronological thirds, per division, leave-one-division-out
+notes: >
+  Expected test bets from the proposal: about 300-400 (13% of matches in the last 5 rounds x about 30% asymmetric;
+  an estimate, not counted). The uniform zone boundaries (1, 4, 6, bottom 3) are a simplification fixed here.
+  Pre-2019/20 max is the Betbrain max, post is the market Max (era change); the data-quality rule applies to both.
+  Train uses Pinnacle for the fair reference and the benchmark, test uses Betfair, so theta carries over across
+  reference books by assumption. Test window reused by other rules (see H1 notes).
