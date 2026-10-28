@@ -158,8 +158,8 @@ def do_score() -> None:
         "selection_fallback": bool(sel["fallback"]),
         "selection_snapshot": sel["data_snapshot"],
         "selection_git_sha": sel["git_sha"],
-        "pit_assertion": "stakes use results dated strictly before the match date; decide() takes only whitelisted "
-        "open columns (sobf.assert_whitelist)",
+        "pit_assertion": "stakes use results dated strictly before the decision day (latest Tue/Fri on or before the "
+        "match date); decide() takes only whitelisted open columns (sobf.assert_whitelist)",
         "clean": True,
         "within_ceiling": bool(mean < CEILING),
         "underpowered": bool(len(bets) < MIN_N),
