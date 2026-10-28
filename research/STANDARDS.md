@@ -25,6 +25,17 @@ Nothing here ever places a real bet. The top rung is *paper* trading.
 | Polymarket soccer | hourly bar close at decision hour, plus the taker fee 0.05·p·(1−p) and half the bar's high-low as a spread proxy | Polymarket last pre-kickoff bar, and the sharp bookmaker close for the same match |
 | Kalshi soccer | hourly candle at decision hour, with Kalshi fees | as Polymarket |
 
+**Reference-book validity (every betting family registered after 2026-10-28).** A Betfair Exchange book used
+as a fair reference or a benchmark is valid only when its back-price book sum over the three 1X2 outcomes
+(Σ 1/odds) lies in **[1.00, 1.05]**. A book outside that range is too thin to price fairly, so the match is
+dropped before any decision and counted in the report. The band comes from market structure, not from any
+strategy's result. On the 2024-08 to 2025-06 football-data main-league files, Betfair Exchange **closing** books,
+which are liquid, have a median sum of 1.007 and a 99.5th percentile of 1.041, with 0.16% above 1.05. Opening books
+have a median of 1.02, but 23% exceed 1.05 and 11% exceed 1.10, many at 1.01-1.10 on every outcome (an empty book).
+The registration declares the screen in its universe. A pre-2026-10-28 registration keeps its own rule, and the
+report states the share of its decisions that would fail the band. The first such case, H1
+`soft-open-vs-betfair-fav-open-v1`, was found after that hypothesis was scored.
+
 Primary metrics, chosen at registration: **CLV** (log of taken odds over de-vigged closing odds, averaged
 per bet), **log-loss edge in bits** vs the de-vigged close (`backtest/slices.py` convention), or **Brier
 skill vs the market price** for prediction-market strategies. ROI is always reported and never primary
