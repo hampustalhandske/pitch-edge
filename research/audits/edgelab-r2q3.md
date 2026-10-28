@@ -93,7 +93,10 @@ evaluation-window bets, attributed to the short-lead drop (not itemised; unverif
    provider. Filed in edgelab as EL-23 (must); edgelab's own trace finds the holdout carved out only for
    validation while inference uses the full series, so the "locked" holdout bars feed the grade. Consequence: `notes.md`'s "headline scored mostly on 2012-2022" and the
    `holdout_20pct_not_scored_by_edgelab` key in `r2q3-bet365-pe_side.json` do not describe this run. The same check
-   applies to the `r2q3-max` run.
+   applies to the `r2q3-max` run. edgelab's fix for EL-23 (edgelab dev f32b69c) scores only the search window,
+   evaluates markets that resolve after the search end only in the unlocked holdout, and reports how many it moved
+   (`validation.holdout_cut`). The grade above was produced before that fix and keeps its "holdout bars included"
+   label; a regrade needs a fresh run root and the owner's approval.
 2. **CPCV value.** The 21 identical OOS Sharpes are 0.429, not the full-sample 0.194; why is unknown (part of EL-9).
 
 ## Verdict
