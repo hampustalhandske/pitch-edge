@@ -333,10 +333,7 @@ def full_refresh(
         summary["feature_rows"] = int(len(features))
         if not features.empty:
             persist_features(wh, features)
-            models = default_models()
-            if fast:
-                models = [m for m in models if m.name != "gru_sequence"]
-            results = run_backtests(features, models, WalkForwardConfig(), wh=wh, label="main")
+            results = run_backtests(features, default_models(), WalkForwardConfig(), wh=wh, label="main")
             summary["backtest"] = results_table(results).to_dict(orient="records")
             summary["calibration"] = calibration_table(results).to_dict(orient="records")
         summary["rag_docs"] = build_rag_index(wh).count()

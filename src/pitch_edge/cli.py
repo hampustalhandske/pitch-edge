@@ -342,7 +342,7 @@ def health() -> None:
 
 
 @app.command()
-def refresh(fast: bool = typer.Option(False, help="skip weather + GRU for a quicker run")) -> None:
+def refresh(fast: bool = typer.Option(False, help="skip the weather ingest for a quicker run")) -> None:
     """Ingest -> features -> backtests -> RAG index in one go."""
     from pitch_edge.pipeline import full_refresh
 

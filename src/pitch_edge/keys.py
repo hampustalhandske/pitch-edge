@@ -1,7 +1,8 @@
-"""Single source of truth for the optional credentials — what each unlocks, where to get it.
+"""Single source of truth for the optional keys `pitch-edge setup` offers — what each unlocks, where to get it.
 
 `pitch-edge setup` and the dashboard's key panel both read this registry, and a test checks that
-`API_KEYS.md` names every entry, so the docs and the code cannot drift apart.
+`API_KEYS.md` names every entry, so the docs and the code cannot drift apart. The lakehouse and the-odds-api
+credentials are not offered by `setup`; `API_KEYS.md` lists them under "Credentials outside the registry".
 
 None of these is a bookmaker or exchange credential. Nothing accepted here can place an order or
 move money: the system has no bet-placement capability to configure.

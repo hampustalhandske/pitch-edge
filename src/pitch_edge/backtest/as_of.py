@@ -1,7 +1,7 @@
 """Point-in-time correctness for the `ask` agent.
 
-There is no live-odds feed today (`ODDS_API_KEY` unset), so there is no genuine "now" a question
-can honestly be answered as of. Every question is instead answered as of an explicit historical
+The `ask` agent reads no live odds (the paper loop's the-odds-api quotes are not wired into it), so
+there is no genuine "now" a question can honestly be answered as of. Every question is instead answered as of an explicit historical
 instant, `as_of`, defaulting to a date strictly before the most recent real closing-odds price in
 the warehouse. Every node that needs a cutoff — training data, feature values, RAG retrieval,
 lineup confirmation — goes through this module so none of them can drift out of sync with another.

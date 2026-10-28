@@ -185,8 +185,11 @@ projects; M8 traceability; S2 lake capacity; S4 decimal-odds instrument with CLV
   GRU; the `backtest/as_of.py` docstring says `ODDS_API_KEY` is unset; `ODDS_API_KEY` and `LAKEHOUSE_*` are outside
   the `keys.py` registry.
 - Acceptance: each statement matches the code.
+- Progress: the `refresh --fast` help, the `as_of.py` and `keys.py` docstrings and the `pull_prices.py` docstring
+  now match the code (`API_KEYS.md` already lists the lake and odds-api credentials outside the registry). Left:
+  `reports/main/CASE_STUDY.md` needs a rerun of the main backtest on the current model roster.
 - Blocked by: none. Blocks: none.
-- Commits: none yet.
+- Commits: see git log for `PE-15`.
 
 ## PE-16 The paper loop runs on a laptop that sleeps
 - Status: open (deferred by the owner)
