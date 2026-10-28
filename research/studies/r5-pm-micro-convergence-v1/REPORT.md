@@ -7,6 +7,12 @@ bounce), is the slope still negative? Registration: `research/registry/r5-pm-mic
 Each row needs a book at T ≤ 6h old, a last book before kickoff ≤ 3h old, spread ≤ 5¢, and a sharp open known by T.
 The sharp open exists for only 27% of 2026 matches → n = **19 / 24 / 30** over 5 / 6 / 10 days.
 
+**Data gap (PE-26).** football-data published no Betfair Exchange close for 2026-04-20 to 2026-05-03 and for about
+half the matches of 2026-04-17, 04-19 and 05-04. The convergence test needs only the sharp open; the open-to-close
+comparison uses the Betfair close, which is missing for 132 of the 167 matches dated 2026-04-17 to 05-04 in the
+454-match book window (counted on `data/research/r1/fd.parquet`, before the study's other filters). The numbers are
+the recorded run.
+
 ## Method
 OLS slope of move = mid(last) − mid(T) on gap = mid(T) − q_open, scored as mean influence values in `run_trial`;
 exact block CIs stored alongside.

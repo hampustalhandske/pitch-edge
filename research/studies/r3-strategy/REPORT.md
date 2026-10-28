@@ -10,6 +10,12 @@ from open-price coverage only: bet365 (B365), bwin (BW), William Hill (WH). Grid
 football-data open snapshot, back an outcome when log(price × model fair-close probability) > θ. Score: CLV vs the
 power-de-vigged Pinnacle close (Shin as sensitivity). Evaluation 2019-07 → 2025-06.
 
+**Data gap (PE-26).** football-data published no Betfair Exchange close for 2026-04-20 to 2026-05-03 and for about
+half the matches of 2026-04-17, 04-19 and 05-04. The post-2025 Betfair rows come from the R3 panel, which ends on
+2026-01-15 because it requires a Pinnacle open; none of the 597 main-league matches dated 2026-04-17 to 05-04 is in it
+(432 of them also have no Betfair close, counted on `data/research/r3/fd_odds.parquet`). The post-2025 numbers are the
+recorded run; the gap removes no match from them.
+
 ## Results
 | book, θ | CLV [95% CI] | n | note |
 |---|---|---|---|

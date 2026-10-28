@@ -12,6 +12,12 @@ every 4h; median book 6.6h old at T−1h. 454 R1 matches kick off in the window;
 three usable books (two-sided, spread ≤ 5¢, age ≤ 24h, raw sum 0.9–1.1); **93** also have a valid Betfair close
 (missing for 44%). 39 longshot outcomes (18 days), 22 favourite outcomes (17 days).
 
+**Data gap (PE-26).** football-data published no Betfair Exchange close for 2026-04-20 to 2026-05-03 and for about
+half the matches of 2026-04-17, 04-19 and 05-04. Of the 185 matches with three usable books, 92 lack a valid close,
+and all 92 are dated 2026-04-17 to 05-04 (167 of the 454 matches in the book window are, and 132 of those have no
+close; counted on `data/research/r1/fd.parquet` through the study's loader). The numbers above are the recorded run;
+they exclude those matches.
+
 ## Method
 Per outcome s·(p_mid − q_close), s = +1 for q < 0.2, −1 for q > 0.6; p_mid power-normalised. Match-day block
 bootstrap (5,000) via `run_trial`. Secondaries on the same rows: last trade, paired last − mid, depth-1¢ microprice.

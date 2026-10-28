@@ -10,6 +10,13 @@ prices can be stale or erroneous) or `bet365_open`. Quotes above 1.5× the Pinna
 errors. Score: CLV vs power-de-vigged Pinnacle close. Post segment 2025-07+: Betfair open as fair price, Betfair
 close as benchmark.
 
+**Data gap (PE-26).** football-data published no Betfair Exchange close for 2026-04-20 to 2026-05-03 and for about
+half the matches of 2026-04-17, 04-19 and 05-04. In the post segment, 170 matches dated 2026-04-17 to 05-04 pass the
+other eligibility filters (main-league file, result, Betfair open, max and bet365 open); 5 of them have no Betfair
+close and are not scored. The other 427 of the 597 main-league matches in the span lack a Betfair open, so the filter
+removes them regardless; 432 of the 597 have no close (counted on `data/research/r2/fd.parquet`). The post-segment
+numbers are the recorded run; they exclude those matches.
+
 ## How often (evaluation)
 max_open beats Pinnacle-open fair on ≥ 1 outcome in 65% of matches (26% of outcomes); 59% of those also beat the
 fair close. bet365: 12% of matches (4.1% of outcomes); 54% also beat the close. Exploratory: 77% / 19% of matches.

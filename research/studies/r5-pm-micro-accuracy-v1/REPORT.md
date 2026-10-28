@@ -8,6 +8,12 @@
 Universe and filters as `r5-pm-micro-flb-v1`. Target: football-data result (hindsight, target only). T−1h: 93
 matches / 23 days; T−24h: 98 / 22.
 
+**Data gap (PE-26).** football-data published no Betfair Exchange close for 2026-04-20 to 2026-05-03 and for about
+half the matches of 2026-04-17, 04-19 and 05-04. Of the 454 matches in the book window, 167 are dated 2026-04-17 to
+05-04 and 132 of them have no close. Of the matches with three usable books, 92 of 185 (T−1h) and 111 of 209 (T−24h)
+have no close and are not scored; 92 and 110 of them are dated in that span (counted on `data/research/r1/fd.parquet`
+through the study's loader). The numbers above exclude them.
+
 ## Method
 Per match LL(PM mid) − LL(Betfair close) in bits; positive = Polymarket worse.
 

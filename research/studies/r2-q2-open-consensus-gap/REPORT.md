@@ -16,6 +16,12 @@ g_max = log(max_open / pin_open), capped at 1.5. Predictability: move (logit p_p
 g_avg, g_max — fitted on exploratory, scored by out-of-sample R² on evaluation. Strategy: back the outcome with the
 largest gap > θ at Pinnacle open; CLV vs power-de-vigged Pinnacle close.
 
+**Data gap (PE-26).** football-data published no Betfair Exchange close for 2026-04-20 to 2026-05-03 and for about
+half the matches of 2026-04-17, 04-19 and 05-04. None of the 1,029 post-segment matches dated 2026-04-17 to 05-04 has
+a Pinnacle open (the snapshot has none after 2026-01-15), which the universe requires, so none is scored whether or
+not it has a close; 863 of the 1,029 also have no Betfair close (counted on `data/research/r2/fd.parquet`). The
+post-segment numbers are the recorded run; the gap removes no match from them.
+
 ## Headline
 Predictability: OOS R² +0.65% [0.47, 0.83] (136k outcome rows). In-window slope on g_avg 0.38 (exploratory),
 0.24 (evaluation); with probability-level and outcome controls (post-hoc) 0.39 [0.36, 0.43] and 0.44 [0.38, 0.49].

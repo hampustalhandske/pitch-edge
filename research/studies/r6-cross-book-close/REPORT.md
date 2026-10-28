@@ -17,6 +17,12 @@ allow-listed open columns, and `assert_open_only` runs on every fold (recomputin
 column blanked must give identical features). Exploratory 2012-07 → 2019-06; evaluation 2019/20 → 2024/25:
 n = 45,467 matches, 1,610 match-days.
 
+**Data gap (PE-26).** football-data published no Betfair Exchange close for 2026-04-20 to 2026-05-03 and for about
+half the matches of 2026-04-17, 04-19 and 05-04. The post segment requires a Pinnacle open, which the snapshot lacks
+after 2026-01-15, so none of the 597 main-league matches dated 2026-04-17 to 05-04 is in the 2,929; 432 of those 597
+also have no Betfair Exchange close (counted on `data/research/r2/audit_q3_raw.parquet`). The post-segment numbers are
+the recorded run; the gap removes no match from them.
+
 ## Method
 - Target: logit move of the power-de-vigged Pinnacle open → close; predicted close p̂ ∝ σ(logit p_open + move).
 - Baseline: R3's per-outcome OLS of the move on [1, g_avg, g_max], refit in the same walk-forward.

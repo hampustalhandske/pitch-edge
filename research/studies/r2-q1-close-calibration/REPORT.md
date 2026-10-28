@@ -12,6 +12,11 @@ Lake `fd_matches` snapshot 2026-10-20 17:56:52Z, all 38 divisions. Exploratory 2
 matches / 2,385 match-days); evaluation 2019-07 → 2025-06 (72,538 / 2,034 days); Betfair close 2024-08 → 2026-10
 (25,878, evaluation only).
 
+**Data gap (PE-26).** football-data published no Betfair Exchange close for 2026-04-20 to 2026-05-03 and for about
+half the matches of 2026-04-17, 04-19 and 05-04. Of the 1,029 matches in the Betfair-close window dated 2026-04-17 to
+05-04, 863 have no close and are not scored (counted on `data/research/r2/fd.parquet`; the study's other filter, a
+result, removes none of them). The numbers above are the recorded run; they exclude those matches.
+
 ## Method
 FLB = OLS slope b in y = a + b·p (home+away rows; b > 1 ⇒ FLB). Draw bias = mean(y_draw − p_draw). De-vig
 comparison = paired log-loss difference. Match-day block bootstrap, 2,000 draws; BH q = 0.10 within test across

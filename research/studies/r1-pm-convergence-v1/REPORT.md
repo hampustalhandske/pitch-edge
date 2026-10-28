@@ -9,6 +9,12 @@ Universe and open point-in-time rule as `r1-pm-gap-trade-v1`. p_PM(T) must be a 
 trade from a bar ending by kickoff, ≤ 3h old. Evaluation 2025-11-01 → 2026-10-19; rows are outcomes (three per
 match), pooled.
 
+**Data gap (PE-26).** football-data published no Betfair Exchange close for 2026-04-20 to 2026-05-03 and for about
+half the matches of 2026-04-17, 04-19 and 05-04. The Polymarket-versus-open test needs no close, so the gap does not
+touch it; the open-to-close column and the Betfair-close diagnostic below exclude the matches without a close. In the
+evaluation window, 132 of the 167 matches dated 2026-04-17 to 05-04 have none (counted on
+`data/research/r1/fd.parquet`, before the study's other filters). The numbers are the recorded run.
+
 ## Headline (evaluation)
 | T | n (days) | slope [95% CI] | BH-adj p | bounce-only slope (post-hoc) | sharp open→close slope on gap |
 |---|---|---|---|---|---|

@@ -12,6 +12,12 @@ Join rates (`data/research/r3/join_rates.csv`): Understat 83–84% in the top 5 
 by fixture co-occurrence, 353 fd teams) 100% for E0, SP1, I1, D1, F1, N1, SC0 and 24–41% in second tiers; Club Elo
 (2022-09+) 98–99% E0/D1, 70–88% F1/I1/SP1.
 
+**Data gap (PE-26).** football-data published no Betfair Exchange close for 2026-04-20 to 2026-05-03 and for about
+half the matches of 2026-04-17, 04-19 and 05-04. The post-2025-07 Betfair-close matches also need a Pinnacle open, and
+the snapshot has none after 2026-01-15, so the 2,929 post matches end on 2026-01-15 and none of the 597 main-league
+matches dated 2026-04-17 to 05-04 enters the panel; 432 of those 597 also have no Betfair close (counted on
+`data/research/r3/fd_odds.parquet`). The post-2025 numbers are the recorded run; the gap removes no match from them.
+
 ## Method
 Target: logit move from power- (Shin as sensitivity) de-vigged Pinnacle open to close. Baseline: per-outcome OLS
 on the consensus gaps g_avg, g_max (R2-Q2). Feature model adds the group's columns, fitted on the same rows.

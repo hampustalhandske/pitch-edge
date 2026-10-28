@@ -14,6 +14,11 @@ high — No side. Does it beat the de-vigged Betfair Exchange close after fees a
   so the bound is conservative.
 - Cost per share = last trade (≤ 6h old) + max(half bar high−low, 0.005) + fee 0.05·p·(1−p).
 - Code asserts bar `known_at ≤ T` and `open_known_at ≤ T`.
+- **Data gap (PE-26).** football-data published no Betfair Exchange close for 2026-04-20 to 2026-05-03 and for about
+  half the matches of 2026-04-17, 04-19 and 05-04. In the evaluation window, 132 of the 167 matches dated 2026-04-17
+  to 05-04 have no Betfair close, so their trades have no CLV against it and are not in the headline (counted on
+  `data/research/r1/fd.parquet`, before the study's other filters). The numbers are the recorded run; they exclude
+  those matches.
 
 ## Headline (evaluation 2025-11-01 → 2026-10-19; CLV = log(fair close / cost) vs de-vigged Betfair close)
 | T | θ | side | n | CLV vs BF close [95% CI] | CLV vs PM last | ROI |

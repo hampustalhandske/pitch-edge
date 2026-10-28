@@ -8,6 +8,11 @@
 Universe, kickoff rule, PM snapshot rule and windows as `r1-pm-accuracy-v1`. Evaluation 2025-11-01 → 2026-10-19:
 1,174 matches, 213 match-days, three outcome rows each; PM power-normalised.
 
+**Data gap (PE-26).** football-data published no Betfair Exchange close for 2026-04-20 to 2026-05-03 and for about
+half the matches of 2026-04-17, 04-19 and 05-04. In the evaluation window, 132 of the 167 matches dated 2026-04-17 to
+05-04 have no Betfair close and are not scored (counted on `data/research/r1/fd.parquet`, before the study's
+Polymarket-price filters). The numbers above are the recorded run; they exclude those matches.
+
 ## Method
 Per outcome gap = PM probability − Betfair close probability; mean per segment with match-day block bootstrap
 (5,000 draws), one-sided in the registered direction.

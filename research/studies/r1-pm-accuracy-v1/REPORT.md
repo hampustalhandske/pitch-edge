@@ -19,6 +19,13 @@ than the de-vigged sharp *open*? Registration: `research/registry/r1-pm-accuracy
 - Windows (chosen from counts only): exploratory 2023-09-01 → 2025-10-31 (510 matches); evaluation
   2025-11-01 → 2026-10-19 (1,405 matches, 226 match-days).
 
+**Data gap (PE-26).** football-data published no Betfair Exchange close for 2026-04-20 to 2026-05-03 and for about
+half the matches of 2026-04-17, 04-19 and 05-04. In the evaluation window, 167 matches are dated 2026-04-17 to 05-04
+and 132 of them have no Betfair close. Of the 136 (T−1h) and 98 (T−24h) of them with a Polymarket price passing the
+staleness and sum filters, 107 and 81 have no close and are not scored against the Betfair-close benchmark (counted on
+`data/research/r1/fd.parquet` through the study's loader). The numbers above are the recorded run; they exclude those
+matches.
+
 ## Method
 Per match LL(PM) − LL(benchmark) in bits on the football-data result (PM resolution agreed with it for 100% of
 exploratory matches); mean with match-day block bootstrap (5,000 draws). Positive = PM worse.

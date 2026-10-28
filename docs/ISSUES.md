@@ -323,19 +323,22 @@ projects; M8 traceability; S2 lake capacity; S4 decimal-odds instrument with CLV
 - Blocked by: none. Blocks: none.
 - Commits: see git log for `PE-25`.
 
-## PE-26 Post-2025 segments have no sharp close from 2026-04-17 to 05-04
-- Status: open
+## PE-26 No sharp close in fd_matches from 2026-04-17 to 05-04
+- Status: done
 - Priority: nice (honest reporting)
 - Raised by: lakehouse (LK-42)
 - Evidence: `fd_matches` has no Betfair Exchange close on any match from 2026-04-20 to 2026-05-03 and on about
-  half the matches of 04-17, 04-19 and 05-04 (about 830 matches, every division); RUS has none in 2026. The
-  post segments of R2-Q1, R2-Q2, R2-Q3, R3 and R6 (2024-08 or 2025-07 to 2026-10-19) score against that close.
-  Their eligibility filters require a valid close, so those matches are dropped, never scored against a soft
-  close. Paper decisions start on 2026-10-20 and are unaffected. football-data never published these closes
-  (the lake re-read the source files on 2026-10-27), so the lake matches its source and the recorded runs
-  stand.
-- Acceptance: each affected report states the gap and its match count beside the post-segment numbers. If the
+  half the matches of 04-17, 04-19 and 05-04 (about 830 matches, every division); RUS has none in 2026.
+  football-data never published these closes (the lake re-read the source files on 2026-10-27), so the lake
+  matches its source and the recorded runs stand. Studies scoring against that close drop those matches; none
+  falls back to a soft close. Affected: R2-Q1 and R2-Q3 post segments, the R1 Polymarket studies (evaluation
+  2025-11 to 2026-10), R5 micro (evaluation 2026-04-09 to 09-29) and R5 lead-lag. R2-Q2, R3 and R6 lose nothing:
+  their universes need a Pinnacle open, which the snapshots lack after 2026-01-15, so their post segments end
+  there. R5 agreement and arbitrage never read the close. Paper decisions start on 2026-10-20 and are unaffected.
+- Acceptance: each affected report states the gap and its match count beside the numbers it affects. If the
   lake's OddsPapi backfill (LK-45) gives a sharp close for the span, a run on it is reported as a sensitivity;
   the recorded first run stays the result of record.
+- Result: a "Data gap (PE-26)" paragraph in 14 study reports, with counts from each study's local snapshot (for
+  example R2-Q1 863 of 1,029 matches in the span, R5 micro FLB 92 of 107, R2-Q3 5 of 170 eligible).
 - Blocked by: none. Blocks: none.
 - Commits: none yet.

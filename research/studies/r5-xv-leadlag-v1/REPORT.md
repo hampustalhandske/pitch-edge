@@ -7,6 +7,11 @@ information about the Betfair close that the other lacks? Registration: `researc
 Hourly: Kalshi mids at H−1, H, H+1 and a Polymarket trade in each of those hours — 126,796 rows, 290 days. Close:
 the last hour ≤ kickoff−1h with a Polymarket book mid, an `fd_match_key` and a Betfair close — 276 outcomes, 22 days.
 
+**Data gap (PE-26).** football-data published no Betfair Exchange close for 2026-04-20 to 2026-05-03 and for about
+half the matches of 2026-04-17, 04-19 and 05-04. Of the 897 evaluation-window events with an `fd_match_key`, 132 are
+dated 2026-04-17 to 05-04 and 113 of them have no close and are not scored (counted on `data/research/r5/fd.parquet`,
+before the study's price filters). The numbers above are the recorded run; they exclude those matches.
+
 ## Headline
 - Kalshi → Polymarket next-hour slope **0.117 [0.060, 0.178]** (thirds 0.036 / 0.231 / 0.181).
 - Polymarket → Kalshi **0.054 [0.013, 0.101]** (thirds 0.012 / 0.116 / 0.085).
