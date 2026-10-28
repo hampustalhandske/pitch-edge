@@ -169,9 +169,11 @@ projects; M8 traceability; S2 lake capacity; S4 decimal-odds instrument with CLV
   lists UCL.
 - Acceptance: either UCL leaves the paper strategies' universe (stated as a deviation in the report), or a sharp
   UCL close source is found and used.
-- Lead: the lake's planned OddsPapi recorder (LK-45) would give Pinnacle and Singbet UCL price paths from
-  2026-01 with kickoff times, and FotMob the scores (LK-27).
-- Blocked by: LK-45. Blocks: none.
+- Lead: LK-45 is built (lake b3abc46): OddsPapi Pinnacle, Singbet and Betfair Exchange price paths for UCL,
+  UEL and UECL from 2026-01-13, with kickoff UTC; the close is the last row with observed_at <= kickoff_utc
+  (median 2.9 minutes before kickoff for Pinnacle on UCL). Next: once the backfill finishes (~2026-10-30) and the
+  outcome codes are verified, settle UCL paper decisions against the de-vigged Pinnacle close from it.
+- Blocked by: LK-45 backfill and its outcome-code check. Blocks: none.
 - Commits: none yet.
 
 ## PE-14 Paper strategies that cannot produce evidence

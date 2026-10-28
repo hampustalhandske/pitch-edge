@@ -22,7 +22,7 @@ are upper bounds.
 | H1 | basic rule | Backing a strong favourite (Betfair-open fair p ≥ 0.70) at the best soft open, when that price beats the Betfair-open fair price by θ ∈ {0, 1%}, has positive CLV against the Betfair close (soft books under-shorten favourites). | fd 1X2 opens (max, Betfair), Betfair close | train 2024-08 to 2025-06 (choose θ, p cut-off) / test 2025-07 to 2026-10 | 306 at θ = 0, 200 at θ = 1% (counted) | 0.88 / 0.69 |
 | H2 | basic rule | In the last 5 rounds, the side that still needs points (title, Europe, relegation) is under-priced at the best soft open against a side with nothing at stake, measured by CLV against the Betfair close. | fd results (point-in-time tables) and 1X2 opens, Betfair close | rule fixed in advance; train 2012-07 to 2024-06 against the Pinnacle close to set θ / test 2025-07 to 2026-10 | about 300-400 (estimate: 13% of matches in the last 5 rounds × about 30% asymmetric; not counted) | about 0.87-0.95 |
 | H3 | ML | A gradient-boosted model of the de-vigged sharp close from soft-book opens only (average, max and bet365 levels and spreads, no Pinnacle or Betfair inputs) finds best soft opens priced above the predicted fair close by θ, with positive CLV against the Betfair close. | fd 1X2 opens; target Pinnacle close (train), Betfair close (test) | train 2012-07 to 2024-06 (walk-forward folds) / test 2025-07 to 2026-10 | about 1,500-2,500 at θ = 2% (estimate from R2-Q3's 25% bet rate; not counted) | about 1.00 |
-| H4 | rule on price paths | When Pinnacle shortens an outcome by ≥ 3% within an hour before kickoff and bet365 has not moved, backing bet365 at its quote has positive CLV against the Pinnacle close (a soft book lags the sharp move). | OddsPapi Pinnacle and bet365 paths (LK-45), kickoff UTC | train 2026-01-13 to 2026-05-31 / test 2026-06-01 to 2026-10-19 | unknown until LK-45 reports coverage | n/a until counted; 80% needs about 250 bets |
+| H4 | rule on price paths | When Pinnacle shortens an outcome by ≥ 3% within an hour before kickoff and the Betfair Exchange back price has not moved, backing on Betfair at that price (within the size offered) has positive CLV against the Pinnacle close (the exchange lags the sharp book). | OddsPapi Pinnacle and Betfair Exchange paths with offered size (LK-45; 6,740 finished matches from 2026-01-13 in 26 sampled tournaments incl. UCL/UEL; bet365 is not in OddsPapi) | train 2026-01-13 to 2026-05-31 / test 2026-06-01 to 2026-10-19 | not yet counted: the backfill finishes about 2026-10-30 | n/a until counted; 80% needs about 250 bets |
 
 **Considered and not proposed.**
 - Kalshi longshots against the Betfair close: only about 900 Kalshi 1X2 events since 2026-01 link to a
@@ -32,6 +32,7 @@ are upper bounds.
 
 **What each would show.** H1 and H2 are cheap and fully specified now. H3 is the ML candidate: it replaces R6's
 Pinnacle-open inputs, which end on 2026-01-15, with books that are still published, so it can also run live in the
-paper loop. H4 waits for LK-45 and is the only one that tests intraday timing. A pass on any of them reaches at
+paper loop. H4 waits for the LK-45 backfill and is the only one that tests intraday timing; it needs the outcome codes
+(101/102/103 = home/draw/away) verified against the football-data Betfair close first. A pass on any of them reaches at
 most L2 to L3 on this reused window. The claim then needs the auditor, edgelab's grade and at least 150 settled
 paper bets.
