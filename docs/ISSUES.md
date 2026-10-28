@@ -361,3 +361,18 @@ projects; M8 traceability; S2 lake capacity; S4 decimal-odds instrument with CLV
   example R2-Q1 863 of 1,029 matches in the span, R5 micro FLB 92 of 107, R2-Q3 5 of 170 eligible).
 - Blocked by: none. Blocks: none.
 - Commits: none yet.
+
+## PE-27 Propose new hypotheses tradable on current data
+- Status: in-progress (waiting for the owner's approval)
+- Priority: should (owner goal: more strategies tested on data we have)
+- Raised by: coordinator, round 2
+- Evidence: Betfair historical data is not obtainable from Sweden and no paid datasets are bought, so new tests
+  must use football-data opens and closes, the Betfair close, Polymarket and Kalshi bars, and OddsPapi paths
+  from 2026-01 (LK-45).
+- Acceptance: a one-page draft of 3-6 hypotheses (at least one basic rule and one ML idea) with data, windows,
+  expected test bets and power at +2% CLV; the owner approves or rejects each before any registration.
+- Result so far: `research/proposals/2026-10-28-new-hypotheses.md` (commit 5ff6d18) proposes H1 favourite rule,
+  H2 end-of-season motivation rule, H3 soft-books-only closing-line model (ML), H4 Pinnacle-to-bet365 lag on
+  OddsPapi paths (after LK-45).
+- Blocked by: owner approval; H4 also LK-45. Blocks: none.
+- Commits: see git log for `PE-27`.
