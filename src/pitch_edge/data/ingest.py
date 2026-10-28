@@ -36,6 +36,14 @@ from pitch_edge.data.teams import TeamNameResolver
 
 logger = logging.getLogger(__name__)
 
+
+def latest_season_start(today: date | None = None) -> int:
+    """Start year of the European season under way on `today` (default: today, UTC): seasons start on 1 July,
+    so 2026-10-28 gives 2026 (2026/27) and 2026-05-01 gives 2025 (2025/26)."""
+    today = today or datetime.now(UTC).date()
+    return today.year if today.month >= 7 else today.year - 1
+
+
 MATCH_CORE_COLUMNS = [
     "match_id",
     "date",
@@ -187,7 +195,7 @@ def ingest_football_data(
 ) -> dict[str, int]:
     src = FootballDataCoUkSource()
     leagues = leagues or list(LEAGUE_CODES)
-    seasons = seasons or list(range(2005, 2026))
+    seasons = seasons or list(range(2005, latest_season_start() + 1))
     counts: dict[str, int] = {}
     for league in leagues:
         counts[league] = _run(wh, f"football_data_co_uk:{league}", partial(_ingest_fd_league, wh, src, league, seasons))
@@ -228,7 +236,8 @@ def ingest_club_elo(wh: Warehouse, dates: list[str] | None = None) -> int:
     # that date, so trip the circuit fast instead of waiting for the client's general-purpose
     # default (6 consecutive failures, tuned for sources with occasional per-item blips).
     src.http.max_consecutive_failures = 2
-    dates = dates or [f"{y}-{m:02d}-01" for y in range(2010, 2026) for m in (1, 7)]
+    today = datetime.now(UTC).date()
+    dates = dates or [f"{y}-{m:02d}-01" for y in range(2010, today.year + 1) for m in (1, 7) if date(y, m, 1) <= today]
 
     def go() -> int:
         total = 0
@@ -290,7 +299,7 @@ def ingest_openfootball(wh: Warehouse, leagues: list[str] | None = None, seasons
         "br.1",
         "jp.1",
     ]
-    seasons = seasons or list(range(2015, 2026))
+    seasons = seasons or list(range(2015, latest_season_start() + 1))
 
     def go() -> int:
         total = 0
