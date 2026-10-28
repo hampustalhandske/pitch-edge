@@ -430,3 +430,17 @@ projects; M8 traceability; S2 lake capacity; S4 decimal-odds instrument with CLV
   while the other `cfmd_`-only rows stay.
 - Blocked by: none. Blocks: none.
 - Commits: see git log for `PE-28`.
+
+## PE-29 Read football-data from the lake only
+- Status: open
+- Priority: should (joint plan: the lake serves all data)
+- Raised by: coordinator, after PE-28
+- Evidence: pitch-edge fetches football-data.co.uk itself (`data/ingest.py` `ingest_football_data`) for the warehouse
+  spine that `ask`, the dashboard and the backtests read, while the studies and the paper settle read the lake's
+  `fd_matches`. On 2026-10-28 the own ingest reached 2026-10-24 to 10-26 in the 11 backtest leagues and the lake mirror
+  10-11 to 10-19, so the two copies of one source disagree on what is known.
+- Acceptance: the warehouse spine's football-data matches and odds come from the lake (`lake_fd_matches` through
+  `lake-sync`, or the lake API), with the same columns and point-in-time stamps; `ingest_football_data` and its
+  connector are removed in the same change; a test covers the spine built from the mirror.
+- Blocked by: the lake refreshing `fd_matches` at least daily (database-04 reports the cadence). Blocks: none.
+- Commits: none yet.
