@@ -211,7 +211,7 @@ def review(
     ),
     ledger: Path | None = LEDGER_OPTION,
 ) -> None:
-    """Append a review (audit / edgelab / paper) to the ledger."""
+    """Append a review (audit / edgelab / paper) or a pre-result registration amendment to the ledger."""
     console = _console()
     try:
         parsed = json.loads(detail)

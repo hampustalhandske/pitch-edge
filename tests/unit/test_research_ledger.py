@@ -174,6 +174,15 @@ def test_reviews_append_with_a_closed_set_of_kinds(ledger, reg):
         ledger.record_review("nope-v1", "audit", "SIGNED")
 
 
+def test_an_amendment_is_accepted_only_before_the_first_trial(ledger, reg):
+    ledger.record_review(reg.id, "amendment", "RECORDED", {"text": "drop incomplete seasons"})
+    assert list(ledger.reviews(reg.id)["kind"]) == ["amendment"]
+    ledger.record_trial(native_record(reg))
+    with pytest.raises(ProtocolError, match="already has trials"):
+        ledger.record_review(reg.id, "amendment", "RECORDED", {"text": "too late"})
+    assert ledger.verify_chain().ok
+
+
 def test_ledger_has_no_mutation_api():
     public = [name for name in dir(Ledger) if not name.startswith("_")]
     forbidden = re.compile(r"update|delete|remove|drop|clear|truncate|edit|replace|overwrite|reset|execute|sql|conn")

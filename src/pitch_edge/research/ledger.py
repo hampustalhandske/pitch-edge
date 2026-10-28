@@ -62,7 +62,7 @@ from pitch_edge.research.stats import directional_p_value
 __all__ = ["DIRECTIONS", "REVIEW_KINDS", "ChainReport", "Ledger", "ProtocolError", "TrialRecord", "default_ledger_path"]
 
 DIRECTIONS = ("positive", "negative", "two-sided")
-REVIEW_KINDS = ("audit", "edgelab", "paper")
+REVIEW_KINDS = ("audit", "edgelab", "paper", "amendment")
 GENESIS = "0" * 64
 _TOL = 1e-12
 
@@ -477,7 +477,10 @@ class Ledger:
 
     def record_review(self, hypothesis_id: str, kind: str, verdict: str, detail: dict[str, Any] | None = None) -> None:
         """Append a review of a registered hypothesis. `kind` is one of `REVIEW_KINDS`; `detail` is stored
-        as JSON (for `paper`: `n_settled`, `weeks`, `clv_ci_lo`, ... as read by `research.gates`)."""
+        as JSON (for `paper`: `n_settled`, `weeks`, `clv_ci_lo`, ... as read by `research.gates`).
+
+        An `amendment` adds a rule to the registration (its `detail` carries the text) and is accepted only while
+        the hypothesis has no trial, so it is on the chain before any result exists; the grading gates ignore it."""
         if kind not in REVIEW_KINDS:
             raise ProtocolError(f"review kind must be one of {REVIEW_KINDS}, got {kind!r}")
         row = {
@@ -491,6 +494,10 @@ class Ledger:
         def op(con: duckdb.DuckDBPyConnection) -> None:
             if self._registration_row(con, hypothesis_id) is None:
                 raise ProtocolError(f"{hypothesis_id} is not registered")
+            if kind == "amendment":
+                n = con.execute("SELECT count(*) FROM trials WHERE hypothesis_id = ?", [hypothesis_id]).fetchone()
+                if n and n[0]:
+                    raise ProtocolError(f"{hypothesis_id} already has trials; an amendment must precede every result")
             self._append(con, "reviews", row)
 
         self._write(op)
