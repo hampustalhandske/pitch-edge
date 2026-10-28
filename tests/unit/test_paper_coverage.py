@@ -120,3 +120,29 @@ def test_cli_report_and_status_print_coverage_and_gaps(tmp_path, monkeypatch):
     assert "cycles observed" in res.output
     assert "1 gap" in res.output
     assert "4 missed" in res.output
+
+
+def test_a_gap_holding_a_recorded_pause_is_paused_not_missed():
+    starts = _hours(0, 1, 2, 7, 8, 12, 13)
+    gaps = cycle_gaps(starts, H, pauses=[T0 + timedelta(hours=2.5)])
+    assert [(g.missed, g.paused) for g in gaps] == [(4, True), (3, False)]
+
+
+def test_cli_status_shows_pauses_apart_from_missed_cycles(tmp_path, monkeypatch):
+    db = tmp_path / "paper.duckdb"
+    monkeypatch.setenv("PITCH_EDGE_PAPER_DB", str(db))
+    with PaperStore(db) as store:
+        for t in _hours(0, 1, 2, 7, 8, 12, 13):
+            store.record_decide_run(
+                "control-fav-pinnacle", t, n_fixtures_evaluated=1, n_fixtures_qualifying=0, n_new_decisions=0
+            )
+    runner = CliRunner()
+    for since in ("2026-10-21T02:30:00Z", "2026-10-21T13:30:00Z", "2026-10-21T13:30:00Z"):
+        res = runner.invoke(app, ["paper", "pause", "--since", since, "--reason", "owner"])
+        assert res.exit_code == 0, res.output
+    assert "already recorded" in res.output
+    res = runner.invoke(app, ["paper", "status"])
+    assert res.exit_code == 0, res.output
+    assert "1 gap(s), 3 missed" in res.output
+    assert "4 paused cycles" in res.output
+    assert "paused since 2026-10-21 13:30" in res.output

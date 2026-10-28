@@ -100,6 +100,9 @@ CREATE TABLE IF NOT EXISTS decide_log (
     strategy_id VARCHAR NOT NULL, decided_at TIMESTAMP NOT NULL, n_fixtures_evaluated INTEGER,
     n_fixtures_qualifying INTEGER, n_new_decisions INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS pauses (
+    started_at TIMESTAMP PRIMARY KEY, reason VARCHAR NOT NULL, recorded_at TIMESTAMP NOT NULL
+);
 CREATE TABLE IF NOT EXISTS collect_log (
     source VARCHAR NOT NULL, scope VARCHAR, called_at TIMESTAMP NOT NULL, status VARCHAR NOT NULL,
     remaining INTEGER, used INTEGER, n_quotes INTEGER, note VARCHAR
@@ -671,6 +674,26 @@ class PaperStore:
 
     def decide_log(self) -> pd.DataFrame:
         return self._df("SELECT * FROM decide_log ORDER BY decided_at, strategy_id")
+
+    def record_pause(self, started_at: datetime, reason: str) -> bool:
+        """Record that the loop was stopped on purpose from `started_at` (tz-aware UTC) until its next cycle.
+        Returns False when a pause with that start is already recorded."""
+        if started_at.tzinfo is None:
+            raise ValueError("started_at must be timezone-aware (UTC)")
+        start = started_at.astimezone(UTC).replace(tzinfo=None)
+        if self.con.execute("SELECT 1 FROM pauses WHERE started_at = ?", [start]).fetchone():
+            return False
+        self.con.execute(
+            "INSERT INTO pauses VALUES (?, ?, ?)", [start, reason, utc_now().astimezone(UTC).replace(tzinfo=None)]
+        )
+        return True
+
+    def pause_starts(self) -> list[datetime]:
+        """Start of every recorded pause, oldest first (tz-aware UTC); empty for a ledger without the table."""
+        if "pauses" not in self.tables():
+            return []
+        rows = self.con.execute("SELECT started_at FROM pauses ORDER BY started_at").fetchall()
+        return [r[0].replace(tzinfo=UTC) for r in rows]
 
     def cycle_starts(self) -> list[datetime]:
         """Time of every loop cycle that ran the strategies, oldest first (tz-aware UTC): the distinct

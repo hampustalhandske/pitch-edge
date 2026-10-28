@@ -198,10 +198,28 @@ def report(n_boot: int = 2000) -> None:
 
 
 @paper_app.command()
+def pause(
+    since: str = typer.Option(
+        ..., "--since", help="When the loop was stopped, ISO 8601 UTC (e.g. 2026-10-28T07:48:17Z)"
+    ),
+    reason: str = typer.Option(..., "--reason", help="Why the loop was stopped"),
+) -> None:
+    """Record that the loop was stopped on purpose from --since until its next cycle, so `paper status` counts
+    those cycles as paused rather than missed. Recording the same start twice adds nothing."""
+    import pandas as pd
+
+    start = pd.Timestamp(since)
+    start = start.tz_localize("UTC") if start.tzinfo is None else start.tz_convert("UTC")
+    with PaperStore(paper_db_path()) as store:
+        added = store.record_pause(start.to_pydatetime(), reason)
+    rprint(f"pause from {start:%Y-%m-%d %H:%M:%S} UTC {'recorded' if added else 'already recorded'}")
+
+
+@paper_app.command()
 def status() -> None:
     """Row counts, quotes per source, the-odds-api credits remaining, and loop cycles observed vs expected
     with the longest gaps. Read-only."""
-    from pitch_edge.paper.report import CYCLE_INTERVAL, cycle_gaps
+    from pitch_edge.paper.report import CYCLE_INTERVAL, cycle_gaps, open_pause
 
     store = PaperStore.open_read_only(paper_db_path())
     if store is None:
@@ -222,14 +240,24 @@ def status() -> None:
             t.add_row(f"quotes[{src}]", f"{n} rows, {fx} fixtures, last {last} UTC")
         t.add_row("odds_api credits remaining", str(store.budget("odds_api")))
         starts = store.cycle_starts()
-        gaps = cycle_gaps(starts, CYCLE_INTERVAL)
+        pauses = store.pause_starts()
+        gaps = cycle_gaps(starts, CYCLE_INTERVAL, pauses)
+        missed = [g for g in gaps if not g.paused]
         if starts:
             expected = round((starts[-1] - starts[0]) / CYCLE_INTERVAL) + 1
             t.add_row(
                 "cycles observed vs expected",
                 f"{len(starts)} of {expected} since {starts[0]:%Y-%m-%d %H:%M} UTC (last {starts[-1]:%Y-%m-%d %H:%M})",
             )
-            t.add_row("cycle gaps", f"{len(gaps)} gap(s), {sum(g.missed for g in gaps)} missed cycles")
+            t.add_row("cycle gaps", f"{len(missed)} gap(s), {sum(g.missed for g in missed)} missed cycles")
+            paused = [g for g in gaps if g.paused]
+            if paused:
+                t.add_row("paused", f"{len(paused)} pause(s), {sum(g.missed for g in paused)} paused cycles")
+        current = open_pause(starts, pauses)
+        if current is not None:
+            t.add_row("loop", f"paused since {current:%Y-%m-%d %H:%M} UTC (no cycle since)")
         rprint(t)
-        for g in sorted(gaps, key=lambda g: g.missed, reverse=True)[:5]:
+        for g in sorted(missed, key=lambda g: g.missed, reverse=True)[:5]:
             rprint(f"gap {g.start:%Y-%m-%d %H:%M} -> {g.end:%Y-%m-%d %H:%M} UTC: {g.missed} missed cycles")
+        for g in (g for g in gaps if g.paused):
+            rprint(f"pause {g.start:%Y-%m-%d %H:%M} -> {g.end:%Y-%m-%d %H:%M} UTC: {g.missed} paused cycles")

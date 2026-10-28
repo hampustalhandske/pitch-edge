@@ -36,8 +36,10 @@ projects; M8 traceability; S2 lake capacity; S4 decimal-odds instrument with CLV
   across a restart shows only in `paper status`). The hourly settle's cost is PE-18.
 - Paused (owner, 2026-10-28): the launchd agent `local.pitch-edge.paper-loop` is unloaded and the loop exited at
   2026-10-28T07:48:17Z after its 07:15-07:27Z cycle; the plist stays in `~/Library/LaunchAgents/`. Cycles from then
-  until the agent is reloaded are paused, not missed: `paper status` still counts them as missed, so every forward
-  result states the paused period beside its coverage. The 14 decisions waiting for a lake close are left as they
+  until the agent is reloaded are paused, not missed: the pause start is recorded in the paper ledger's `pauses`
+  table (`paper pause --since … --reason …`), and `paper status` shows "paused since <start>" while no cycle has run
+  and, after reload, counts the gap holding the pause as paused cycles apart from missed ones. Every forward result
+  states the paused period beside its coverage. The 14 decisions waiting for a lake close are left as they
   are and settle on the first cycle after reload
   (`launchctl load ~/Library/LaunchAgents/local.pitch-edge.paper-loop.plist`).
 - Blocked by: none. Blocks: any L5 claim.

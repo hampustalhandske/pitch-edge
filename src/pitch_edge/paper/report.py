@@ -60,21 +60,34 @@ NO_BENCHMARK_LEAGUES = ("UCL",)
 
 @dataclass(frozen=True)
 class CycleGap:
-    """Two consecutive loop cycles further apart than `GAP_FACTOR` x the interval; `missed` cycles never ran."""
+    """Two consecutive loop cycles further apart than `GAP_FACTOR` x the interval; `missed` cycles never ran.
+    `paused` is True when a recorded pause started inside the gap: the loop was stopped on purpose, so its
+    cycles are paused rather than missed."""
 
     start: datetime  # the cycle before the gap
     end: datetime  # the cycle after the gap
     missed: int
+    paused: bool = False
 
 
-def cycle_gaps(starts: list[datetime], interval: timedelta = CYCLE_INTERVAL) -> list[CycleGap]:
+def cycle_gaps(
+    starts: list[datetime], interval: timedelta = CYCLE_INTERVAL, pauses: list[datetime] | None = None
+) -> list[CycleGap]:
     """Gaps in a sorted list of cycle start times. Consecutive starts more than `GAP_FACTOR` x `interval`
-    apart are a gap that missed round(gap / interval) - 1 cycles."""
+    apart are a gap that missed round(gap / interval) - 1 cycles; a gap holding one of `pauses` (recorded
+    pause starts) is marked paused."""
     gaps = []
     for a, b in zip(starts, starts[1:], strict=False):
         if b - a > GAP_FACTOR * interval:
-            gaps.append(CycleGap(a, b, round((b - a) / interval) - 1))
+            paused = any(a <= p < b for p in pauses or [])
+            gaps.append(CycleGap(a, b, round((b - a) / interval) - 1, paused))
     return gaps
+
+
+def open_pause(starts: list[datetime], pauses: list[datetime]) -> datetime | None:
+    """The latest recorded pause start after the last cycle (the loop has not run since), else None."""
+    after = [p for p in pauses if not starts or p >= starts[-1]]
+    return max(after) if after else None
 
 
 def window_coverage(
