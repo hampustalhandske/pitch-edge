@@ -34,6 +34,12 @@ projects; M8 traceability; S2 lake capacity; S4 decimal-odds instrument with CLV
   gaps (derived from `decide_log`, one entry per cycle); `paper report` adds each primary segment's window
   coverage; the loop logs `missed N cycles since <ts>` when it wakes after a gap within one process run (a gap
   across a restart shows only in `paper status`). The hourly settle's cost is PE-18.
+- Paused (owner, 2026-10-28): the launchd agent `local.pitch-edge.paper-loop` is unloaded and the loop exited at
+  2026-10-28T07:48:17Z after its 07:15-07:27Z cycle; the plist stays in `~/Library/LaunchAgents/`. Cycles from then
+  until the agent is reloaded are paused, not missed: `paper status` still counts them as missed, so every forward
+  result states the paused period beside its coverage. The 14 decisions waiting for a lake close are left as they
+  are and settle on the first cycle after reload
+  (`launchctl load ~/Library/LaunchAgents/local.pitch-edge.paper-loop.plist`).
 - Blocked by: none. Blocks: any L5 claim.
 - Commits: see git log for `PE-2`.
 
@@ -221,6 +227,8 @@ projects; M8 traceability; S2 lake capacity; S4 decimal-odds instrument with CLV
 - Raised by: pitch-edge
 - Evidence: see PE-2.
 - Acceptance: the loop runs on an always-on host; until then PE-2's coverage figures go with every forward result.
+- State: the loop is paused by the owner from 2026-10-28T07:48:17Z (see PE-2); the host question returns when it is
+  reloaded.
 - Blocked by: owner. Blocks: none.
 - Commits: none.
 
