@@ -12,7 +12,6 @@ table in the warehouse, not just the ones summarized here, with column counts an
 flowchart LR
     subgraph Sources["Free data sources"]
         FD["football-data.co.uk\nresults + multi-book odds"]
-        CF["Club-Football-Match-Data\n2000-2025 spine, Elo"]
         TM["Transfermarkt open extract\nplayers, valuations, lineups"]
         SB["StatsBomb Open Data\nevents"]
         ESPN["ESPN soccer data\nfixtures, stats, lineups"]

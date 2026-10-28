@@ -316,6 +316,7 @@ def full_refresh(
 ) -> dict:
     """Ingest everything, build features, run all backtests, rebuild the RAG index. Returns a summary dict."""
     from pitch_edge.data.ingest import ingest_everything
+    from pitch_edge.data.quality import find_duplicate_fixtures
 
     settings = settings or get_settings()
     settings.ensure_dirs()
@@ -329,6 +330,7 @@ def full_refresh(
             include_weather=not fast,
             statsbomb_max_matches=statsbomb_max_matches,
         )
+        summary["duplicate_fixtures"] = len(find_duplicate_fixtures(wh))
         features = load_feature_frame(wh, min_date=backtest_min_date)
         summary["feature_rows"] = int(len(features))
         if not features.empty:

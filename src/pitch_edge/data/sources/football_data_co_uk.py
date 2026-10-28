@@ -59,7 +59,7 @@ LEAGUE_CODES: dict[str, tuple[str, str]] = {  # code -> (country, league name)
     "G1": ("Greece", "Super League"),
 }
 
-# Division codes used by the xgabora compilation for the same "extra" leagues (a few differ from the file stems).
+# Division code -> (country, league name) for the "extra" leagues (a few codes differ from the file stems).
 EXTRA_DIVISION_COUNTRIES: dict[str, tuple[str, str]] = {
     "ARG": ("Argentina", "Liga Profesional"),
     "AUT": ("Austria", "Bundesliga"),

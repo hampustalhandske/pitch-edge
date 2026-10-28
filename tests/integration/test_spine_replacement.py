@@ -1,4 +1,4 @@
-"""Spine precedence is order-independent, and the backtester degrades honestly without Pinnacle prices."""
+"""Spine precedence over secondary sources, and the backtester degrades honestly without Pinnacle prices."""
 
 from __future__ import annotations
 
@@ -29,16 +29,8 @@ def _row(source: str, match_id: str, **extra) -> pd.DataFrame:
     return pd.DataFrame([{**base, **extra}])
 
 
-def test_football_data_row_replaces_secondary_row_and_keeps_elo(warehouse):
-    secondary = _row(
-        "club_football_match_data",
-        "cfmd_E0_20230812_Arsenal_ManUnited",
-        home_elo=1900.0,
-        away_elo=1850.0,
-        MktH=1.9,
-        MktD=3.5,
-        MktA=4.0,
-    )
+def test_football_data_row_replaces_secondary_row(warehouse):
+    secondary = _row("openfootball", "of_E0_20230812_Arsenal_ManUnited", MktH=1.9, MktD=3.5, MktA=4.0)
     assert store_matches(warehouse, secondary) == 1
     assert warehouse.count("odds") == 3
 
@@ -55,20 +47,8 @@ def test_football_data_row_replaces_secondary_row_and_keeps_elo(warehouse):
     assert store_matches(warehouse, spine) == 1  # net count unchanged: one deleted, one inserted
     m = warehouse.read("matches")
     assert len(m) == 1 and m.iloc[0]["source"] == "football_data_co_uk"
-    assert m.iloc[0]["home_elo"] == 1900.0  # carried over from the replaced row
     odds = warehouse.read("odds")
     assert set(odds["bookmaker"]) == {"PS"} and len(odds) == 6  # old Mkt odds removed
-
-
-def test_secondary_after_spine_is_deduped_not_inserted(warehouse):
-    spine = _row("football_data_co_uk", "fd_1", PSH=1.85, PSD=3.7, PSA=4.4)
-    store_matches(warehouse, spine)
-    from pitch_edge.data.ingest import _attach_elo_to_spine
-
-    dup = _row("club_football_match_data", "cfmd_1", home_elo=1700.0, away_elo=1600.0, home_form5=1.0, away_form5=2.0)
-    _attach_elo_to_spine(warehouse, dup)
-    m = warehouse.read("matches")
-    assert len(m) == 1 and m.iloc[0]["home_elo"] == 1700.0
 
 
 def test_engine_falls_back_to_market_average_price_when_no_pinnacle(synthetic_league_matches):

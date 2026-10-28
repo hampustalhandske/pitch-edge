@@ -336,9 +336,16 @@ def export(out_dir: str = "") -> None:
 
 @app.command()
 def health() -> None:
-    """Data pipeline health per source."""
+    """Data pipeline health per source, plus fixtures stored twice under different spellings."""
+    from pitch_edge.data.quality import find_duplicate_fixtures
+
     with _wh() as wh:
         _print_df(wh.health(), "Pipeline health")
+        dupes = find_duplicate_fixtures(wh)
+        if dupes.empty:
+            rprint("[bold]duplicate fixtures:[/bold] none")
+        else:
+            _print_df(dupes.head(50), f"Duplicate fixtures ({len(dupes)} pairs, first 50)")
 
 
 @app.command()

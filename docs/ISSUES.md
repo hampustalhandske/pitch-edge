@@ -142,14 +142,20 @@ projects; M8 traceability; S2 lake capacity; S4 decimal-odds instrument with CLV
 - Commits: see git log for `PE-11`.
 
 ## PE-12 Duplicate matches in the warehouse spine
-- Status: open
+- Status: done
 - Priority: should (correct training data for the `ask` models)
 - Raised by: R7 study
 - Evidence: at least 698 `cfmd_` matches duplicate `fd_` matches under variant team spellings
   (`research/studies/r7-outcome-models/REPORT.md`).
 - Acceptance: one row per real match; a test fails on a duplicate fixture under two name spellings.
 - Blocked by: none. Blocks: none.
-- Commits: none yet.
+- Result: the xgabora connector (`club_football_match_data`) is removed. `ingest_everything` now purges `matches`
+  rows (and their `odds`, `weather` and `features` rows) of any source it does not write, so the next ingest
+  deletes the leftover `cfmd_` rows. `pitch-edge health` and the refresh summary report duplicate fixtures
+  (`data/quality.py::find_duplicate_fixtures`). Measured read-only on the warehouse before the purge: 1,780 duplicate
+  pairs, all of them `cfmd_` against `fd_`; 0 pairs remain once `cfmd_` rows are excluded (no football-data vs
+  openfootball duplicates).
+- Commits: see git log for `PE-12`.
 
 ## PE-13 UCL paper decisions have no benchmark
 - Status: open

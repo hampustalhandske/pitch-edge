@@ -68,7 +68,7 @@ flowchart LR
     LK[football-data odds · Polymarket · Kalshi<br/>Understat · Club Elo · Transfermarkt · Bluesky · Reddit]
   end
   subgraph Free["Free sources"]
-    SRC[football-data.co.uk · Club-Football-Match-Data · openfootball<br/>StatsBomb · ESPN · weather · travel · news · Wikipedia]
+    SRC[football-data.co.uk · openfootball<br/>StatsBomb · ESPN · weather · travel · news · Wikipedia]
   end
   LK --> MIR[lake-sync<br/>lake_* mirrors]
   LK --> ST[research studies<br/>research/studies/*]

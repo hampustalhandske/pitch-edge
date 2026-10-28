@@ -94,7 +94,7 @@ class WalkForwardBacktester:
         for col in list(bet.values()) + list(close.values()):
             if col not in df.columns:
                 df[col] = np.nan
-        # bet-price fallback: no Pinnacle early prices (e.g. xgabora-only spine) -> market-average price (Mkt*/Avg*)
+        # bet-price fallback: no Pinnacle early prices (e.g. a spine without Pinnacle columns) -> market-average price (Mkt*/Avg*)
         if df[list(bet.values())].isna().all().all():
             for alt in ("Mkt", "Avg", "B365"):
                 alt_cols = self._odds_cols(alt)
