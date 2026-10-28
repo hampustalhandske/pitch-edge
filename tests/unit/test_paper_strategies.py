@@ -9,11 +9,10 @@ from pathlib import Path
 
 import pytest
 
-from pitch_edge.paper.pricing import power_devig_odds, prediction_market_decimal_odds
+from pitch_edge.paper.pricing import power_devig_odds
 from pitch_edge.paper.store import PaperStore, Quote
 from pitch_edge.paper.strategies import (
     ControlFavPinnacle,
-    PmVsSharpGap,
     Snapshot,
     available_strategies,
     run_decide,
@@ -107,45 +106,6 @@ def test_snapshot_excludes_fixtures_that_have_kicked_off(store):
     assert ControlFavPinnacle().decide(_snap(store)) == []
 
 
-def test_pm_gap_backs_the_outcome_whose_ask_plus_fee_is_below_the_sharp_fair_price(store):
-    sharp = (2.0, 3.6, 4.2)
-    store.add_quotes(_book("odds_api:pinnacle", sharp))
-    fair = power_devig_odds(sharp)
-    home_ask = round(fair[0] - 0.06, 2)  # cost = ask + fee, still > theta below fair
-    store.add_quotes(_pm((home_ask, 0.30, 0.25)))
-    [d] = PmVsSharpGap(theta=0.03).decide(_snap(store))
-    assert d.selection == "home" and d.venue == "polymarket"
-    assert d.price_taken == pytest.approx(prediction_market_decimal_odds(home_ask, 0.05))
-    assert d.hypothesis_id == "pending-r1" and d.model_prob == pytest.approx(fair[0])
-    assert len(d.inputs_quote_ids) == 4  # three sharp prices + the Polymarket quote taken
-    assert d.params["theta"] == 0.03 and d.params["sharp_source"] == "odds_api:pinnacle"
-
-
-def test_pm_gap_does_nothing_when_the_gap_is_below_theta(store):
-    sharp = (2.0, 3.6, 4.2)
-    store.add_quotes(_book("odds_api:pinnacle", sharp))
-    fair = power_devig_odds(sharp)
-    store.add_quotes(_pm((round(fair[0] - 0.02, 2), 0.32, 0.27)))
-    assert PmVsSharpGap(theta=0.03).decide(_snap(store)) == []
-
-
-def test_pm_gap_falls_back_to_betfair_and_skips_stale_sharp_or_missing_asks(store):
-    sharp = (2.0, 3.6, 4.2)
-    store.add_quotes(_book("odds_api:betfair_ex_uk", sharp))
-    fair = power_devig_odds(sharp)
-    store.add_quotes(_pm((round(fair[0] - 0.06, 2), None, None)))
-    [d] = PmVsSharpGap().decide(_snap(store))
-    assert d.params["sharp_source"] == "odds_api:betfair_ex_uk"
-    assert PmVsSharpGap(max_sharp_age_h=0.5).decide(_snap(store)) == []
-
-
-def test_pm_gap_requires_enough_size_at_the_ask(store):
-    sharp = (2.0, 3.6, 4.2)
-    store.add_quotes(_book("odds_api:pinnacle", sharp))
-    store.add_quotes(_pm((round(power_devig_odds(sharp)[0] - 0.06, 2), 0.3, 0.25), size=1.0))
-    assert PmVsSharpGap(min_ask_size=5).decide(_snap(store)) == []
-
-
 def test_run_decide_appends_once_per_fixture_and_strategy(store):
     store.add_quotes(_book("odds_api:pinnacle", (3.14, 2.34, 3.48)))
     strategies = [ControlFavPinnacle()]
@@ -157,7 +117,7 @@ def test_run_decide_appends_once_per_fixture_and_strategy(store):
 
 
 def test_available_strategies_lists_the_builtins():
-    assert set(available_strategies()) >= {"control-fav-pinnacle", "pm-vs-sharp-gap"}
+    assert set(available_strategies()) >= {"control-fav-pinnacle", "soft-vs-sharp-live"}
 
 
 def test_paper_package_has_no_order_or_authenticated_trading_path():

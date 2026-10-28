@@ -138,9 +138,17 @@ def test_primary_metric_uses_only_lake_closes_inside_the_evaluation_window_after
     assert u["n_decided"] == 1
     notes = " ".join(report_notes(rep))
     assert "UCL" in notes and "no benchmark" in notes
-    assert "pm-vs-sharp-gap is NOT R1" in notes
+    assert "pm-vs-sharp-gap" in notes and "placeholder" in notes and "no longer runs" in notes
     assert "max" in notes.lower() and "tautolog" in notes.lower()
     assert "2026-10-20T20:54" in notes  # the ledger registration time is what the cut uses
+
+
+def test_decisions_of_a_strategy_without_a_class_still_report(tmp_path, registry):
+    with PaperStore(tmp_path / "p.duckdb") as store:
+        _add(store, 21, datetime(2026, 10, 22, 9, tzinfo=UTC), strategy="pm-vs-sharp-gap", hyp="pending-r1")
+        rep = summarise(store, registry_dir=registry, ledger=FakeLedger(), n_boot=100, seed=1)
+    row = rep.set_index(["strategy_id", "segment"]).loc[("pm-vs-sharp-gap", "unregistered")]
+    assert row["n_decided"] == 1 and row["hypothesis_id"] == "pending-r1"
 
 
 def test_summary_of_an_empty_ledger_is_empty(tmp_path, registry):
@@ -172,7 +180,7 @@ def test_cli_paper_collect_and_decide_with_public_sources(tmp_path, monkeypatch)
     assert "polymarket: 0 quotes" in res.output and "kalshi: 0 quotes" in res.output
     res = runner.invoke(app, ["paper", "decide"])
     assert res.exit_code == 0, res.output
-    assert "control-fav-pinnacle: 0" in res.output and "pm-vs-sharp-gap: 0" in res.output
+    assert "control-fav-pinnacle: 0" in res.output and "pm-vs-sharp-gap" not in res.output
 
 
 def test_cli_collect_odds_api_without_a_key_fails_cleanly(tmp_path, monkeypatch):

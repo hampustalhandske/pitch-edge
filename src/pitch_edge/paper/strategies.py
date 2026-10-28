@@ -8,9 +8,6 @@ Built-ins:
 
 - `control-fav-pinnacle` (hypothesis `control`): back the Pinnacle favourite at Pinnacle's price.
   Expected CLV is about zero; it checks that collection, settlement and CLV maths are wired correctly.
-- `pm-vs-sharp-gap` (hypothesis `pending-r1`): back a Polymarket 1X2 outcome when the cost of buying it
-  (ask + taker fee 0.05·p·(1−p)) is at least `theta` below the power-de-vigged Pinnacle (else Betfair
-  Exchange) probability. Its parameters are placeholders until the R1 study registers its own.
 - `soft-vs-sharp-live` (hypothesis `bookmaker-line-structure-live-soft-vs-sharp-v1`): back the best soft-book
   price that beats the de-vigged sharp price in the same the-odds-api response by more than 2%.
 """
@@ -27,7 +24,7 @@ from datetime import datetime, timedelta
 
 import pandas as pd
 
-from pitch_edge.paper.pricing import POLYMARKET_FEE_RATE, power_devig_odds, taker_fee
+from pitch_edge.paper.pricing import power_devig_odds
 from pitch_edge.paper.r6_model import NON_SOFT_BOOKS, R6LiveModel
 from pitch_edge.paper.store import SELECTIONS, Decision, DecisionError, PaperStore
 
@@ -129,88 +126,6 @@ class ControlFavPinnacle(PaperStrategy):
                     inputs_quote_ids=list(book["quote_id"]),
                     code_version=snapshot.code_version,
                     params={"max_quote_age_h": self.max_quote_age_h},
-                )
-            )
-        return out
-
-
-class PmVsSharpGap(PaperStrategy):
-    """Back a Polymarket outcome whose ask + fee is `theta` below the de-vigged sharp-book probability."""
-
-    strategy_id = "pm-vs-sharp-gap"
-    hypothesis_id = "pending-r1"
-
-    def __init__(
-        self,
-        theta: float = 0.03,
-        fee_rate: float = POLYMARKET_FEE_RATE,
-        sharp_sources: tuple[str, ...] = ("odds_api:pinnacle", "odds_api:betfair_ex_uk"),
-        max_sharp_age_h: float = 26.0,
-        max_pm_age_h: float = 2.0,
-        min_ask_size: float = 5.0,
-        stake: float = 1.0,
-    ):
-        self.theta = theta
-        self.fee_rate = fee_rate
-        self.sharp_sources = sharp_sources
-        self.max_sharp_age_h = max_sharp_age_h
-        self.max_pm_age_h = max_pm_age_h
-        self.min_ask_size = min_ask_size
-        self.stake = stake
-
-    def decide(self, snapshot: Snapshot) -> list[Decision]:
-        done = snapshot.already_decided(self.strategy_id)
-        sharp_books = [
-            (src, snapshot.three_way(src, timedelta(hours=self.max_sharp_age_h))) for src in self.sharp_sources
-        ]
-        pm = snapshot.fresh("polymarket", timedelta(hours=self.max_pm_age_h))
-        out: list[Decision] = []
-        for fk, g in pm.groupby("fixture_key"):
-            fk = str(fk)
-            if fk in done:
-                continue
-            sharp_src, book = next(((s, b[fk]) for s, b in sharp_books if fk in b), (None, None))
-            if book is None:
-                continue
-            fair = dict(
-                zip(SELECTIONS, power_devig_odds([float(book.loc[s, "decimal_odds"]) for s in SELECTIONS]), strict=True)
-            )
-            best: tuple[float, pd.Series, float] | None = None
-            for _, q in g.iterrows():
-                ask = q["ask"]
-                if pd.isna(ask) or not (0.0 < ask < 1.0) or pd.isna(q["size"]) or q["size"] < self.min_ask_size:
-                    continue
-                cost = float(ask) + taker_fee(float(ask), self.fee_rate)
-                gap = fair[q["selection"]] - cost
-                if gap >= self.theta and (best is None or gap > best[0]):
-                    best = (gap, q, cost)
-            if best is None:
-                continue
-            gap, q, cost = best
-            out.append(
-                Decision(
-                    strategy_id=self.strategy_id,
-                    hypothesis_id=self.hypothesis_id,
-                    decided_at=snapshot.as_of,
-                    fixture_key=fk,
-                    kickoff_at=q["kickoff_at"].to_pydatetime(),
-                    venue="polymarket",
-                    selection=str(q["selection"]),
-                    price_taken=1.0 / cost,
-                    paper_stake_units=self.stake,
-                    model_prob=fair[q["selection"]],
-                    inputs_quote_ids=[*book["quote_id"], q["quote_id"]],
-                    code_version=snapshot.code_version,
-                    params={
-                        "theta": self.theta,
-                        "fee_rate": self.fee_rate,
-                        "sharp_source": sharp_src,
-                        "gap": round(gap, 6),
-                        "ask": float(q["ask"]),
-                        "max_sharp_age_h": self.max_sharp_age_h,
-                        "max_pm_age_h": self.max_pm_age_h,
-                        "min_ask_size": self.min_ask_size,
-                    },
                 )
             )
         return out
@@ -509,7 +424,6 @@ def _last_update_age_s(quote: pd.Series) -> int | None:
 
 _REGISTRY: dict[str, Callable[[], PaperStrategy]] = {
     ControlFavPinnacle.strategy_id: ControlFavPinnacle,
-    PmVsSharpGap.strategy_id: PmVsSharpGap,
     SoftVsSharpLive.strategy_id: SoftVsSharpLive,
     "soft-vs-sharp-live-v2-pinnacle": lambda: SoftVsSharpLiveV2("pinnacle"),
     "soft-vs-sharp-live-v2-r6_live_model": lambda: SoftVsSharpLiveV2("r6_live_model"),

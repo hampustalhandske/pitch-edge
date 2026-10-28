@@ -132,7 +132,7 @@ opens only short-lived read-only connections (`_read_cached` / `_query_cached`, 
   checkpointed per window in `lake_sync_runs` / `lake_sync_state`. Studies pull from the lake API directly;
   the backtest/`ask` pipeline still reads the warehouse's own ingested tables.
 - **Paper loop:** `scripts/paper_loop.sh` under launchd agent `local.pitch-edge.paper-loop` — hourly Polymarket,
-  Kalshi and the-odds-api collection plus every strategy (`control-fav-pinnacle`, `pm-vs-sharp-gap`,
+  Kalshi and the-odds-api collection plus every strategy (`control-fav-pinnacle`,
   `soft-vs-sharp-live`, `soft-vs-sharp-live-v2-{pinnacle,r6_live_model}`), daily settlement against the lake's
   closes. L5 needs ≥ 150 settled evaluation-window decisions.
 - **`ask` models:** `models.default_models()` (Dixon-Coles, GBDT without market odds, stochastic strength),

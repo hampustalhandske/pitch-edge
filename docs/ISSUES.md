@@ -166,7 +166,7 @@ projects; M8 traceability; S2 lake capacity; S4 decimal-odds instrument with CLV
 - Commits: none yet.
 
 ## PE-14 Paper strategies that cannot produce evidence
-- Status: open
+- Status: done
 - Priority: should (owner rule: every piece of work serves a goal)
 - Raised by: pitch-edge
 - Evidence: `pm-vs-sharp-gap` runs with placeholder parameters (hypothesis `pending-r1`, unregistered, 4 decisions
@@ -175,7 +175,9 @@ projects; M8 traceability; S2 lake capacity; S4 decimal-odds instrument with CLV
 - Acceptance: `pm-vs-sharp-gap` is registered or removed from the loop; the v1 rule's tautology is recorded as a
   deviation in its report.
 - Blocked by: none. Blocks: none.
-- Commits: none yet.
+- Result: `pm-vs-sharp-gap` is removed from the paper loop (its past decisions stay in the ledger and still
+  report as unregistered); the v1 sanity-rule tautology is recorded as a deviation in the paper report notes.
+- Commits: see git log for `PE-14`.
 
 ## PE-15 Stale docs
 - Status: open

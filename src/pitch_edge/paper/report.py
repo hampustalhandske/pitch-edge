@@ -6,7 +6,7 @@ Segments per strategy:
   registration's `window.evaluation` (inclusive dates, UTC) and is after the time the *ledger* recorded the
   registration (`recorded_at`; the YAML's own `registered_at` is a claim, the ledger time is evidence).
 - `exploratory`: a registered hypothesis's decisions outside that cut (e.g. the exploratory window).
-- `unregistered`: the hypothesis id has no ledger registration (`control`, `pending-r1`).
+- `unregistered`: the hypothesis id has no ledger registration (`control`, `pending-r1`, the hypothesis of the retired `pm-vs-sharp-gap`).
 
 Within a segment the CLV metric (mean CLV, 95% block-bootstrap CI by match-day via
 `research/stats.py::block_bootstrap`, ROI) uses only *final* settlements, which are lake-sourced closes.
@@ -223,9 +223,9 @@ def report_notes(rep: pd.DataFrame) -> list[str]:
         f"{'/'.join(NO_BENCHMARK_LEAGUES)} division; covered: {', '.join(sorted(FD_DIVISIONS))}), so these "
         "decisions are collected but reported as no benchmark (n_no_benchmark). This is a deviation from the "
         "registered universe of bookmaker-line-structure-live-soft-vs-sharp-v1, which lists UCL.",
-        "pm-vs-sharp-gap is NOT R1's registered rule: its parameters are placeholders (hypothesis 'pending-r1'), "
-        "so all of its decisions are exploratory/unregistered.",
-        "soft-vs-sharp-live: the registered sanity rule 'price <= the max quote for that outcome in the response' "
+        "pm-vs-sharp-gap (hypothesis 'pending-r1') no longer runs; its recorded decisions used placeholder "
+        "parameters, never R1's registered rule, so all of them are unregistered.",
+        "soft-vs-sharp-live deviation from the v1 registration: the registered sanity rule 'price <= the max quote for that outcome in the response' "
         "is tautological for live data (the best soft price is itself one of the response's quotes), so it never "
         "binds; only the <= 1.10 x sharp-price cap can reject a price.",
     ]
