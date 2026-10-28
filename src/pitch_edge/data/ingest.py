@@ -19,6 +19,7 @@ from pitch_edge.config import get_settings
 from pitch_edge.data.alt.news import NewsScanner
 from pitch_edge.data.alt.venues import VenueGeocoder
 from pitch_edge.data.alt.weather import OpenMeteoWeather
+from pitch_edge.data.quality import find_duplicate_fixtures
 from pitch_edge.data.sources.club_elo import ClubEloSource
 from pitch_edge.data.sources.football_data_co_uk import (
     EXTRA_DIVISION_COUNTRIES,
@@ -71,9 +72,6 @@ MATCH_CORE_COLUMNS = [
     "away_form3",
     "away_form5",
 ]
-
-# `matches.source` values `ingest_everything` writes: football-data.co.uk and openfootball's Swedish schedules.
-INGESTED_MATCH_SOURCES = frozenset({"football_data_co_uk", "openfootball"})
 
 # Tables with rows per `matches.match_id`, removed together with the match.
 MATCH_KEYED_TABLES = ("odds", "weather", "features")
@@ -158,26 +156,29 @@ def _replace_secondary_duplicates(wh: Warehouse, df: pd.DataFrame) -> None:
     logger.info("replaced %d secondary-source rows with football-data.co.uk rows", len(ids))
 
 
-def purge_uningested_sources(wh: Warehouse) -> int:
-    """Delete `matches` rows whose `source` is not one `ingest_everything` writes, with their rows in the
-    match-keyed tables (`odds`, `weather`, `features`). Returns the number of matches removed; a warehouse
-    with no such rows is left untouched, so running it repeatedly is harmless."""
-    if not wh.table_exists("matches"):
+def purge_duplicate_fixtures(wh: Warehouse) -> int:
+    """Delete every non-football-data.co.uk `matches` row that `find_duplicate_fixtures` pairs with a
+    football-data.co.uk row (the same fixture under another spelling), with its rows in the match-keyed
+    tables (`odds`, `weather`, `features`). Unpaired rows are kept. Returns the number of matches removed;
+    with no such pairs nothing is touched, so running it repeatedly is harmless."""
+    pairs = find_duplicate_fixtures(wh)
+    if pairs.empty:
         return 0
-    marks = ",".join("?" * len(INGESTED_MATCH_SOURCES))
-    stale = wh.query(
-        f"SELECT match_id, source FROM matches WHERE source IS NULL OR source NOT IN ({marks})",
-        sorted(INGESTED_MATCH_SOURCES),
-    )
-    if stale.empty:
+    spine = "football_data_co_uk"
+    ids: set[str] = set()
+    for p in pairs.itertuples(index=False):
+        if p.source_a == spine and p.source_b != spine:
+            ids.add(p.match_id_b)
+        elif p.source_b == spine and p.source_a != spine:
+            ids.add(p.match_id_a)
+    if not ids:
         return 0
-    ids = stale["match_id"].tolist()
+    ordered = sorted(ids)
     for table in ("matches", *MATCH_KEYED_TABLES):
         if wh.table_exists(table):
-            wh._conn.execute(f"DELETE FROM {table} WHERE match_id IN (SELECT UNNEST(?::VARCHAR[]))", [ids])
-    by_source = stale["source"].fillna("<null>").value_counts().to_dict()
-    logger.info("purged %d matches from sources no longer ingested: %s", len(ids), by_source)
-    return len(ids)
+            wh._conn.execute(f"DELETE FROM {table} WHERE match_id IN (SELECT UNNEST(?::VARCHAR[]))", [ordered])
+    logger.info("purged %d matches that duplicate a football-data.co.uk fixture", len(ordered))
+    return len(ordered)
 
 
 # ---------------------------------------------------------------------- sources
@@ -702,9 +703,9 @@ def ingest_everything(
     include_players: bool = True,
 ) -> dict[str, int]:
     report: dict[str, int] = {}
-    # Matches come from football-data.co.uk (the spine) and openfootball's Swedish schedules. Rows of any
-    # other source are purged first, so the warehouse holds only what these two write.
-    purged = purge_uningested_sources(wh)
+    # Matches come from football-data.co.uk (the spine) and openfootball's Swedish schedules. Stored rows
+    # of any other source that repeat a football-data fixture are purged first.
+    purged = purge_duplicate_fixtures(wh)
     if purged:
         report["purged_matches"] = purged
     report.update(ingest_football_data(wh, leagues, seasons))

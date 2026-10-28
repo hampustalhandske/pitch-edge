@@ -149,12 +149,15 @@ projects; M8 traceability; S2 lake capacity; S4 decimal-odds instrument with CLV
   (`research/studies/r7-outcome-models/REPORT.md`).
 - Acceptance: one row per real match; a test fails on a duplicate fixture under two name spellings.
 - Blocked by: none. Blocks: none.
-- Result: the xgabora connector (`club_football_match_data`) is removed. `ingest_everything` now purges `matches`
-  rows (and their `odds`, `weather` and `features` rows) of any source it does not write, so the next ingest
-  deletes the leftover `cfmd_` rows. `pitch-edge health` and the refresh summary report duplicate fixtures
-  (`data/quality.py::find_duplicate_fixtures`). Measured read-only on the warehouse before the purge: 1,780 duplicate
-  pairs, all of them `cfmd_` against `fd_`; 0 pairs remain once `cfmd_` rows are excluded (no football-data vs
-  openfootball duplicates).
+- Result: the xgabora connector (`club_football_match_data`) is removed. `ingest_everything` first runs
+  `purge_duplicate_fixtures`, which deletes each non-football-data row that `find_duplicate_fixtures` pairs with a
+  football-data row, with its `odds`, `weather` and `features` rows; unpaired rows are kept. `pitch-edge health` and
+  the refresh summary report duplicate fixtures (`data/quality.py`). Measured read-only on the warehouse: 53,959
+  `cfmd_` rows; 1,780 duplicate pairs, all `cfmd_` against `fd_`; 0 non-`cfmd_` duplicates (none between football-data
+  and openfootball); 1,779 matches (with 17,142 odds, 302 weather and 713 features rows) to be purged at the next
+  ingest.
+- Owner decision: no code ingests the roughly 52,000 remaining `cfmd_`-only matches any more, so a freshly built
+  warehouse would not have them while this one does. The owner decides whether to re-add the source or drop the rows.
 - Commits: see git log for `PE-12`.
 
 ## PE-13 UCL paper decisions have no benchmark
