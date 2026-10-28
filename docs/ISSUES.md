@@ -433,14 +433,19 @@ projects; M8 traceability; S2 lake capacity; S4 decimal-odds instrument with CLV
 
 ## PE-29 Read football-data from the lake only
 - Status: open
-- Priority: should (joint plan: the lake serves all data)
+- Priority: should (joint plan: the lake serves all data; one source, no second copy that can go stale)
 - Raised by: coordinator, after PE-28
-- Evidence: pitch-edge fetches football-data.co.uk itself (`data/ingest.py` `ingest_football_data`) for the warehouse
-  spine that `ask`, the dashboard and the backtests read, while the studies and the paper settle read the lake's
-  `fd_matches`. On 2026-10-28 the own ingest reached 2026-10-24 to 10-26 in the 11 backtest leagues and the lake mirror
-  10-11 to 10-19, so the two copies of one source disagree on what is known.
-- Acceptance: the warehouse spine's football-data matches and odds come from the lake (`lake_fd_matches` through
-  `lake-sync`, or the lake API), with the same columns and point-in-time stamps; `ingest_football_data` and its
-  connector are removed in the same change; a test covers the spine built from the mirror.
-- Blocked by: the lake refreshing `fd_matches` at least daily (database-04 reports the cadence). Blocks: none.
+- Evidence (2026-10-28): the lake's `fd_matches` is fetched daily (latest run 11:04 UTC); in the 11 backtest leagues it
+  ends 2026-10-24 to 10-26. pitch-edge holds two other copies:
+  - its own ingest (`data/ingest.py` `ingest_football_data`), which feeds the warehouse spine that `ask`, the
+    dashboard and the backtests read, and reached the same dates;
+  - the warehouse's `lake_fd_matches` mirror from `lake-sync`, which ends 10-11 to 10-19. The warehouse holds no
+    `lake_sync_runs`/`lake_sync_state` rows, so the mirror has not been refreshed since it was built, and nothing
+    schedules `lake-sync`.
+  The studies and the paper settle read the lake API directly.
+- Acceptance: the warehouse spine's football-data matches and odds come from the lake, either read through the API
+  at decision time or through a `lake-sync` that runs on a schedule and reports its lag in `pitch-edge health`;
+  `ingest_football_data` and its connector are removed in the same change; a test covers the spine built from the
+  lake rows, with the same columns and point-in-time stamps.
+- Blocked by: none. Blocks: none.
 - Commits: none yet.
