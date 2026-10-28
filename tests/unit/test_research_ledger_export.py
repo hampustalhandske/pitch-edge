@@ -135,3 +135,69 @@ def test_cli_writes_jsonl_that_ends_with_the_summary(two_families, tmp_path):
     lines = [json.loads(x) for x in out.read_text().splitlines()]
     assert lines[-1]["summary"]["n_tests"] == 3
     assert _recompute(lines) == [line["row_hash"] for line in lines if "row_hash" in line]
+
+
+def _yaml_lines(lines: list[dict]) -> list[dict]:
+    return [line for line in lines if line.get("table") == "registration_yaml"]
+
+
+def test_registration_yaml_lines_recompute_to_the_chained_registration_hash(two_families):
+    led, a, _ = two_families
+    lines = led.export_chain("fam-a", _last_hash(led))
+    yamls = _yaml_lines(lines)
+    assert [y["hypothesis_id"] for y in yamls] == [a.id]  # only the family's registration
+    y = yamls[0]
+    assert "row_hash" not in y and "mismatch" not in y
+    assert hashlib.sha256(y["yaml"].encode("utf-8")).hexdigest() == y["sha256"]
+    reg_row = next(
+        json.loads(line["row_canonical"])
+        for line in lines
+        if line.get("table") == "registrations" and "row_hash" in line
+    )
+    assert reg_row["id"] == a.id and reg_row["sha256"] == y["sha256"]
+    last_chain = max(i for i, line in enumerate(lines) if "row_hash" in line)
+    assert lines.index(y) > last_chain and lines.index(y) < lines.index(lines[-1])
+
+
+def test_unchained_registrations_export_their_yaml_marked_unchained(two_families, tmp_path):
+    led, _, _ = two_families
+    old = write_registration(tmp_path, "fam-a-legacy-v1", family="fam-a", grid={"k": [1]})
+    digest = hashlib.sha256(old.read_bytes()).hexdigest()
+    con = duckdb.connect(str(led.path))
+    con.execute(
+        "INSERT INTO registrations VALUES ('fam-a-legacy-v1', 'fam-a', ?, ?, now()::TIMESTAMP - INTERVAL 30 DAY, "
+        "now()::TIMESTAMP - INTERVAL 30 DAY)",
+        [digest, str(old)],
+    )
+    con.close()
+    y = next(
+        y for y in _yaml_lines(led.export_chain("fam-a", _last_hash(led))) if y["hypothesis_id"] == "fam-a-legacy-v1"
+    )
+    assert y["chained"] is False and hashlib.sha256(y["yaml"].encode("utf-8")).hexdigest() == digest
+
+
+def test_edited_registration_file_exports_with_mismatch(two_families):
+    led, a, _ = two_families
+    a.source_path.write_text(a.source_path.read_text() + "\n# edited after registering\n")
+    lines = led.export_chain("fam-a", _last_hash(led))
+    y = _yaml_lines(lines)[0]
+    assert y["yaml"] is None and y["mismatch"] is True
+    assert len(y["sha256"]) == 64 and lines[-1]["summary"]["n_tests"] == 3
+
+
+def test_missing_registration_file_exports_with_mismatch(two_families):
+    led, a, _ = two_families
+    a.source_path.unlink()
+    y = _yaml_lines(led.export_chain("fam-a", _last_hash(led)))[0]
+    assert y["yaml"] is None and y["mismatch"] is True
+
+
+def test_return_test_keys_hold_only_return_kind_keys(two_families):
+    led, a, _ = two_families
+    upto = _last_hash(led)
+    s = led.export_chain("fam-a", upto, {a.id: "return"})[-1]["summary"]
+    assert s["return_test_keys"] == s["test_keys"] and s["n_return_kind"] == len(s["return_test_keys"]) == 2
+    s = led.export_chain("fam-a", upto, {a.id: "predictive"})[-1]["summary"]
+    assert s["return_test_keys"] == [] and s["n_return_kind"] == 0
+    s = led.export_chain("fam-a", upto)[-1]["summary"]
+    assert s["return_test_keys"] is None and s["n_return_kind"] is None

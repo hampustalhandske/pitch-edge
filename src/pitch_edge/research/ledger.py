@@ -583,10 +583,16 @@ class Ledger:
           64 zeros);
         - the family's rows that were never chained (written before the chain existed):
           `{"table", "row_canonical", "chained": false}`;
-        - `{"summary": {family, upto, n_tests, n_distinct_hypothesis_config, n_return_kind, test_keys}}` over the
-          family's trial rows in the lines above; `test_keys` are the sorted distinct `"<hypothesis_id>|<config_hash>"`
-          and `n_return_kind` counts those whose hypothesis has metric kind `return` in `metric_kinds` (None when
-          `metric_kinds` is not given).
+        - one line per registration of the family, chained ones in chain order, then the unchained ones:
+          `{"table": "registration_yaml", "hypothesis_id", "sha256", "yaml"}`, where `sha256` is the digest recorded
+          in the registration row and `yaml` is the registration file's exact text, so
+          `sha256(yaml.encode("utf-8")).hexdigest() == sha256`. A registration row outside the chain adds
+          `"chained": false`. When the file is missing or its bytes no longer hash to the recorded digest, `yaml` is
+          None and `"mismatch": true` is added. These lines carry no `row_hash` and are not part of the chain;
+        - `{"summary": {family, upto, n_tests, n_distinct_hypothesis_config, n_return_kind, return_test_keys,
+          test_keys}}` over the family's trial rows in the lines above; `test_keys` are the sorted distinct
+          `"<hypothesis_id>|<config_hash>"`, `return_test_keys` the subset whose hypothesis has metric kind
+          `return` in `metric_kinds`, and `n_return_kind` its length (both None when `metric_kinds` is not given).
 
         Trial rows carry `family`, `hypothesis_id` and `config_hash`; registrations carry `id` and `family`.
         Raises `ProtocolError` when the chain does not verify up to `upto` or `upto` is not in it.
@@ -597,6 +603,7 @@ class Ledger:
         by_key, chain = snapshot
         lines: list[dict[str, Any]] = []
         family_rows: list[tuple[str, dict[str, Any]]] = []
+        registrations: list[tuple[dict[str, Any], bool]] = []
         hypotheses = {str(r["id"]) for rs in by_key["registrations"].values() for r in rs if r["family"] == family}
 
         def in_family(table: str, row: dict[str, Any]) -> bool:
@@ -616,6 +623,8 @@ class Ledger:
             )
             if in_family(table, row):
                 family_rows.append((table, row))
+                if table == "registrations":
+                    registrations.append((row, True))
             prev = row_hash
             if row_hash == upto:
                 reached = True
@@ -632,11 +641,34 @@ class Ledger:
                     if in_family(table, r):
                         lines.append({"table": table, "row_canonical": _row_json(table, r), "chained": False})
                         family_rows.append((table, r))
+                        if table == "registrations":
+                            registrations.append((r, False))
+
+        for reg, chained in registrations:
+            recorded = str(reg["sha256"])
+            text: str | None = None
+            try:
+                raw = resolve_registry_path(str(reg["path"])).read_bytes()
+                if hashlib.sha256(raw).hexdigest() == recorded:
+                    text = raw.decode("utf-8")
+            except (OSError, ValueError):
+                pass
+            line: dict[str, Any] = {
+                "table": "registration_yaml",
+                "hypothesis_id": str(reg["id"]),
+                "sha256": recorded,
+                "yaml": text,
+            }
+            if not chained:
+                line["chained"] = False
+            if text is None:
+                line["mismatch"] = True
+            lines.append(line)
 
         trials = [r for table, r in family_rows if table == "trials"]
         keys = sorted({f"{r['hypothesis_id']}|{r['config_hash']}" for r in trials})
-        n_return = (
-            None if metric_kinds is None else sum(1 for k in keys if metric_kinds.get(k.split("|", 1)[0]) == "return")
+        return_keys = (
+            None if metric_kinds is None else [k for k in keys if metric_kinds.get(k.split("|", 1)[0]) == "return"]
         )
         lines.append(
             {
@@ -645,7 +677,8 @@ class Ledger:
                     "upto": upto,
                     "n_tests": len(trials),
                     "n_distinct_hypothesis_config": len(keys),
-                    "n_return_kind": n_return,
+                    "n_return_kind": None if return_keys is None else len(return_keys),
+                    "return_test_keys": return_keys,
                     "test_keys": keys,
                 }
             }
