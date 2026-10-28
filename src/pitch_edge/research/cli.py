@@ -18,7 +18,7 @@ from rich.table import Table
 from pitch_edge.research.gates import grade as grade_hypothesis
 from pitch_edge.research.importer import import_trials_csv
 from pitch_edge.research.ledger import REVIEW_KINDS, Ledger, ProtocolError
-from pitch_edge.research.registry import load, resolve_registry_path
+from pitch_edge.research.registry import load
 
 research_app = typer.Typer(help="Pre-registered hypotheses, the trials ledger and the L0-L5 evidence ladder.")
 
@@ -153,14 +153,8 @@ def export_ledger(
     """Write the hash chain from genesis to --upto, the family's unchained rows and a trial-count summary as
     JSONL, for an independent recount of the family's tests (see `Ledger.export_chain`)."""
     led = _ledger(ledger)
-    kinds: dict[str, str | None] = {}
-    for _, r in led.registrations(family).iterrows():
-        try:
-            kinds[r["id"]] = load(resolve_registry_path(r["path"])).metric_kind
-        except (OSError, ValueError):
-            kinds[r["id"]] = None
     try:
-        lines = led.export_chain(family, upto, kinds)
+        lines = led.export_chain(family, upto, led.metric_kinds(family))
     except ProtocolError as exc:
         _console().print(f"[red]{exc}[/red]")
         raise typer.Exit(1) from exc

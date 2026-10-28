@@ -105,8 +105,12 @@ projects; M8 traceability; S2 lake capacity; S4 decimal-odds instrument with CLV
   its deflated Sharpe understated the search.
 - Acceptance: each submission carries the pitch-edge ledger id, the family and the family N; edgelab's result shows
   the N it used.
-- Blocked by: EL-1 (M3 contract), EL-4 (M5 trial accounting). Blocks: any further counted edgelab run.
-- Commits: none yet.
+- Progress: `pitch_edge.edgelab.write_submission` writes edgelab's `submission.v1` manifest with the trial
+  declaration from the ledger (family, N = the family's trial rows up to a chain hash, the test keys and the
+  ledger export inside the folder); `edgelab submission check` accepts it. Left: edgelab using the declared N in
+  its deflated Sharpe (EL-4), then a counted run that shows it (owner approval).
+- Blocked by: EL-4 (M5 trial accounting); EL-1 is done. Blocks: any further counted edgelab run.
+- Commits: see git log for `PE-8`.
 
 ## PE-9 Submit through edgelab's client and delete the hand-built path
 - Status: open

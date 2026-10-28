@@ -382,6 +382,17 @@ class Ledger:
             return self._select("registrations", order=" ORDER BY recorded_at, id")
         return self._select("registrations", " WHERE family = ?", [family], " ORDER BY recorded_at, id")
 
+    def metric_kinds(self, family: str) -> dict[str, str | None]:
+        """Each of the family's registered hypotheses mapped to its registration's `metric_kind`, or None when
+        the registration file can no longer be read; the shape `export_chain` takes."""
+        kinds: dict[str, str | None] = {}
+        for _, r in self.registrations(family).iterrows():
+            try:
+                kinds[r["id"]] = load(resolve_registry_path(r["path"])).metric_kind
+            except (OSError, ValueError):
+                kinds[r["id"]] = None
+        return kinds
+
     # ------------------------------------------------------------------ trials
 
     @staticmethod

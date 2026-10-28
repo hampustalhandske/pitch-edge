@@ -33,8 +33,8 @@ class ScaffoldSpec:
         slug: Short name; the folder is `pitch-edge-<slug>` (lower-case letters, digits, hyphens).
         title: Human-readable strategy name.
         rationale: Economic rationale, written before any counted run.
-        data_path: Dataset folder the `parquet` provider reads (absolute, or relative to the parent
-            of the strategies root).
+        data_path: Dataset folder the `parquet` provider reads (absolute, or relative to the strategy
+            folder, e.g. `../data` in a submission folder).
         range_start: First day of the tested window, `YYYY-MM-DD`.
         range_end: Last day of the tested window, `YYYY-MM-DD`.
         edge_thresholds: Values of the minimum |forecast - mid| acted on. More than one is swept.
@@ -259,7 +259,7 @@ name: {json.dumps(spec.title)}
 version: "1.0.0"
 author: {json.dumps(spec.author)}
 created: {spec.created}
-strategy: strategies/{spec.folder}/strategy.py:{spec.class_name}
+strategy: strategy.py:{spec.class_name}
 params:
   universe: {{kind: index, index: polymarket_soccer, point_in_time: false}}
   schedule:
@@ -300,7 +300,8 @@ def scaffold_strategy(spec: ScaffoldSpec, strategies_root: str | Path) -> Path:
 
     Args:
         spec: The pre-registered specification.
-        strategies_root: edgelab's `strategies/` directory.
+        strategies_root: Where the strategy folder goes: edgelab's `strategies/` directory or a
+            submission folder.
 
     Returns:
         The strategy folder.
