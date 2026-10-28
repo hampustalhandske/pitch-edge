@@ -12,7 +12,8 @@ declaration carries the family, its trial count, the export's last `row_hash` an
     write_submission(spec, "out/h-v1", ledger)  # the folder already holds strategy/ and data/
 
 `declared_n` is the number of trial rows in the family up to `upto`, the same N pitch-edge's own deflated
-Sharpe uses (`research/gates.py`). Nothing here runs or imports edgelab; `edgelab submission check <folder>`
+Sharpe uses (`research/gates.py`); a re-run of one (hypothesis, config) counts again, so it is never below the
+number of distinct `test_keys`, which edgelab requires. Nothing here runs or imports edgelab; `edgelab submission check <folder>`
 validates the result offline.
 """
 

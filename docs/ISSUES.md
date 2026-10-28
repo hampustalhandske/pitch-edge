@@ -272,9 +272,12 @@ projects; M8 traceability; S2 lake capacity; S4 decimal-odds instrument with CLV
 - Evidence: `research/gates.py` `_dsr` uses N = every test in the family, while the variance of Sharpe ratios
   comes only from same-kind (return) tests. In `bookmaker-line-structure`, 254 of 338 trial rows are R2-Q1
   calibration tests with a probability metric that could never be selected as a strategy, so the R2-Q3 DSR was
-  deflated at N=355.
-- Acceptance: N counts the return-kind tests of the family, the total is reported beside it, and the rule
-  matches the one agreed for edgelab (E2); a test covers a mixed-kind family.
+  deflated at N=355. N also counts trial rows, so a re-run of the same (hypothesis, config) counts as a second
+  test; edgelab counts distinct (hypothesis_id, config_hash) keys and keeps re-evaluations apart (EL-4). The
+  submission's `declared_n` (PE-8) uses the same rows count as `_dsr`, so the two change together.
+- Acceptance: N counts the distinct return-kind (hypothesis, config) tests of the family, the total is reported
+  beside it, `_dsr` and the submission's `declared_n` use the same rule, and the rule matches the one agreed for
+  edgelab (E2); a test covers a mixed-kind family and a re-run config.
 - Blocked by: E2 agreement. Blocks: PE-17.
 - Commits: none yet.
 
