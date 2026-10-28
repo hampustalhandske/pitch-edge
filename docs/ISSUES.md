@@ -211,15 +211,18 @@ projects; M8 traceability; S2 lake capacity; S4 decimal-odds instrument with CLV
 - Commits: none yet.
 
 ## PE-18 The hourly settle queries the lake once per open decision
-- Status: open
+- Status: done
 - Priority: should (S2)
 - Raised by: pitch-edge
 - Evidence: `paper/settle.py` looks up `fd_matches` (and Polymarket bars) separately for every decision past
   kickoff without a final settlement, re-polling provisional ones for up to 30 days; with settlement on every
   cycle (PE-2) that is one lake query per open decision per hour.
 - Acceptance: one lake query per league and date window per settle call, with the same settlements as before.
+- Result: `LakeCloseSource` keeps every lake answer for the settle call it serves: one fd_matches query per
+  (division, kickoff date) and one bar query per token set, and a failed query is not repeated within the call.
+  The decision logic is unchanged; mocked tests count the queries.
 - Blocked by: none. Blocks: none.
-- Commits: none yet.
+- Commits: see git log for `PE-18`.
 
 ## PE-19 Document the research pipeline for the other projects
 - Status: done

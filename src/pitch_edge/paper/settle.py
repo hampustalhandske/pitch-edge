@@ -26,7 +26,7 @@ from __future__ import annotations
 import logging
 import math
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any, Protocol
 
 import pandas as pd
@@ -62,22 +62,45 @@ class LakeLike(Protocol):
 
 
 class LakeCloseSource:
-    """`CloseSource` backed by the lakehouse API (`pitch_edge.lake.client.Lake`)."""
+    """`CloseSource` backed by the lakehouse API (`pitch_edge.lake.client.Lake`).
+
+    Build one per settle call. Every lake answer is kept for the life of the instance: the fd_matches rows
+    of one (division, kickoff date) window and the bars of one (tokens, kickoff) set are queried once however
+    many decisions share them, and a failed query is re-raised from memory, so a lake outage costs one failed
+    query per window instead of one per decision.
+    """
 
     def __init__(self, lake: LakeLike):
         self.lake = lake
+        self._answers: dict[tuple[Any, ...], pd.DataFrame | Exception] = {}
+
+    def _sql_once(self, key: tuple[Any, ...], query: str, params: list[Any]) -> pd.DataFrame:
+        """`lake.sql(query, params)`, answered from memory when `key` was asked before."""
+        if key not in self._answers:
+            try:
+                self._answers[key] = self.lake.sql(query, params)
+            except Exception as exc:
+                self._answers[key] = exc
+        answer = self._answers[key]
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+
+    def _fd_window(self, division: str, day: date) -> pd.DataFrame:
+        """fd_matches rows of `division` with match_date within a day of `day`."""
+        return self._sql_once(
+            ("fd", division, day),
+            "SELECT match_date, home_team, away_team, ft_result, betfair_ex_home_close, betfair_ex_draw_close, "
+            "betfair_ex_away_close FROM fd_matches WHERE division = ? AND match_date BETWEEN ? AND ?",
+            [division, (day - timedelta(days=1)).isoformat(), (day + timedelta(days=1)).isoformat()],
+        )
 
     def fd_match(self, league: str, kickoff_at: datetime, home: str, away: str) -> FdClose | None:
         """The fd_matches row for this fixture (match_date within a day of the UTC kickoff date), or None."""
         division = FD_DIVISIONS.get(league)
         if division is None:
             return None
-        day = kickoff_at.date()
-        df = self.lake.sql(
-            "SELECT match_date, home_team, away_team, ft_result, betfair_ex_home_close, betfair_ex_draw_close, "
-            "betfair_ex_away_close FROM fd_matches WHERE division = ? AND match_date BETWEEN ? AND ?",
-            [division, (day - timedelta(days=1)).isoformat(), (day + timedelta(days=1)).isoformat()],
-        )
+        df = self._fd_window(division, kickoff_at.date())
         if df.empty:
             return None
         resolver = TeamNameResolver(set(df["home_team"]) | set(df["away_team"]))
@@ -106,7 +129,8 @@ class LakeCloseSource:
         if not asset_ids:
             return {}
         marks = ", ".join("?" for _ in asset_ids)
-        df = self.lake.sql(
+        df = self._sql_once(
+            ("pm", tuple(sorted(asset_ids)), before),
             f"SELECT asset_id, arg_max(close, hour_start) AS close FROM pm_soccer_bars_1h "
             f"WHERE asset_id IN ({marks}) AND hour_start >= CAST(? AS TIMESTAMPTZ) "
             f"AND hour_start + INTERVAL 1 HOUR <= CAST(? AS TIMESTAMPTZ) GROUP BY asset_id",

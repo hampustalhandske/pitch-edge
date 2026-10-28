@@ -256,3 +256,50 @@ def test_closing_prices_with_an_implausible_book_sum_are_rejected(store, close):
         "settled": 0,
         "waiting": 1,
     }
+
+
+def _fd_window_frame():
+    return pd.DataFrame(
+        {
+            "match_date": [pd.Timestamp("2026-10-24")] * 2,
+            "home_team": ["Ipswich", "Arsenal"],
+            "away_team": ["Nott'm Forest", "Everton"],
+            "ft_result": ["A", "H"],
+            "betfair_ex_home_close": [2.0, 1.4],
+            "betfair_ex_draw_close": [3.6, 5.0],
+            "betfair_ex_away_close": [4.4, 9.0],
+        }
+    )
+
+
+def test_lake_adapter_queries_each_division_and_day_once():
+    lake = FakeLake([_fd_window_frame()])
+    source = LakeCloseSource(lake)
+    first = source.fd_match("EPL", KO, "Ipswich Town", "Nottingham Forest")
+    second = source.fd_match("EPL", KO + timedelta(hours=3), "Arsenal", "Everton")
+    again = source.fd_match("EPL", KO, "Ipswich Town", "Nottingham Forest")
+    assert first == again == FdClose(betfair_close=(2.0, 3.6, 4.4), result="away")
+    assert second == FdClose(betfair_close=(1.4, 5.0, 9.0), result="home")
+    assert len(lake.calls) == 1
+
+
+def test_lake_adapter_does_not_retry_a_failed_window_within_one_settle():
+    class DownLake:
+        calls = 0
+
+        def sql(self, query, params=None):
+            DownLake.calls += 1
+            raise RuntimeError("lake down")
+
+    source = LakeCloseSource(DownLake())
+    for _ in range(3):
+        with pytest.raises(RuntimeError, match="lake down"):
+            source.fd_match("EPL", KO, "Ipswich Town", "Nottingham Forest")
+    assert DownLake.calls == 1
+
+
+def test_lake_adapter_queries_the_same_token_set_once():
+    lake = FakeLake([pd.DataFrame({"asset_id": ["t1", "t2"], "close": [0.4, 0.3]})])
+    source = LakeCloseSource(lake)
+    assert source.pm_last_bars(["t1", "t2"], KO) == source.pm_last_bars(["t2", "t1"], KO) == {"t1": 0.4, "t2": 0.3}
+    assert len(lake.calls) == 1
