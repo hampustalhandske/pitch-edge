@@ -32,7 +32,7 @@ are upper bounds.
 
 **What each would show.** H1 and H2 are cheap and fully specified now. H3 is the ML candidate: it replaces R6's
 Pinnacle-open inputs, which end on 2026-01-15, with books that are still published, so it can also run live in the
-paper loop. H4 waits for the LK-45 backfill and is the only one that tests intraday timing; it needs the outcome codes
-(101/102/103 = home/draw/away) verified against the football-data Betfair close first. A pass on any of them reaches at
+paper loop. H4 waits for the LK-45 backfill and is the only one that tests intraday timing (the outcome codes are verified
+against the football-data Betfair close). A pass on any of them reaches at
 most L2 to L3 on this reused window. The claim then needs the auditor, edgelab's grade and at least 150 settled
 paper bets.
