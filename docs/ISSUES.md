@@ -526,6 +526,14 @@ projects; M8 traceability; S2 lake capacity; S4 decimal-odds instrument with CLV
   `fd_P1_1920_20200201_SantaClara_PacosFerreira` and `fd_P1_2021_20210103_SantaClara_Benfica`
   (18 `backtest_bets`, 6 `model_predictions` rows). `pitch-edge health` also lists 1,591 `cfmd_`/football-data
   duplicate pairs, which `purge_duplicate_fixtures` removes at the next `ingest`/`refresh` (PE-12).
+- Readers (checked 2026-11-05): no report, case study, `ask` answer or dashboard figure reads `backtest_bets`.
+  Case studies are written from the CSVs a backtest run produces, `ask` fits its models fresh per question, and the
+  dashboard reads neither table; `pipeline.latest_backtest_tables` reads only the latest run (0 orphaned of its
+  4,531 bets) and is called only by a test. The orphaned bets sit in older runs (for example `main:gbdt`,
+  `main:dixon_coles` and `ping:dixon_coles` of run 20260906T083733). The one live reader is the RAG index: it takes
+  the latest `model_predictions` run, in which 262 of 2,384 rows are orphaned `cfmd_` ids (2024-02 to 2026-08), as
+  prediction documents. Those documents name teams and dates, not match ids, so they still describe the right
+  fixture, possibly beside a football-data duplicate.
 - Decision so far: every orphaned row is kept (2026-11-05); this entry is their flag.
 - Acceptance: either the replacement step carries the match-keyed rows to the new id or records the old-to-new
   id, or `pitch-edge health` reports orphaned match-keyed rows by table, so a stored result can always be traced.
