@@ -490,3 +490,44 @@ projects; M8 traceability; S2 lake capacity; S4 decimal-odds instrument with CLV
   trailing whitespace trimmed from 86 referee/kickoff strings; (6) +15,851 rows the stored spine lacks (extra leagues
   since 2024-02, and lower-division matches from 2024-02 to 2024-06, e.g. SP2 172, F2 153, E3 152, E2 148). Still open: the first real `lake-sync` plus
   spine build (needs a warehouse slot), the owner's launchd bootstrap, then close.
+
+## PE-30 The football-data CSV ingest stored extra-league closes as opens
+- Status: done
+- Priority: should (point-in-time: no hindsight price may pass as a pre-match one)
+- Raised by: pitch-edge (PE-29 dry run)
+- Evidence: for football-data's 16 extra-league files (`fdx_` match ids: MLS, Brazil, Argentina, Mexico, Japan,
+  Romania, Poland, Sweden, Norway, Russia, Denmark, China, Ireland, Finland, Austria, Switzerland), the columns
+  `PSCH`/`MaxCH`/`AvgCH` (Pinnacle, max and average closing 1X2) were parsed as `PS`/`Max`/`Avg` with
+  `is_closing` false. Warehouse table `odds`, source `football_data_co_uk`: 305,069 rows on `fdx_` matches
+  (2012-03-02 to 2024-02-22) before the rebuild, 0 after. Readers that could have taken these closes for opens:
+  `Warehouse.matches_with_closing_odds` (columns `PSH/PSD/PSA`, `AvgH…`, `MaxH…`), and through it the feature build
+  (`features/build.py` early-odds features, so `features` rows of `fdx_` matches), `ask` (`agents/qa_data.py`
+  `REAL_ODDS_COLUMNS`), the RAG match documents (`rag/documents.py`, "Pinnacle pre-match odds"), the backtest
+  engine's bet price and `pipeline.py`. Unaffected: the 11 backtest leagues (main divisions, `fd_` ids) and every
+  registered study (they read the lake directly).
+- Acceptance: the spine stores these prices as closes, and the derived tables built from the old rows are rebuilt.
+- Result: the spine built from the lake (654f2ee, first build 2026-11-05) stores them as closes. Left as a
+  follow-up, not a blocker: `features` rows and the RAG index for `fdx_` matches still hold values derived from
+  the old rows until the next `refresh` (a warehouse slot).
+- Blocked by: none. Blocks: none.
+- Commits: 654f2ee (Refs PE-29).
+
+## PE-31 Match-keyed rows outlive the matches the spine replaces
+- Status: open
+- Priority: nice (traceability of stored results)
+- Raised by: pitch-edge (PE-29 first sync)
+- Evidence: `store_matches` deletes a non-football-data `matches` row (and its `odds`) when football-data brings
+  the same fixture, but leaves its rows in `features`, `weather`, `model_predictions` and `backtest_bets`. On
+  2026-11-05, after the first spine build from the lake, about 84,000 `cfmd_` ids (dated 2005 to 2026) are in
+  those tables with no `matches` row: `backtest_bets` 584,420 rows (70,577 ids), `model_predictions` 302,534 rows,
+  `features` 41,203 ids, `weather` 12,046 ids. Most predate the build (for example the 2026/27 `cfmd_` ids replaced by
+  the football-data 2026/27 ingest on 2026-10-28); the build replaced 4,889 more `cfmd_` matches (2024 fixtures
+  football-data now has) and re-keyed two `P1` fixtures the lake re-dated by one day:
+  `fd_P1_1920_20200201_SantaClara_PacosFerreira` and `fd_P1_2021_20210103_SantaClara_Benfica`
+  (18 `backtest_bets`, 6 `model_predictions` rows). `pitch-edge health` also lists 1,591 `cfmd_`/football-data
+  duplicate pairs, which `purge_duplicate_fixtures` removes at the next `ingest`/`refresh` (PE-12).
+- Decision so far: every orphaned row is kept (2026-11-05); this entry is their flag.
+- Acceptance: either the replacement step carries the match-keyed rows to the new id or records the old-to-new
+  id, or `pitch-edge health` reports orphaned match-keyed rows by table, so a stored result can always be traced.
+- Blocked by: none. Blocks: none.
+- Commits: none yet.
