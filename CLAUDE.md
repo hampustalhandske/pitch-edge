@@ -41,7 +41,7 @@ Before any study or strategy work load the `research-protocol` skill; before tou
 `skeptic-auditor` signs it, and only `return`-kind strategies can ever be shown as an edge (predictive and
 descriptive findings top out at L4).
 
-MCP servers `lakehouse` and `edgelab` (`.mcp.json`, git-ignored; `.mcp.json.example` reads the private checkouts from `$LAKEHOUSE_REPO` and `$EDGELAB_DIR`, exported in the shell; enabled in `.claude/settings.json`) give the orchestrator
+MCP servers `lakehouse` and `edgelab` (`.mcp.json`, git-ignored; `.mcp.json.example` reads the private checkouts from `$LAKEHOUSE_REPO` and `$EDGELAB_DIR`, exported in the shell; enabled in `.claude/settings.json`, git-ignored, template `.claude/settings.json.example`) give the orchestrator
 and agents direct tools: use `mcp__lakehouse__*` for interactive lake lookups and verification, and
 `mcp__edgelab__*` for edgelab checks, dry-runs, status and summaries; study data still comes through the Python
 client so results are reproducible, and counted edgelab runs need the owner's approval. Project agents only get

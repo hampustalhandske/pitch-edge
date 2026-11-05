@@ -15,6 +15,7 @@ logs/
 PROMPT_ELITE.md
 temp/
 .claude/settings.local.json
+.claude/settings.json
 
 
 # Machine-specific config: commit the .example templates, keep the real files local
