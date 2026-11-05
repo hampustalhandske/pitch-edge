@@ -35,8 +35,18 @@ TRIAL = {
     "direction": "positive",
     "extra_json": "{}",
 }
+# A review row (here an `amendment`). `detail_json` is the review detail as `json.dumps(detail, sort_keys=True)`
+# with the default separators (", " and ": "), and it enters the row JSON as a string.
+REVIEW = {
+    "hypothesis_id": "demo-v1",
+    "kind": "amendment",
+    "verdict": "RECORDED",
+    "detail_json": '{"amends_sha256": "' + "ab" * 32 + '", "rules": ["a rule"]}',
+    "recorded_at": datetime(2026, 10, 28, 1, 30, 0, 250000),
+}
 REGISTRATION_HASH = "13c98f3cdd15afc3fd9573cd933721ee65a81746ae35992fe81d064f361d3894"
 TRIAL_HASH = "1887978452d3a9f6fde6560cf0fafbd63acf36bf81a3b20ae06dd1eb2ad1d623"
+REVIEW_HASH = "297a6a2f82ae5ea5c8ced6c545e51085a274b03030101d26add9d144e9048bf4"  # chained after TRIAL
 
 
 def test_genesis_is_64_zeros():
@@ -55,6 +65,15 @@ def test_chain_hash_vectors():
     first = _chain_hash(GENESIS, "registrations", REGISTRATION)
     assert first == REGISTRATION_HASH
     assert _chain_hash(first, "trials", TRIAL) == TRIAL_HASH
+    assert _chain_hash(TRIAL_HASH, "reviews", REVIEW) == REVIEW_HASH
+
+
+def test_review_row_json_embeds_detail_as_a_string():
+    assert _row_json("reviews", REVIEW) == (
+        '{"detail_json":"{\\"amends_sha256\\": \\"' + "ab" * 32 + '\\", \\"rules\\": [\\"a rule\\"]}",'
+        '"hypothesis_id":"demo-v1","kind":"amendment","recorded_at":"2026-10-28T01:30:00.250000",'
+        '"verdict":"RECORDED"}'
+    )
 
 
 def test_trial_row_json_encodes_nan_as_string_and_none_as_null():

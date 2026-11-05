@@ -323,6 +323,10 @@ projects; M8 traceability; S2 lake capacity; S4 decimal-odds instrument with CLV
   hash `13c98f3c…`, trial hash `18879784…`); agentic-trading reproduced both with an independent implementation.
   Any future change to the canonicalisation or separators gets a format version number recorded with the
   chain, so a shared checker can tell the versions apart.
+- Addendum (2026-11-05, for AT-40): a third vector covers a `reviews` row (`REVIEW_HASH` `297a6a2f…`, chained after the
+  trial vector). Its `detail_json` is `json.dumps(detail, sort_keys=True)` with the default separators, embedded in
+  the row JSON as a string. The `amendment` review kind (fe4f694) is a new value of `kind`, not a format change, so
+  the format has no version number yet.
 - Blocked by: none. Blocks: AT-40.
 - Commits: none yet.
 
