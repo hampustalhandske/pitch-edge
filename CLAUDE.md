@@ -117,29 +117,39 @@ opens only short-lived read-only connections (`_read_cached` / `_query_cached`, 
   reports), `API_KEYS.md` (a test checks it against `keys.py`), `scripts/README.md`, `research/HANDOFF.md`.
 - Don't commit or push unless explicitly asked; `data/`, `*.log`, `.env`, large report parquet are ignored.
 
-## State (2026-10-21)
+## State (2026-11-05)
 
 - **Research headline:** display floor L4, **no validated edge**. The only L4 findings are predictive, not
   strategies: R6's cross-book closing-line model (`closing-line-prediction-cross-book-gbm-v1`, +6.61e-5 bits
   vs the R3 consensus-gap baseline, n=45,467; also `-linear-v1`) and book informativeness
   (`closing-line-prediction-book-informativeness-v1`, VC/Betfair informative, BW/IW/1xBet stale), both signed
   by the auditor. Best strategy rung is L2 (R2-Q3 max-odds stale-soft-open, a quoted-price upper bound; its
-  bet365 version was rejected by the audit). Prediction-market (R1, R5), crowd-attention (R4) and the other
-  bookmaker-structure studies are null or artefacts. Per-study index: `reports/CASE_STUDY.md`; live ladder:
-  `pitch-edge research status`.
+  bet365 version was rejected by the audit). Prediction-market (R1, R5), crowd-attention (R4), the outcome
+  models (R7, L1) and the other bookmaker-structure studies are null or artefacts. Per-study index:
+  `reports/CASE_STUDY.md`; live ladder: `pitch-edge research status`.
+- **Family `soft-open-vs-betfair` (N 4):** H1 favourite-open L1 null, H2 late-season stakes uninformative (5 test
+  bets), H3 soft-books closing-line GBM null after the family correction (mostly line shopping by its placebo),
+  H4 exchange lag (`-exchange-lag-v1`, Pinnacle moves vs Betfair Exchange on OddsPapi paths) registered and
+  amended on the ledger, not yet scored.
 - **Lake mirror:** 10 `lake_*` mirrors (football-data matches + open/close odds, Polymarket markets and hourly
   bars, Kalshi markets and candles, Understat team matches (xG), Club Elo, Transfermarkt managers/tenures/injuries),
-  checkpointed per window in `lake_sync_runs` / `lake_sync_state`. Studies pull from the lake API directly;
-  the backtest/`ask` pipeline still reads the warehouse's own ingested tables.
+  checkpointed per window in `lake_sync_runs` / `lake_sync_state`. Nothing schedules `lake-sync`, so the mirrors
+  are as old as their last manual run. Studies and the paper settle read the lake API directly; the
+  backtest/`ask` pipeline still reads the warehouse's own ingested tables (PE-29 moves football-data to the lake).
 - **Paper loop:** `scripts/paper_loop.sh` under launchd agent `local.pitch-edge.paper-loop` — hourly Polymarket,
-  Kalshi and the-odds-api collection plus every strategy (`control-fav-pinnacle`,
-  `soft-vs-sharp-live`, `soft-vs-sharp-live-v2-{pinnacle,r6_live_model}`), daily settlement against the lake's
-  closes. L5 needs ≥ 150 settled evaluation-window decisions.
+  Kalshi and the-odds-api collection, every strategy (`control-fav-pinnacle`, `soft-vs-sharp-live`,
+  `soft-vs-sharp-live-v2-{pinnacle,r6_live_model}`) and a settle on every cycle against the lake's closes.
+  **Paused by the owner since 2026-10-28** (agent unloaded, plist kept; reload only on the owner's word). L5 needs
+  ≥ 150 settled evaluation-window decisions per strategy; each strategy has under 10, and the loop covered about
+  13% of evaluation-window hours because the laptop sleeps (PE-2, PE-16).
 - **`ask` models:** `models.default_models()` (Dixon-Coles, GBDT without market odds, stochastic strength),
-  fitted fresh per question; nothing persists fitted weights. Their outcome-models hypotheses are registered
-  (L0) but not yet graded, so every `ask` candidate is a model-vs-market disagreement below the floor.
-- **Benchmarks:** Pinnacle close in the lake ends 2025-09; Betfair Exchange close (2024-08+) is the benchmark
-  after that (`research/STANDARDS.md`).
+  fitted fresh per question; nothing persists fitted weights. Their outcome-models hypotheses are graded L1
+  (R7, a registered negative), so every `ask` candidate is a model-vs-market disagreement below the floor.
+- **Benchmarks:** Pinnacle close in football-data ends 2025-09; Betfair Exchange close (2024-08+) is the benchmark
+  after that (`research/STANDARDS.md`). football-data has no sharp close from 2026-04-17 to 05-04 (PE-26). The
+  lake's OddsPapi tables hold Pinnacle, Betfair Exchange and Singbet 1X2 price paths from 2026-01, including UCL,
+  UEL and UECL (LK-45).
+- **Work tracking:** `docs/ISSUES.md` (PE-ids). Commits name their issue.
 - **Optional keys:** see `API_KEYS.md`; `LAKEHOUSE_API_TOKEN` is needed for `lake-sync` and the studies,
   `ODDS_API_KEY` for the paper loop's bookmaker quotes. `PITCH_EDGE_LLM_PROVIDER=groq` routes LLM calls to Groq
   instead of local Ollama.
