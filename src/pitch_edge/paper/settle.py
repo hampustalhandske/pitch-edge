@@ -3,7 +3,10 @@
 Closing source, in order of preference:
 
 1. Bookmaker / exchange decisions: the Betfair Exchange close (`betfair_ex_*_close`) for the match in the
-   lake's `fd_matches` (football-data.co.uk), power de-vigged across home/draw/away.
+   lake's `fd_matches` (football-data.co.uk), power de-vigged across home/draw/away. For competitions
+   football-data does not cover (`ODDSPAPI_DIVISIONS`: UCL, UEL) the benchmark is instead the Pinnacle 1X2
+   close in the lake's OddsPapi tables, source `lake:oddspapi.pinnacle_close` (see `PinnacleClose`); it is a
+   different benchmark from the Betfair close and is reported separately.
 2. Polymarket decisions: the last hourly bar known before kickoff (`hour_start + 1h <= kickoff_at`) for
    each of the fixture's three Yes tokens in the lake's `pm_soccer_bars_1h`, power-normalised when all
    three are present. The Betfair close is still recorded alongside as `sharp_fair_close_odds`.
@@ -17,8 +20,11 @@ Closing sets whose implied probabilities do not sum to [0.95, 1.05] are rejected
 decision whose fixture's kickoff moved by more than 3 hours (postponed) is flagged `void` instead.
 
 The result comes from `fd_matches.ft_result` when the league is covered. Inside the grace period a
-decision waits until both a lake close and a result exist; after it, whatever is known is written (a
-missing result leaves `result` and `pnl` NULL). Settlements are written once and never changed.
+decision waits until both a lake close and a result exist (leagues with no result source, such as UCL, wait
+for the close only and settle with `result` and `pnl` NULL); after it, whatever is known is written (a
+missing result leaves `result` and `pnl` NULL). Settlements are written once and never changed. An OddsPapi-
+benchmarked bookmaker decision that has no valid Pinnacle close once `grace` has passed gets a `no_benchmark`
+flag whose reason says why (no fixture, ambiguous fixture, missing/inactive/stale close, implausible book sum).
 """
 
 from __future__ import annotations
@@ -32,7 +38,15 @@ from typing import Any, Protocol
 import pandas as pd
 
 from pitch_edge.data.teams import TeamNameResolver
-from pitch_edge.paper.fixtures import FD_DIVISIONS, canonical_team, team_similarity
+from pitch_edge.paper.fixtures import (
+    FD_DIVISIONS,
+    ODDSPAPI_DIVISIONS,
+    ambiguous_tokens,
+    canonical_team,
+    fixture_score,
+    oddspapi_team,
+    team_similarity,
+)
 from pitch_edge.paper.pricing import clv_log, paper_pnl, power_devig_odds, power_normalise_probs
 from pitch_edge.paper.store import SELECTIONS, PaperStore, Settlement
 
@@ -51,8 +65,27 @@ class FdClose:
     result: str | None
 
 
+ODDSPAPI_KICKOFF_TOLERANCE = timedelta(hours=3)
+ODDSPAPI_MAX_CLOSE_AGE = timedelta(minutes=15)
+PINNACLE_CLOSE_SOURCE = "lake:oddspapi.pinnacle_close"
+_OUTCOME_CODES = {"home": 0, "draw": 1, "away": 2}
+
+
+@dataclass(frozen=True)
+class PinnacleClose:
+    """The OddsPapi Pinnacle 1X2 close of one fixture: decimal odds (home, draw, away), or `reason` saying why
+    there is none (no fixture matched, an outcome missing or inactive, the last row too old). `retry` marks a
+    missing fixture, which is not yet a verdict that no benchmark exists."""
+
+    odds: tuple[float, float, float] | None
+    reason: str | None = None
+    retry: bool = False  # True when the fixture is not listed yet: a later lake refresh may supply it
+
+
 class CloseSource(Protocol):
     def fd_match(self, league: str, kickoff_at: datetime, home: str, away: str) -> FdClose | None: ...
+
+    def pinnacle_close(self, league: str, kickoff_at: datetime, home: str, away: str) -> PinnacleClose: ...
 
     def pm_last_bars(self, asset_ids: list[str], before: datetime) -> dict[str, float]: ...
 
@@ -123,6 +156,76 @@ class LakeCloseSource:
         betfair = tuple(float(c) for c in closes) if all(pd.notna(c) and float(c) > 1.0 for c in closes) else None
         result = _FD_RESULT.get(str(r["ft_result"])) if pd.notna(r["ft_result"]) else None
         return FdClose(betfair_close=betfair, result=result)  # type: ignore[arg-type]
+
+    def _oddspapi_window(self, division: str, day: date) -> pd.DataFrame:
+        """OddsPapi fixtures of `division` kicking off from the day before `day` to the day after it, one row per
+        fixture and outcome with the latest Pinnacle 1X2 row (price, active, observed_at) at or before kickoff."""
+        return self._sql_once(
+            ("oddspapi", division, day),
+            "WITH fx AS (SELECT fixture_id, home_team, away_team, kickoff_utc FROM oddspapi_fixtures "
+            "WHERE division = ? AND kickoff_utc >= CAST(? AS TIMESTAMPTZ) AND kickoff_utc < CAST(? AS TIMESTAMPTZ)), "
+            "cl AS (SELECT o.fixture_id, o.outcome, arg_max(o.price, o.observed_at) AS price, "
+            "arg_max(o.active, o.observed_at) AS active, max(o.observed_at) AS observed_at "
+            "FROM oddspapi_odds o JOIN fx ON o.fixture_id = fx.fixture_id "
+            "WHERE o.bookmaker = 'pinnacle' AND o.market = '1x2' AND o.observed_at <= fx.kickoff_utc "
+            "AND o.outcome IN ('home', 'draw', 'away') GROUP BY o.fixture_id, o.outcome) "
+            "SELECT fx.fixture_id, fx.home_team, fx.away_team, fx.kickoff_utc, cl.outcome, cl.price, cl.active, "
+            "cl.observed_at FROM fx LEFT JOIN cl ON cl.fixture_id = fx.fixture_id",
+            [division, (day - timedelta(days=1)).isoformat(), (day + timedelta(days=2)).isoformat()],
+        )
+
+    def pinnacle_close(self, league: str, kickoff_at: datetime, home: str, away: str) -> PinnacleClose:
+        """The OddsPapi Pinnacle 1X2 close for a fixture of a competition in `ODDSPAPI_DIVISIONS`.
+
+        The fixture is the one OddsPapi fixture of the competition kicking off within
+        `ODDSPAPI_KICKOFF_TOLERANCE` of `kickoff_at` whose clubs pass `fixture_score` (canonical team keys);
+        none or several passing means no close. The close is the latest `pinnacle` `1x2` row per outcome with
+        `observed_at <= kickoff_utc`; it is valid only when all three outcomes exist with price > 1 and
+        `active`, and the latest of the three rows is at most `ODDSPAPI_MAX_CLOSE_AGE` before kickoff.
+        One lake query per (competition, kickoff date).
+        """
+        division = ODDSPAPI_DIVISIONS.get(league)
+        if division is None:
+            return PinnacleClose(None, f"{league} is not an OddsPapi competition")
+        df = self._oddspapi_window(division, kickoff_at.date())
+        fixtures = df.drop_duplicates("fixture_id")
+        if fixtures.empty:
+            return PinnacleClose(None, f"no OddsPapi {division} fixtures near {kickoff_at.date()}", retry=True)
+        keys = {
+            str(r.fixture_id): (oddspapi_team(r.home_team), oddspapi_team(r.away_team)) for r in fixtures.itertuples()
+        }
+        hk, ak = oddspapi_team(home), oddspapi_team(away)
+        ambiguous = ambiguous_tokens({hk, ak} | {k for pair in keys.values() for k in pair})
+        passing = [
+            str(r.fixture_id)
+            for r in fixtures.itertuples()
+            if abs(r.kickoff_utc.to_pydatetime() - kickoff_at) <= ODDSPAPI_KICKOFF_TOLERANCE
+            and fixture_score(hk, ak, *keys[str(r.fixture_id)], ambiguous) is not None
+        ]
+        if not passing:
+            return PinnacleClose(None, f"no OddsPapi {division} fixture matches {home} v {away}", retry=True)
+        if len(passing) > 1:
+            return PinnacleClose(None, f"{len(passing)} OddsPapi {division} fixtures match {home} v {away}")
+        rows = df[(df["fixture_id"].astype(str) == passing[0]) & df["outcome"].notna()]
+        kickoff = fixtures[fixtures["fixture_id"].astype(str) == passing[0]]["kickoff_utc"].iloc[0].to_pydatetime()
+        by_outcome = {str(r.outcome): r for r in rows.itertuples()}
+        if not by_outcome:
+            return PinnacleClose(None, "OddsPapi lists the fixture but holds no Pinnacle 1x2 rows for it", retry=True)
+        missing = [o for o in _OUTCOME_CODES if o not in by_outcome or pd.isna(by_outcome[o].price)]
+        if missing:
+            return PinnacleClose(None, f"Pinnacle 1x2 close before kickoff lacks {'/'.join(missing)}")
+        inactive = [o for o in _OUTCOME_CODES if not bool(by_outcome[o].active) or float(by_outcome[o].price) <= 1.0]
+        if inactive:
+            return PinnacleClose(
+                None, f"Pinnacle 1x2 latest row is inactive or has price <= 1 for {'/'.join(inactive)}"
+            )
+        latest = max(by_outcome[o].observed_at.to_pydatetime() for o in _OUTCOME_CODES)
+        age = kickoff - latest
+        if age > ODDSPAPI_MAX_CLOSE_AGE:
+            return PinnacleClose(
+                None, f"Pinnacle 1x2 close is stale: latest row {age.total_seconds() / 60:.0f} min before kickoff"
+            )
+        return PinnacleClose(tuple(float(by_outcome[o].price) for o in _OUTCOME_CODES))  # type: ignore[arg-type]
 
     def pm_last_bars(self, asset_ids: list[str], before: datetime) -> dict[str, float]:
         """Close of the last hourly bar per token that was complete (hour_start + 1h) by `before`."""
@@ -228,6 +331,19 @@ def _kickoff_moved(store: PaperStore, fixture: str, kickoff: datetime, now: date
     return latest if abs(latest - kickoff) > KICKOFF_MOVE_VOID else None
 
 
+def _pinnacle_sharp(pin: PinnacleClose, selection: str, fixture: str) -> tuple[_Close | None, str | None]:
+    """The de-vigged `_Close` of `selection` from an OddsPapi Pinnacle close, or (None, why there is none)."""
+    if pin.odds is None:
+        return None, pin.reason or "no Pinnacle close"
+    if not plausible_book([1.0 / o for o in pin.odds]):
+        total = sum(1.0 / o for o in pin.odds)
+        logger.warning("Pinnacle close %s for %s fails the book-sum check", pin.odds, fixture)
+        return None, f"Pinnacle close book sum {total:.3f} outside [{BOOKSUM_MIN}, {BOOKSUM_MAX}]"
+    fair = dict(zip(SELECTIONS, power_devig_odds(pin.odds), strict=True))
+    raw = dict(zip(SELECTIONS, pin.odds, strict=True))
+    return _Close(raw[selection], 1.0 / fair[selection], PINNACLE_CLOSE_SOURCE), None
+
+
 def settle(
     store: PaperStore,
     source: CloseSource,
@@ -244,11 +360,16 @@ def settle(
       inside `grace` it also waits for the result.
     - After `grace` with no lake close: one provisional row (our own post-decision snapshot, or `none`);
       the lake keeps being asked until `final_horizon` after kickoff, and a final row then supersedes it.
+    - An OddsPapi-benchmarked bookmaker decision is flagged `no_benchmark` (with the reason) when its fixture
+      is listed but its Pinnacle close is invalid, or when `final_horizon` passes without a valid close; a
+      fixture OddsPapi does not list yet is retried on later calls, never flagged before the horizon.
 
     Returns {"settled": final rows written, "waiting": decisions still inside `grace`}.
     """
     fixtures = store.fixtures().set_index("fixture_key")
     provisional = set(store.provisional_settlements()["decision_id"])
+    flags = store.decision_flags()
+    flagged = set(flags.loc[flags["flag"] == "no_benchmark", "decision_id"])
     counts = {"settled": 0, "waiting": 0}
     n_provisional = 0
     for d in store.unsettled_decisions().itertuples():
@@ -268,12 +389,25 @@ def settle(
         past_horizon = now - kickoff > final_horizon
         fx = fixtures.loc[d.fixture_key] if d.fixture_key in fixtures.index else None
         fd: FdClose | None = None
-        if fx is not None and not past_horizon:
+        league = str(fx["league"]) if fx is not None else None
+        oddspapi = league is not None and league not in FD_DIVISIONS and league in ODDSPAPI_DIVISIONS
+        no_close_reason: str | None = None
+        retry_later = False
+        if fx is not None and not past_horizon and not oddspapi:
             try:
                 fd = source.fd_match(str(fx["league"]), kickoff, str(fx["home"]), str(fx["away"]))
             except Exception as exc:  # the lake may be down; the decision simply waits
                 logger.warning("fd_matches lookup for %s failed: %s", d.fixture_key, exc)
         sharp: _Close | None = None
+        if fx is not None and not past_horizon and oddspapi:
+            try:
+                pin = source.pinnacle_close(str(fx["league"]), kickoff, str(fx["home"]), str(fx["away"]))
+            except Exception as exc:
+                logger.warning("oddspapi lookup for %s failed: %s", d.fixture_key, exc)
+                no_close_reason, retry_later = f"OddsPapi lookup failed: {exc}", True
+            else:
+                sharp, no_close_reason = _pinnacle_sharp(pin, d.selection, d.fixture_key)
+                retry_later = pin.retry
         if fd is not None and fd.betfair_close is not None:
             if plausible_book([1.0 / o for o in fd.betfair_close]):
                 fair = dict(zip(SELECTIONS, power_devig_odds(fd.betfair_close), strict=True))
@@ -296,7 +430,8 @@ def settle(
             primary = sharp
         result = fd.result if fd is not None else None
         in_grace = now - kickoff < grace
-        if primary is not None and (result is not None or not in_grace):
+        has_result_source = league in FD_DIVISIONS
+        if primary is not None and (result is not None or not in_grace or not has_result_source):
             won = None if result is None else result == d.selection
             store.append_settlement(_settlement(d, primary, sharp, result, won, now))
             counts["settled"] += 1
@@ -304,11 +439,25 @@ def settle(
         if in_grace:
             counts["waiting"] += 1
             continue
+        if oddspapi and past_horizon and d.venue != "polymarket" and d.decision_id not in flagged:
+            store.flag_decision(
+                d.decision_id, "no_benchmark", "no valid Pinnacle close within the final horizon", flagged_at=now
+            )
+            flagged.add(d.decision_id)
         if d.decision_id not in provisional:
             fallback = _own_snapshot_close(store, d.fixture_key, kickoff, d.selection, d.venue, decided)
             won = None if result is None else result == d.selection
             store.append_provisional_settlement(_settlement(d, fallback, sharp, result, won, now))
             n_provisional += 1
+            if (
+                oddspapi
+                and d.venue != "polymarket"
+                and no_close_reason is not None
+                and not retry_later
+                and d.decision_id not in flagged
+            ):
+                store.flag_decision(d.decision_id, "no_benchmark", no_close_reason, flagged_at=now)
+                flagged.add(d.decision_id)
     if n_provisional:
         logger.info("%d provisional settlements written (no lake close yet)", n_provisional)
     return counts
@@ -328,4 +477,5 @@ def _settlement(
         settled_at=now,
         sharp_fair_close_odds=sharp.fair_close_odds if sharp else None,
         clv_vs_sharp_log=clv_log(d.price_taken, sharp.fair_close_odds) if sharp else None,
+        sharp_source=sharp.source if sharp else None,
     )

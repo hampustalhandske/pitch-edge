@@ -192,7 +192,19 @@ projects; M8 traceability; S2 lake capacity; S4 decimal-odds instrument with CLV
   (median 2.9 minutes before kickoff for Pinnacle on UCL). Outcome codes 101/102/103 = home/draw/away are verified
   (the lake matched OddsPapi's Betfair close to football-data's on 54 of 54 matches, 2026-01-13 to 01-17). Next:
   once the backfill finishes (~2026-10-30), settle UCL paper decisions against the de-vigged Pinnacle close from it.
-- Blocked by: LK-45 backfill. Blocks: none.
+- Progress (uncommitted, not closed): `paper/settle.py` settles UCL/UEL bookmaker decisions against the de-vigged
+  OddsPapi Pinnacle close (`lake:oddspapi.pinnacle_close`; fixture matched by competition, kickoff within 3 h and
+  team names via `fixtures.oddspapi_team`; valid only with all three outcomes present, active, price > 1, the
+  latest row at most 15 min before kickoff, and a plausible book sum; one lake query per competition and day per
+  settle call). A fixture OddsPapi does not list yet, or lists without Pinnacle rows, is retried and never flagged
+  before the 30-day horizon; an invalid close gets a `no_benchmark` flag with the reason. `settlements` gain
+  `sharp_source`. `paper report` shows a `benchmark` column (`betfair_close` / `pinnacle_close`) with separate rows;
+  v2's arm table and `research/summary.py` exclude the Pinnacle-benchmarked rows. The registrations name the
+  Betfair Exchange close, so the Pinnacle rows are a deviation to state. Read-only match test on the 2026-10-28
+  copy of the paper ledger: 12 UCL decisions of 2026-10-21 (all provisional) match 12/12 fixtures, 11 get a valid
+  close (Real Madrid v RB Leipzig is stale, 22 min); the 29 of 3-4 November are listed by OddsPapi without
+  Pinnacle rows (recorder stalled, LK-61) and wait. Not yet run: `paper settle` on the live ledger.
+- Blocked by: LK-61 (recorder stalled since 2026-10-28) for decisions after 2026-11-01. Blocks: none.
 - Commits: none yet.
 
 ## PE-14 Paper strategies that cannot produce evidence
@@ -385,6 +397,10 @@ projects; M8 traceability; S2 lake capacity; S4 decimal-odds instrument with CLV
   the recorded first run stays the result of record.
 - Result: a "Data gap (PE-26)" paragraph in 14 study reports, with counts from each study's local snapshot (for
   example R2-Q1 863 of 1,029 matches in the span, R5 micro FLB 92 of 107, R2-Q3 5 of 170 eligible).
+- Lead for the sensitivity (lake, 2026-11-05): OddsPapi has Betfair Exchange 1X2 paths for 2026-04-19 to 05-04;
+  in E0, E1, D1, SP1, I1, F1 and SC0, 173 of 174 fixtures have a betfair-ex path and all 174 a Pinnacle path. A
+  close from it is the last row with observed_at <= kickoff_utc. Not run; the recorded first runs stay the result
+  of record.
 - Blocked by: none. Blocks: none.
 - Commits: none yet.
 
@@ -407,7 +423,13 @@ projects; M8 traceability; S2 lake capacity; S4 decimal-odds instrument with CLV
   `trials.csv`, not on the ledger, and only the selected config is scored once on the evaluation window. Next: score
   H1 and H3; count H2's train-window bets before any outcome is read, then score; score H4 after the LK-45 backfill.
   H1's selected config can fall below `min_n` 300 (about 200 bets at θ = 1%).
-- Blocked by: H4 on LK-45. Blocks: none.
+- H4 (2026-11-05): LK-45 is complete (6,993 fixtures, 6,900 with a path; Pinnacle on 99.6% and Betfair Exchange
+  on 98.3% of them). Two more amendments are chained before any pull of record, count or selection: a price <= 1.0
+  is no valid quote (the lake holds 518 betfair-ex rows at 0.0 on 2026-02-05/06), and the readings fixed while
+  writing the code. Study code in `research/studies/soft-open-vs-betfair-exchange-lag/` (pull, outcome-blind
+  count, selection, one score). The evaluation window has 2,388 fixtures with both books, so `min_n` 300 needs
+  about one bet per eight fixtures.
+- Blocked by: H4's score waits for a stable lake build (LK-61). Blocks: none.
 - Commits: see git log for `PE-27`.
 
 ## PE-28 The warehouse spine has no 2026/27 football-data matches

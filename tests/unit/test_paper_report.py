@@ -59,6 +59,7 @@ def _add(
     final=True,
     provisional=False,
     won=True,
+    source="lake:fd_matches.betfair_ex_close",
 ):
     ko = decided + timedelta(days=1 + i % 3, hours=2)
     q = Quote(
@@ -93,7 +94,7 @@ def _add(
         decision_id=d.decision_id,
         closing_price=2.0,
         fair_close_odds=2.0,
-        closing_source="lake:fd_matches.betfair_ex_close" if final else "own_snapshot:odds_api:pinnacle@t",
+        closing_source=source if final else "own_snapshot:odds_api:pinnacle@t",
         result="home" if won else "away",
         clv_log=clv,
         pnl=1.0 if won else -1.0,
@@ -117,15 +118,24 @@ def test_primary_metric_uses_only_lake_closes_inside_the_evaluation_window_after
         for i, (t, c) in enumerate(zip(evals, clvs, strict=True), start=1):
             _add(store, i, t, clv=c, won=i % 2 == 0)
         _add(store, 10, datetime(2026, 10, 22, 9, tzinfo=UTC), clv=0.9, final=False, provisional=True)
-        _add(store, 11, datetime(2026, 10, 22, 10, tzinfo=UTC), league="UCL", clv=0.7)
+        ucl = _add(store, 11, datetime(2026, 10, 22, 10, tzinfo=UTC), league="UCL", final=False, provisional=True)
+        store.flag_decision(ucl.decision_id, "no_benchmark", "no OddsPapi fixture", flagged_at=T0)
+        _add(
+            store,
+            13,
+            datetime(2026, 10, 22, 11, tzinfo=UTC),
+            league="UCL",
+            clv=0.7,
+            source="lake:oddspapi.pinnacle_close",
+        )
         voided = _add(store, 12, datetime(2026, 10, 23, 9, tzinfo=UTC), clv=0.8)
         store.flag_decision(voided.decision_id, "void", "test", flagged_at=datetime(2026, 10, 25, tzinfo=UTC))
         _add(store, 20, datetime(2026, 10, 22, 9, tzinfo=UTC), strategy="control-fav-pinnacle", hyp="control")
         rep = summarise(store, registry_dir=registry, ledger=FakeLedger(), n_boot=500, seed=1)
-    rows = rep.set_index(["strategy_id", "segment"])
+    rows = rep[rep["benchmark"] == "betfair_close"].set_index(["strategy_id", "segment"])
     p = rows.loc[("soft-vs-sharp-live", "primary")]
-    assert p["n_decided"] == 7  # 4 final + provisional + UCL + void, all inside the evaluation window
-    assert (p["n_final"], p["n_provisional"], p["n_no_benchmark"], p["n_void"]) == (4, 1, 1, 1)
+    assert p["n_decided"] == 6  # 4 final + provisional + void, inside the evaluation window
+    assert (p["n_final"], p["n_provisional"], p["n_no_benchmark"], p["n_void"]) == (4, 1, 0, 1)
     assert p["mean_clv"] == pytest.approx(np.mean(clvs))
     finals_days = [str((t + timedelta(days=1 + i % 3, hours=2)).date()) for i, t in enumerate(evals, start=1)]
     boot = block_bootstrap(clvs, finals_days, n_boot=500, seed=1)
@@ -136,8 +146,11 @@ def test_primary_metric_uses_only_lake_closes_inside_the_evaluation_window_after
     assert e["n_decided"] == 1 and e["mean_clv"] == pytest.approx(0.5)
     u = rows.loc[("control-fav-pinnacle", "unregistered")]
     assert u["n_decided"] == 1
+    pin = rep[(rep["benchmark"] == "pinnacle_close") & (rep["segment"] == "primary")].iloc[0]
+    assert (pin["n_decided"], pin["n_final"], pin["n_no_benchmark"]) == (2, 1, 1)
+    assert pin["mean_clv"] == pytest.approx(0.7)
     notes = " ".join(report_notes(rep))
-    assert "UCL" in notes and "no benchmark" in notes
+    assert "UCL" in notes and "pinnacle_close" in notes and "never pooled" in notes
     assert "pm-vs-sharp-gap" in notes and "placeholder" in notes and "no longer runs" in notes
     assert "max" in notes.lower() and "tautolog" in notes.lower()
     assert "2026-10-20T20:54" in notes  # the ledger registration time is what the cut uses

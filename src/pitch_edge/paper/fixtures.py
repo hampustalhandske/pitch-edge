@@ -66,6 +66,13 @@ FD_DIVISIONS: dict[str, str] = {
     "EREDIVISIE": "N1",
 }
 
+# Canonical league -> OddsPapi division code (the lake's `oddspapi_fixtures.division`) for competitions that
+# football-data.co.uk does not cover; their sharp close is the OddsPapi Pinnacle 1X2 close.
+ODDSPAPI_DIVISIONS: dict[str, str] = {
+    "UCL": "UCL",
+    "UEL": "UEL",
+}
+
 _RESOLVER = TeamNameResolver()
 
 
@@ -100,6 +107,28 @@ def canonical_team(name: str) -> str:
         return PAPER_ALIASES[key]
     resolved = _RESOLVER.resolve(name)
     return normalise(resolved or name)
+
+
+# Canonical team keys (after `canonical_team`) that name the same club in OddsPapi and in the paper quotes:
+# key -> the one key both map to. Applied only when matching paper fixtures to OddsPapi fixtures.
+ODDSPAPI_ALIASES: dict[str, str] = {
+    "inter milano": "inter",
+    "real betis seville": "betis",
+    "real betis balompie": "betis",
+    "sabah masazir": "sabah fk",
+    "bodoe glimt": "bod glimt",
+    "fenerbahce istanbul": "fenerbahce",
+    "slavia prague": "slavia praha",
+    "galatasaray istanbul": "galatasaray",
+    "fk shakhtar donetsk": "shakhtar donetsk",
+    "lens": "racing lens",
+}
+
+
+def oddspapi_team(name: str) -> str:
+    """Club key for comparing a paper or OddsPapi team name: `canonical_team` then `ODDSPAPI_ALIASES`."""
+    key = canonical_team(name)
+    return ODDSPAPI_ALIASES.get(key, key)
 
 
 def fixture_key(league: str, kickoff_at: datetime, home: str, away: str) -> str:

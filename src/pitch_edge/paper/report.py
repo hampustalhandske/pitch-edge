@@ -11,8 +11,13 @@ Segments per strategy:
 Within a segment the CLV metric (mean CLV, 95% block-bootstrap CI by match-day via
 `research/stats.py::block_bootstrap`, ROI) uses only *final* settlements, which are lake-sourced closes.
 Provisional settlements (our own snapshot or no close) are counted and averaged separately and never enter
-the metric. Void decisions and fixtures in leagues without a lake close/result source (UCL) are counted
-as `n_void` / `n_no_benchmark` and excluded from every metric.
+the metric. Void decisions and decisions flagged `no_benchmark` by settlement (an OddsPapi-benchmarked
+decision with no valid Pinnacle close) are counted as `n_void` / `n_no_benchmark` and excluded from every metric.
+
+Every row carries a `benchmark`: `betfair_close` (the Betfair Exchange close from football-data, and the
+Polymarket bar close of Polymarket-venue decisions) or `pinnacle_close` (the OddsPapi Pinnacle close, used for
+competitions football-data does not cover: UCL, UEL). The two are different benchmarks, so their decisions are
+never pooled into one mean CLV; each (strategy, segment) has one row per benchmark present.
 
 The loop runs one cycle per hour but the machine sleeps, so cycles are missed and market snapshots cannot be
 backfilled. `cycle_gaps` and `window_coverage` measure that from the cycle record (`PaperStore.cycle_starts`);
@@ -30,7 +35,8 @@ from typing import Any, Protocol
 import numpy as np
 import pandas as pd
 
-from pitch_edge.paper.fixtures import FD_DIVISIONS
+from pitch_edge.paper.fixtures import FD_DIVISIONS, ODDSPAPI_DIVISIONS
+from pitch_edge.paper.settle import PINNACLE_CLOSE_SOURCE
 from pitch_edge.paper.store import PaperStore, utc_now
 from pitch_edge.research.stats import block_bootstrap
 
@@ -38,6 +44,7 @@ COLUMNS = [
     "strategy_id",
     "hypothesis_id",
     "segment",
+    "benchmark",
     "n_decided",
     "n_void",
     "n_no_benchmark",
@@ -55,7 +62,8 @@ COLUMNS = [
 ]
 CYCLE_INTERVAL = timedelta(hours=1)
 GAP_FACTOR = 1.5
-NO_BENCHMARK_LEAGUES = ("UCL",)
+BETFAIR_BENCHMARK = "betfair_close"
+PINNACLE_BENCHMARK = "pinnacle_close"
 
 
 @dataclass(frozen=True)
@@ -127,6 +135,12 @@ def _league(fixture_key: str) -> str:
     return fixture_key.split("|", 1)[0]
 
 
+def _is_pinnacle_benchmarked(league: pd.Series, venue: pd.Series) -> pd.Series:
+    """Whether a decision's intended benchmark is the OddsPapi Pinnacle close: a bookmaker/exchange-quote
+    decision (not Polymarket) in a competition football-data does not cover."""
+    return league.isin(set(ODDSPAPI_DIVISIONS) - set(FD_DIVISIONS)) & (venue != "polymarket")
+
+
 def _segment_row(g: pd.DataFrame, n_boot: int, seed: int) -> dict[str, Any]:
     benchmarked = g[~g["void"] & ~g["no_benchmark"]]
     final = benchmarked[benchmarked["final"]].dropna(subset=["clv_log"])
@@ -180,12 +194,17 @@ def summarise(
         ledger = Ledger()
     final = store.settlements()
     prov = store.provisional_settlements().rename(columns={"clv_log": "prov_clv_log"})[["decision_id", "prov_clv_log"]]
-    df = decisions.merge(final[["decision_id", "clv_log", "pnl"]], on="decision_id", how="left")
+    df = decisions.merge(final[["decision_id", "clv_log", "pnl", "closing_source"]], on="decision_id", how="left")
     df = df.merge(prov, on="decision_id", how="left")
     df["final"] = df["decision_id"].isin(set(final["decision_id"]))
     df["provisional"] = df["decision_id"].isin(set(prov["decision_id"]))
     df["void"] = df["decision_id"].isin(store.voided_decision_ids())
-    df["no_benchmark"] = df["fixture_key"].map(_league).isin(NO_BENCHMARK_LEAGUES)
+    flags = store.decision_flags()
+    flagged = set(flags.loc[flags["flag"] == "no_benchmark", "decision_id"]) if not flags.empty else set()
+    df["no_benchmark"] = df["decision_id"].isin(flagged) & ~df["final"]
+    intended = _is_pinnacle_benchmarked(df["fixture_key"].map(_league), df["venue"])
+    settled_pin = df["closing_source"].eq(PINNACLE_CLOSE_SOURCE)
+    df["benchmark"] = np.where(np.where(df["final"], settled_pin, intended), PINNACLE_BENCHMARK, BETFAIR_BENCHMARK)
 
     now = now or utc_now()
     starts = store.cycle_starts()
@@ -212,12 +231,13 @@ def summarise(
     df["segment"] = pd.concat(segments).reindex(df.index)
 
     rows = []
-    for (sid, hyp, seg), g in df.groupby(["strategy_id", "hypothesis_id", "segment"], sort=True):
+    for (sid, hyp, seg, bench), g in df.groupby(["strategy_id", "hypothesis_id", "segment", "benchmark"], sort=True):
         rows.append(
             {
                 "strategy_id": sid,
                 "hypothesis_id": hyp,
                 "segment": seg,
+                "benchmark": bench,
                 **_segment_row(g, n_boot, seed),
                 "window_coverage": coverage.get(str(hyp), np.nan) if seg == "primary" else np.nan,
                 "registration_cut": cuts.get(str(hyp), ""),
@@ -232,10 +252,14 @@ def report_notes(rep: pd.DataFrame) -> list[str]:
         "mean_clv / CI / ROI use final settlements only (lake closes: Betfair Exchange close from fd_matches, or "
         "the last pre-kickoff Polymarket bar); provisional settlements (our own post-decision snapshot or no "
         "close) are shown separately as provisional_mean_clv and never enter the metric.",
-        f"{', '.join(NO_BENCHMARK_LEAGUES)}: no lake close or result source (football-data.co.uk has no "
-        f"{'/'.join(NO_BENCHMARK_LEAGUES)} division; covered: {', '.join(sorted(FD_DIVISIONS))}), so these "
-        "decisions are collected but reported as no benchmark (n_no_benchmark). This is a deviation from the "
-        "registered universe of bookmaker-line-structure-live-soft-vs-sharp-v1, which lists UCL.",
+        "benchmark: `betfair_close` rows are measured against the de-vigged Betfair Exchange close from fd_matches "
+        "(Polymarket-venue decisions against the last pre-kickoff bar); `pinnacle_close` rows (UCL, UEL, which "
+        "football-data does not cover) against the de-vigged Pinnacle close from the lake's OddsPapi tables "
+        "(valid only with all three outcomes active and the latest row at most 15 min before kickoff). They are "
+        "different benchmarks and never pooled. The registrations of bookmaker-line-structure-live-soft-vs-sharp-v1 "
+        "and -v2 name the Betfair Exchange close, so the pinnacle_close rows are a stated deviation, not part of "
+        "the registered primary result. n_no_benchmark counts decisions settlement flagged as having no valid "
+        "Pinnacle close (reason in decision_flags); a fixture OddsPapi does not list yet is retried, not flagged.",
         "pm-vs-sharp-gap (hypothesis 'pending-r1') no longer runs; its recorded decisions used placeholder "
         "parameters, never R1's registered rule, so all of them are unregistered.",
         "soft-vs-sharp-live deviation from the v1 registration: the registered sanity rule 'price <= the max quote for that outcome in the response' "
@@ -284,7 +308,7 @@ def v2_summary(
     with a match-day block-bootstrap CI, progress against `min_n`, decisions per week and the share of bets at
     the informative books (betvictor, betfair_sb_uk); and the paired per-fixture difference model - pinnacle
     over fixtures where either arm bet (an arm that did not bet scores 0; a fixture whose bet has no final
-    close yet is pending and left out). Void and no-benchmark (UCL) decisions are excluded.
+    close yet is pending and left out). Void decisions and decisions benchmarked on the OddsPapi Pinnacle close (UCL, UEL) are excluded.
 
     Returns {"arms": DataFrame, "paired": dict, "cut": str} (empty arms frame when there are no v2 decisions).
     """
@@ -308,7 +332,7 @@ def v2_summary(
     day = d["decided_at"].dt.date
     d = d[(day >= window[0]) & (day <= window[1]) & (d["decided_at"] > recorded)]
     d = d[~d["decision_id"].isin(store.voided_decision_ids())]
-    d = d[~d["fixture_key"].map(_league).isin(NO_BENCHMARK_LEAGUES)]
+    d = d[~_is_pinnacle_benchmarked(d["fixture_key"].map(_league), d["venue"])]
     if d.empty:
         return {**empty, "cut": cut}
     final = store.settlements()[["decision_id", "clv_log"]]

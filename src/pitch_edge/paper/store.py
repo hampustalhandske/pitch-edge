@@ -86,12 +86,12 @@ CREATE TABLE IF NOT EXISTS decisions (
 CREATE TABLE IF NOT EXISTS settlements (
     decision_id VARCHAR PRIMARY KEY, closing_price DOUBLE, fair_close_odds DOUBLE, closing_source VARCHAR,
     result VARCHAR, clv_log DOUBLE, pnl DOUBLE, sharp_fair_close_odds DOUBLE, clv_vs_sharp_log DOUBLE,
-    settled_at TIMESTAMP NOT NULL
+    settled_at TIMESTAMP NOT NULL, sharp_source VARCHAR
 );
 CREATE TABLE IF NOT EXISTS provisional_settlements (
     decision_id VARCHAR PRIMARY KEY, closing_price DOUBLE, fair_close_odds DOUBLE, closing_source VARCHAR,
     result VARCHAR, clv_log DOUBLE, pnl DOUBLE, sharp_fair_close_odds DOUBLE, clv_vs_sharp_log DOUBLE,
-    settled_at TIMESTAMP NOT NULL
+    settled_at TIMESTAMP NOT NULL, sharp_source VARCHAR
 );
 CREATE TABLE IF NOT EXISTS decision_flags (
     decision_id VARCHAR NOT NULL, flag VARCHAR NOT NULL, reason VARCHAR, flagged_at TIMESTAMP NOT NULL
@@ -191,6 +191,7 @@ class Settlement:
     settled_at: datetime
     sharp_fair_close_odds: float | None = None
     clv_vs_sharp_log: float | None = None
+    sharp_source: str | None = None  # where `sharp_fair_close_odds` came from, e.g. `lake:oddspapi.pinnacle_close`
 
 
 def _with_utc(df: pd.DataFrame) -> pd.DataFrame:
@@ -236,6 +237,8 @@ class PaperStore:
             self.con.execute("ALTER TABLE collect_log ADD COLUMN IF NOT EXISTS cost INTEGER")
             self.con.execute("ALTER TABLE decisions ADD COLUMN IF NOT EXISTS code_hash VARCHAR")
             self.con.execute("ALTER TABLE decide_log ADD COLUMN IF NOT EXISTS error VARCHAR")
+            self.con.execute("ALTER TABLE settlements ADD COLUMN IF NOT EXISTS sharp_source VARCHAR")
+            self.con.execute("ALTER TABLE provisional_settlements ADD COLUMN IF NOT EXISTS sharp_source VARCHAR")
             self._ensure_unique_decisions()
             self._export_chain()
 
@@ -552,7 +555,7 @@ class PaperStore:
         if done and done[0]:
             raise DecisionError(f"decision {s.decision_id} already has a row in {table}")
         self.con.execute(
-            f"INSERT INTO {table} VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            f"INSERT INTO {table} VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             [
                 s.decision_id,
                 s.closing_price,
@@ -564,6 +567,7 @@ class PaperStore:
                 s.sharp_fair_close_odds,
                 s.clv_vs_sharp_log,
                 _naive_utc(s.settled_at),
+                s.sharp_source,
             ],
         )
 

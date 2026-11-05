@@ -223,7 +223,7 @@ EVENTS = [
     ("brentford-old", "Brentford", "Wolves", "EPL", KO_OLD, None, True),  # past grace, no lake row
     ("barca", "Barcelona", "Sevilla", "LALIGA", KO1, None, True),  # lake query raises
     ("madrid", "Real Madrid", "Valencia", "LALIGA", KO1_LATE, None, True),  # same failing window
-    ("ajax", "Ajax", "Benfica", "UCL", KO1, None, False),  # league not in football-data
+    ("ajax", "Ajax", "Benfica", "NOCOMP", KO1, None, False),  # league covered by neither football-data nor OddsPapi
 ]
 # strategy, event, venue, selection, price
 DECISIONS = [

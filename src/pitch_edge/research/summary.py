@@ -35,7 +35,7 @@ from typing import Any
 import duckdb
 import pandas as pd
 
-from pitch_edge.paper.report import summarise
+from pitch_edge.paper.report import BETFAIR_BENCHMARK, summarise
 from pitch_edge.paper.store import PaperStore
 from pitch_edge.research.gates import PAPER_MIN_SETTLED, grade, results_by_role
 from pitch_edge.research.ledger import Ledger
@@ -475,6 +475,7 @@ def paper_summary(
     `paper.report.summarise` with `ledger` deciding which hypotheses are registered and `registry_dir`
     (default `research/registry/`) holding their registration files."""
     rep = summarise(store, registry_dir=registry_dir, ledger=ledger, n_boot=n_boot, seed=seed)
+    rep = rep[rep["benchmark"] == BETFAIR_BENCHMARK]  # Pinnacle-benchmarked decisions are a different benchmark
     statuses = []
     for (sid, hid), g in rep.groupby(["strategy_id", "hypothesis_id"], sort=True):
         by_segment = {str(r["segment"]): r for _, r in g.iterrows()}
