@@ -1,9 +1,8 @@
 """Concrete OddsProvider implementations.
 
 `HistoricalClosingOddsProvider` is real: it reads the bookmaker odds columns
-that ship inside football-data.co.uk match rows (see
-`pitch_edge.data.sources.football_data_co_uk`). This is genuine closing-line
-data, free, no key required, and is what the backtest engine uses for CLV.
+that ship inside football-data.co.uk match rows (the warehouse spine built from the lake mirror, see
+`pitch_edge.lake.spine`). This is genuine closing-line data and is what the backtest engine uses for CLV.
 
 `MockLiveOddsProvider` is explicitly synthetic — a stand-in for a paid live
 odds API (The Odds API / SportsGameOdds / a funded Betfair account) that
@@ -33,7 +32,7 @@ from pitch_edge.odds.base import OddsProvider, OddsQuote
 _MIN_PRICE = 0.001
 _MAX_PRICE = 0.999
 
-# Bookmaker column prefixes -> display name, matching football_data_co_uk.py
+# Bookmaker column prefixes -> display name, matching `pitch_edge.data.fd_vocab`
 _BOOKMAKER_NAMES = {
     "B365": "Bet365",
     "BW": "Bet&Win",

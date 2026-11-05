@@ -133,9 +133,13 @@ opens only short-lived read-only connections (`_read_cached` / `_query_cached`, 
   amended on the ledger, not yet scored.
 - **Lake mirror:** 10 `lake_*` mirrors (football-data matches + open/close odds, Polymarket markets and hourly
   bars, Kalshi markets and candles, Understat team matches (xG), Club Elo, Transfermarkt managers/tenures/injuries),
-  checkpointed per window in `lake_sync_runs` / `lake_sync_state`. Nothing schedules `lake-sync`, so the mirrors
-  are as old as their last manual run. Studies and the paper settle read the lake API directly; the
-  backtest/`ask` pipeline still reads the warehouse's own ingested tables (PE-29 moves football-data to the lake).
+  checkpointed per window in `lake_sync_runs` / `lake_sync_state`. The warehouse spine's football-data `matches`/`odds`
+  rows (read by `ask`, the dashboard and the backtests) are built from `lake_fd_matches` by `lake/spine.py`, run at the
+  end of `lake-sync` and by `ingest`/`refresh`; no football-data CSV is fetched. A launchd template
+  (`scripts/launchd/local.pitch-edge.lake-sync-fd.plist.example`, not installed until the owner loads it) syncs
+  `fd_matches` twice a day and skips when the warehouse is locked; the other mirrors still run only by hand.
+  `pitch-edge health` shows the mirror's last sync and its lag behind the lake per backtest league. Studies and the
+  paper settle read the lake API directly.
 - **Paper loop:** `scripts/paper_loop.sh` under launchd agent `local.pitch-edge.paper-loop` — hourly Polymarket,
   Kalshi and the-odds-api collection, every strategy (`control-fav-pinnacle`, `soft-vs-sharp-live`,
   `soft-vs-sharp-live-v2-{pinnacle,r6_live_model}`) and a settle on every cycle against the lake's closes.

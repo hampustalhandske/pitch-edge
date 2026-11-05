@@ -307,8 +307,6 @@ def synthetic_quotes_from_elo(fixtures: pd.DataFrame, margin: float = 1.05) -> l
 # --------------------------------------------------------------------- full run
 def full_refresh(
     settings: Settings | None = None,
-    leagues: list[str] | None = None,
-    seasons: list[int] | None = None,
     include_statsbomb: bool = True,
     statsbomb_max_matches: int | None = 40,
     backtest_min_date: str = "2015-07-01",
@@ -324,8 +322,6 @@ def full_refresh(
     with Warehouse(settings.db_path) as wh:
         summary["ingest"] = ingest_everything(
             wh,
-            leagues=leagues,
-            seasons=seasons,
             include_statsbomb=include_statsbomb,
             include_weather=not fast,
             statsbomb_max_matches=statsbomb_max_matches,

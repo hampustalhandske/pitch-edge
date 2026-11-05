@@ -10,7 +10,6 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 from datetime import UTC, date, datetime, timedelta
-from functools import partial
 from pathlib import Path
 
 import pandas as pd
@@ -19,19 +18,12 @@ from pitch_edge.config import get_settings
 from pitch_edge.data.alt.news import NewsScanner
 from pitch_edge.data.alt.venues import VenueGeocoder
 from pitch_edge.data.alt.weather import OpenMeteoWeather
+from pitch_edge.data.fd_vocab import EXTRA_DIVISION_COUNTRIES, LEAGUE_CODES, odds_wide_to_long
 from pitch_edge.data.quality import find_duplicate_fixtures
 from pitch_edge.data.sources.club_elo import ClubEloSource
-from pitch_edge.data.sources.football_data_co_uk import (
-    EXTRA_DIVISION_COUNTRIES,
-    EXTRA_LEAGUE_FILES,
-    LEAGUE_CODES,
-    FootballDataCoUkSource,
-    odds_wide_to_long,
-    season_label,
-)
 from pitch_edge.data.sources.openfootball import OpenFootballSource
 from pitch_edge.data.sources.statsbomb import StatsBombOpenDataSource
-from pitch_edge.data.storage import Warehouse
+from pitch_edge.data.storage import Warehouse, _clean_frame
 from pitch_edge.data.teams import TeamNameResolver
 
 logger = logging.getLogger(__name__)
@@ -124,6 +116,16 @@ def _pending_seasons(seasons: list[int], stored_labels: set[str], label_fn: Call
     return [y for y in seasons if y == latest or label_fn(y) not in stored_labels]
 
 
+def prepare_match_tables(wh: Warehouse, df: pd.DataFrame) -> None:
+    """Create `matches` and `odds`, or add the columns `df` would add, so a later `store_matches(wh, df)` alters
+    no table. Callers that store inside a transaction that also deletes from these tables call this first:
+    DuckDB cannot commit a transaction that both modifies and alters one table."""
+    core = df[[c for c in MATCH_CORE_COLUMNS if c in df.columns]]
+    for table, frame in (("matches", core), ("odds", odds_wide_to_long(df))):
+        if not frame.empty:
+            wh._ensure_table(table, _clean_frame(frame))  # noqa: SLF001
+
+
 def store_matches(wh: Warehouse, df: pd.DataFrame) -> int:
     """Persist matches + long odds. football-data.co.uk rows are the preferred spine: if the same
     fixture (home, away, date) already exists from another source (e.g. openfootball), the old row and
@@ -190,42 +192,21 @@ def purge_duplicate_fixtures(wh: Warehouse) -> int:
 
 
 # ---------------------------------------------------------------------- sources
-def ingest_football_data(
-    wh: Warehouse, leagues: list[str] | None = None, seasons: list[int] | None = None, extra_leagues: bool = True
-) -> dict[str, int]:
-    src = FootballDataCoUkSource()
-    leagues = leagues or list(LEAGUE_CODES)
-    seasons = seasons or list(range(2005, latest_season_start() + 1))
-    counts: dict[str, int] = {}
-    for league in leagues:
-        counts[league] = _run(wh, f"football_data_co_uk:{league}", partial(_ingest_fd_league, wh, src, league, seasons))
-    if extra_leagues:
-        for stem in EXTRA_LEAGUE_FILES:
-            counts[stem] = _run(wh, f"football_data_co_uk:new/{stem}", partial(_ingest_fd_extra_league, wh, src, stem))
-    return counts
+def build_football_data_spine(wh: Warehouse, force: bool = False) -> int:
+    """Rebuild the football-data `matches` and `odds` rows from the `lake_fd_matches` mirror (health-logged).
 
+    Takes the warehouse and `force` (rebuild every window, not only those whose mirror rows changed). Returns
+    the matches written; 0 when the mirror has never been synced (run `pitch-edge lake-sync --only fd_matches`).
+    Reads the mirror only: it neither calls the lake nor fetches anything, so it is as fresh as the last sync."""
+    from pitch_edge.lake.spine import MIRROR_TABLE, build_fd_spine
 
-def _ingest_fd_extra_league(wh: Warehouse, src: FootballDataCoUkSource, stem: str) -> int:
-    return store_matches(wh, src.fetch_extra_league(stem))
+    def go() -> int:
+        if not wh.table_exists(MIRROR_TABLE):
+            logger.warning("%s is missing; run `pitch-edge lake-sync --only fd_matches` first", MIRROR_TABLE)
+            return 0
+        return build_fd_spine(wh, force=force)["matches"]
 
-
-def _ingest_fd_league(wh: Warehouse, src: FootballDataCoUkSource, league: str, seasons: list[int]) -> int:
-    """Only re-fetch a season's file if it isn't already stored (from this same source) or is the
-    most recent season, which is still being played and keeps gaining matches."""
-    stored = (
-        set(
-            wh.query("SELECT DISTINCT season FROM matches WHERE league_code = ? AND source = ?", [league, src.name])[
-                "season"
-            ]
-        )
-        if wh.table_exists("matches")
-        else set()
-    )
-    pending = _pending_seasons(seasons, stored, season_label)
-    _log_progress(f"football_data_co_uk:{league}", len(pending), len(seasons), len(seasons) - len(pending))
-    if not pending:
-        return 0
-    return store_matches(wh, src.fetch_matches(league=league, seasons=pending))
+    return _run(wh, "football_data_spine", go)
 
 
 def ingest_club_elo(wh: Warehouse, dates: list[str] | None = None) -> int:
@@ -704,20 +685,19 @@ def ingest_api_football_context(wh: Warehouse, leagues: list[str] | None = None,
 # ------------------------------------------------------------------------ all
 def ingest_everything(
     wh: Warehouse,
-    leagues: list[str] | None = None,
-    seasons: list[int] | None = None,
     include_statsbomb: bool = True,
     include_weather: bool = True,
     statsbomb_max_matches: int | None = None,
     include_players: bool = True,
 ) -> dict[str, int]:
     report: dict[str, int] = {}
-    # Matches come from football-data.co.uk (the spine) and openfootball's Swedish schedules. Stored rows
-    # of any other source that repeat a football-data fixture are purged first.
+    # Matches come from football-data (the spine, built from the `lake_fd_matches` mirror that `lake-sync`
+    # keeps current) and openfootball's Swedish schedules. Stored rows of any other source that repeat a
+    # football-data fixture are purged first.
     purged = purge_duplicate_fixtures(wh)
     if purged:
         report["purged_matches"] = purged
-    report.update(ingest_football_data(wh, leagues, seasons))
+    report["football_data_spine"] = build_football_data_spine(wh)
     # `ingest_sweden` is a real primary source for Swedish leagues; its rows yield to football-data's.
     if include_statsbomb:
         report["statsbomb"] = ingest_statsbomb(wh, max_matches_per_competition=statsbomb_max_matches)
@@ -728,7 +708,7 @@ def ingest_everything(
     # Market-probability data is Polymarket-only now, via the PMXT archive (see
     # `pmxt_archive.py`): the old live-snapshot connectors (`polymarket.py`, `kalshi.py`,
     # `odds_api.py`, all deleted) and football-data.co.uk's own bookmaker-odds columns (no longer
-    # parsed at all — see `store_matches`) were removed as redundant with it / replaced by it.
+    # parsed at all) were removed as redundant with it / replaced by it.
     # Discovery is cheap and safe to run on every ingest; the actual hour-by-hour tick backfill is
     # deliberately NOT run here (a 1-2 year backfill is thousands of ~100MB files) — see
     # `ingest_pmxt_orderbook_range` / the `pitch-edge ingest-pmxt START END` CLI command for that.

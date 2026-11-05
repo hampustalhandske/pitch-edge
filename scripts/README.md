@@ -51,6 +51,50 @@ Without launchd (e.g. for a one-off session): `nohup caffeinate -i scripts/paper
 stopped with `kill $(cat data/paper/paper_loop.pid)`. The interval can be overridden with
 `PAPER_LOOP_INTERVAL_S` (default 3600).
 
+## Football-data mirror and spine (twice daily)
+
+`scripts/lake_sync_fd.sh` runs `pitch-edge lake-sync --only fd_matches --skip-if-busy`: it mirrors the lake's
+`fd_matches` into `lake_fd_matches` (pulled in yearly windows, each committed with its checkpoint) and then rebuilds
+the warehouse spine's football-data `matches` and `odds` rows from the mirror. The spine rebuild is incremental: a
+calendar-year window is redone only when its mirror rows changed (fingerprint kept in `lake_sync_state`).
+`pitch-edge ingest` / `refresh` rebuild the spine from the mirror too (no network), so they are only as fresh as the
+last sync.
+
+- **Schedule:** launchd agent `local.pitch-edge.lake-sync-fd` (template
+  `scripts/launchd/local.pitch-edge.lake-sync-fd.plist.example`) starts the script at 14:00 and 20:00 local time,
+  under `caffeinate -i`. The lake fetches football-data at about 11:00 UTC; 14:00 is 12:00 UTC in Stockholm summer time,
+  so adjust both hours for another zone (keep the first at or after 12:00 UTC). A start missed while the Mac slept runs
+  once on wake.
+- **Warehouse busy:** DuckDB is single-writer. If `data/pitch_edge.duckdb` is open in another process, the run prints
+  `skipped: warehouse busy`, pulls nothing and exits 0; the later start retries. A run killed half-way resumes at its
+  first uncommitted window next time.
+- **Log:** `data/logs/lake_sync_fd.log` (one `start` and one `exit <code>` line per run, plus the sync output);
+  launchd's own stdout/stderr go to `data/logs/lake_sync_fd.launchd.log`.
+- **Lag:** `pitch-edge health` prints the mirror's last sync, the spine's last build and, per backtest league, the
+  newest completed match in the mirror, in the spine and in the lake. It warns when the lake is more than 3 days ahead
+  of the mirror, when the mirror was last synced more than 48 h ago, or when the spine is behind the mirror.
+
+```bash
+# install / start (the owner does this; nothing here loads it)
+sed -e "s|__REPO_DIR__|$PWD|g" -e "s|__HOME__|$HOME|g" \
+  scripts/launchd/local.pitch-edge.lake-sync-fd.plist.example > ~/Library/LaunchAgents/local.pitch-edge.lake-sync-fd.plist
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/local.pitch-edge.lake-sync-fd.plist
+
+# check
+launchctl print gui/$(id -u)/local.pitch-edge.lake-sync-fd | grep -E 'state|runs|last exit'
+tail data/logs/lake_sync_fd.log
+arch -arm64 uv run pitch-edge health              # football-data lag table and warnings
+
+# run now (same as a scheduled start)
+launchctl kickstart gui/$(id -u)/local.pitch-edge.lake-sync-fd
+
+# stop (stays stopped until the next bootstrap)
+launchctl bootout gui/$(id -u)/local.pitch-edge.lake-sync-fd
+```
+
+Without launchd: `scripts/lake_sync_fd.sh`. The first run on a warehouse with no mirror pulls the whole table
+(about 230k rows, 23 yearly windows) and builds every spine window.
+
 ## Warehouse summary
 
 `uv run python scripts/data_summary.py [--json out.json]` lists every table in the warehouse (row count, column
@@ -64,5 +108,6 @@ sleep doesn't stall them, and never run two warehouse-writing stages at once (Du
 
 - `uv run pitch-edge refresh [--fast]` — ingest → features → backtest → RAG index in one shot.
 - `uv run pitch-edge schedule` — the APScheduler loop: hourly news/markets job, nightly full refresh at 03:30.
-- `uv run pitch-edge lake-sync [--only …] [--full-refresh]` — mirror lakehouse tables into `lake_*` tables;
-  checkpointed per window, so re-running the same command resumes an unfinished sync.
+- `uv run pitch-edge lake-sync [--only …] [--full-refresh] [--no-spine] [--skip-if-busy]` — mirror lakehouse tables
+  into `lake_*` tables; checkpointed per window, so re-running the same command resumes an unfinished sync. Syncing
+  `fd_matches` also rebuilds the football-data spine (`--no-spine` skips that).

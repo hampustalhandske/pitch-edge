@@ -51,7 +51,7 @@ with `GROQ_CLOUD_API_KEY` set. The research and paper commands need access to th
 setup` walks through the optional keys; see `API_KEYS.md`.
 
 ```bash
-uv run pitch-edge lake-sync [--only fd_matches] [--full-refresh]   # mirror lakehouse tables (resumable)
+uv run pitch-edge lake-sync [--only fd_matches] [--full-refresh]   # mirror lakehouse tables (resumable); rebuilds the football-data spine
 uv run pitch-edge research status                                  # every hypothesis, its trials and rung
 uv run pitch-edge research grade <hypothesis-id>                   # the ladder, gate by gate
 uv run pitch-edge paper status | report                            # forward paper ledger
@@ -68,7 +68,7 @@ flowchart LR
     LK[football-data odds · Polymarket · Kalshi<br/>Understat · Club Elo · Transfermarkt · Bluesky · Reddit]
   end
   subgraph Free["Free sources"]
-    SRC[football-data.co.uk · openfootball<br/>StatsBomb · ESPN · weather · travel · news · Wikipedia]
+    SRC[openfootball<br/>StatsBomb · ESPN · weather · travel · news · Wikipedia]
   end
   LK --> MIR[lake-sync<br/>lake_* mirrors]
   LK --> ST[research studies<br/>research/studies/*]
@@ -103,7 +103,9 @@ flowchart LR
   study under `research/studies/`; audits under `research/audits/`.
 - **Lake bridge.** `src/pitch_edge/lake/` reads the lakehouse API and mirrors ten tables into `lake_*` warehouse
   tables, each with a known-at column for point-in-time filtering; syncs are checkpointed per window and resume
-  where they stopped.
+  where they stopped. The warehouse spine's football-data matches and odds (`lake/spine.py`) are built from the
+  `lake_fd_matches` mirror, not fetched from football-data.co.uk; `scripts/lake_sync_fd.sh` (launchd template in
+  `scripts/launchd/`) keeps that mirror current and `pitch-edge health` reports how far it lags the lake.
 - **edgelab bridge.** `src/pitch_edge/edgelab/` exports a binary-market dataset and scaffolds a strategy in the
   layout the owner's private edgelab grading engine reads (not included).
 - **Paper loop.** `src/pitch_edge/paper/` + `scripts/paper_loop.sh` (launchd; see `scripts/README.md`): hourly

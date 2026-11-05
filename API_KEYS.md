@@ -93,7 +93,7 @@ every market-data call is a public, read-only GET.
 
 | Source | How it is read |
 |---|---|
-| football-data.co.uk (results, multi-book open/close odds) | for research, through the lake's `fd_matches` (`lake_fd_matches` mirror); the warehouse connector reads the local `data/archive/` mirror first and only then the network |
+| football-data.co.uk (results, multi-book open/close odds) | through the lake's `fd_matches`, for research directly and for the warehouse spine through the `lake_fd_matches` mirror (`lake-sync`); nothing is fetched from football-data.co.uk. Needs `LAKEHOUSE_API_TOKEN` |
 | Club Elo, Understat, Transfermarkt, Polymarket, Kalshi, Bluesky, Reddit | through the lake for research; the warehouse also ingests Club Elo and a Transfermarkt open extract directly |
 | TheSportsDB | public free key `3`, which caps season results and rate-limits player search |
 | Wikimedia pageviews API | `pitch-edge ingest` pulls daily club-article views; honest UA, throttled, year-chunks cached |

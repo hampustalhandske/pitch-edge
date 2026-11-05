@@ -1,7 +1,12 @@
 from __future__ import annotations
 
+import json
+from datetime import UTC, datetime
+from datetime import date as Day
+
 import numpy as np
 import pandas as pd
+import pyarrow as pa
 import pytest
 from scipy.stats import poisson
 
@@ -138,29 +143,94 @@ def warehouse(tmp_path) -> Warehouse:
     wh.close()
 
 
-@pytest.fixture
-def football_data_csv_bytes() -> bytes:
-    header = (
-        "Div,Date,Time,HomeTeam,AwayTeam,FTHG,FTAG,FTR,HTHG,HTAG,HTR,Referee,HS,AS,HST,AST,HF,AF,HC,AC,HY,AY,HR,AR,"
-        "B365H,B365D,B365A,PSH,PSD,PSA,B365>2.5,B365<2.5,PSCH,PSCD,PSCA\n"
-    )
-    rows = [
-        "E0,12/08/2023,20:00,Arsenal,Man United,2,1,H,1,0,H,M Oliver,15,9,6,3,10,12,7,3,1,2,0,0,1.80,3.60,4.50,1.85,3.70,4.40,1.70,2.20,1.82,3.75,4.55",
-        "E0,13/08/2023,14:00,Chelsea,Liverpool,1,1,D,0,1,A,A Taylor,12,14,4,5,9,11,5,6,2,1,0,0,2.90,3.30,2.50,2.95,3.35,2.45,1.75,2.10,2.90,3.40,2.50",
-        "E0,19/08/2023,15:00,Man United,Chelsea,0,2,A,0,1,A,P Tierney,10,13,3,6,13,8,4,5,3,1,0,0,2.20,3.40,3.30,2.25,3.45,3.20,1.80,2.05,2.30,3.40,3.15",
-        "E0,20/08/2023,16:30,Liverpool,Arsenal,3,1,H,2,0,H,M Oliver,18,8,8,3,8,14,9,2,0,2,0,1,1.95,3.60,3.90,1.90,3.65,4.00,1.60,2.40,1.88,3.70,4.10",
-    ]
-    return (header + "\n".join(rows) + "\n").encode("utf-8")
+_E0_STATS = ("ht_home_goals", "ht_away_goals", "home_shots", "away_shots", "home_shots_on_target",
+             "away_shots_on_target", "home_fouls", "away_fouls", "home_corners", "away_corners",
+             "home_yellow", "away_yellow", "home_red", "away_red")  # fmt: skip
+# date, kickoff, home, away, FT goals, referee, stats (in _E0_STATS order), odds_all columns
+_E0_FIXTURES = [
+    (Day(2023, 8, 12), "20:00", "Arsenal", "Man United", (2, 1), "M Oliver", (1, 0, 15, 9, 6, 3, 10, 12, 7, 3, 1, 2, 0, 0),
+     {"B365H": 1.80, "B365D": 3.60, "B365A": 4.50, "PSH": 1.85, "PSD": 3.70, "PSA": 4.40, "B365>2.5": 1.70,
+      "B365<2.5": 2.20, "PSCH": 1.82, "PSCD": 3.75, "PSCA": 4.55}),
+    (Day(2023, 8, 13), "14:00", "Chelsea", "Liverpool", (1, 1), "A Taylor", (0, 1, 12, 14, 4, 5, 9, 11, 5, 6, 2, 1, 0, 0),
+     {"B365H": 2.90, "B365D": 3.30, "B365A": 2.50, "PSH": 2.95, "PSD": 3.35, "PSA": 2.45, "B365>2.5": 1.75,
+      "B365<2.5": 2.10, "PSCH": 2.90, "PSCD": 3.40, "PSCA": 2.50}),
+    (Day(2023, 8, 19), "15:00", "Man United", "Chelsea", (0, 2), "P Tierney", (0, 1, 10, 13, 3, 6, 13, 8, 4, 5, 3, 1, 0, 0),
+     {"B365H": 2.20, "B365D": 3.40, "B365A": 3.30, "PSH": 2.25, "PSD": 3.45, "PSA": 3.20, "B365>2.5": 1.80,
+      "B365<2.5": 2.05, "PSCH": 2.30, "PSCD": 3.40, "PSCA": 3.15}),
+    (Day(2023, 8, 20), "16:30", "Liverpool", "Arsenal", (3, 1), "M Oliver", (2, 0, 18, 8, 8, 3, 8, 14, 9, 2, 0, 2, 0, 1),
+     {"B365H": 1.95, "B365D": 3.60, "B365A": 3.90, "PSH": 1.90, "PSD": 3.65, "PSA": 4.00, "B365>2.5": 1.60,
+      "B365<2.5": 2.40, "PSCH": 1.88, "PSCD": 3.70, "PSCA": 4.10}),
+]  # fmt: skip
+_SWE_FIXTURES = [
+    (Day(2023, 4, 1), "Malmo FF", "AIK", (2, 0),
+     {"PSCH": 1.8, "PSCD": 3.6, "PSCA": 4.6, "MaxCH": 1.9, "MaxCD": 3.8, "MaxCA": 4.9, "AvgCH": 1.78, "AvgCD": 3.5,
+      "AvgCA": 4.4, "BFECH": 1.88, "BFECD": 3.7, "BFECA": 4.7}),
+    (Day(2023, 4, 2), "Hammarby", "Djurgarden", (1, 1),
+     {"PSCH": 2.4, "PSCD": 3.3, "PSCA": 3.0, "MaxCH": 2.5, "MaxCD": 3.4, "MaxCA": 3.1, "AvgCH": 2.35, "AvgCD": 3.25,
+      "AvgCA": 2.95, "BFECH": 2.45, "BFECD": 3.35, "BFECA": 3.05}),
+]  # fmt: skip
 
 
 @pytest.fixture
-def extra_league_csv_bytes() -> bytes:
-    header = "Country,League,Season,Date,Time,Home,Away,HG,AG,Res,PSCH,PSCD,PSCA,MaxCH,MaxCD,MaxCA,AvgCH,AvgCD,AvgCA,BFECH,BFECD,BFECA\n"
-    rows = [
-        "Sweden,Allsvenskan,2023,01/04/2023,15:00,Malmo FF,AIK,2,0,H,1.8,3.6,4.6,1.9,3.8,4.9,1.78,3.5,4.4,1.88,3.7,4.7",
-        "Sweden,Allsvenskan,2023,02/04/2023,15:00,Hammarby,Djurgarden,1,1,D,2.4,3.3,3.0,2.5,3.4,3.1,2.35,3.25,2.95,2.45,3.35,3.05",
-    ]
-    return ("﻿" + header + "\n".join(rows) + "\n").encode("utf-8")
+def lake_fd_rows() -> list[dict]:
+    """Lake `fd_matches` rows (the lake's column names) for four 2023/24 Premier League matches and two
+    Allsvenskan matches: the football-data CSV fixtures of the old ingestion, as the lake serves them."""
+    blank = {"ht_result": None, "ft_result": None, "source_file": "fixture", "scraped_at": None, "attendance": None}
+    rows: list[dict] = []
+    for day, ko, home, away, (hg, ag), ref, stats, odds in _E0_FIXTURES:
+        rows.append(
+            {"division": "E0", "country": "England", "league": "Premier League", "season": "2023-2024",
+             "match_date": day, "kickoff_time": ko, "home_team": home, "away_team": away,
+             "ft_home_goals": hg, "ft_away_goals": ag, "referee": ref, **dict(zip(_E0_STATS, stats, strict=True)),
+             "odds_all": json.dumps(odds), **blank}
+        )  # fmt: skip
+    for day, home, away, (hg, ag), odds in _SWE_FIXTURES:
+        rows.append(
+            {"division": "SWE", "country": "Sweden", "league": "Allsvenskan", "season": "2023",
+             "match_date": day, "kickoff_time": "15:00", "home_team": home, "away_team": away,
+             "ft_home_goals": hg, "ft_away_goals": ag, "referee": None, **dict.fromkeys(_E0_STATS),
+             "odds_all": json.dumps(odds), **blank}
+        )  # fmt: skip
+    for r in rows:  # the mirror query's derived known-at column: match date 00:00 UTC
+        d = r["match_date"]
+        r["open_known_by"] = datetime(d.year, d.month, d.day, tzinfo=UTC)
+    return rows
+
+
+class FakeFdLake:
+    """Stands in for `Lake`: answers the `fd_matches` mirror query with canned rows inside the requested
+    `[start, end)` window, and the freshness aggregate with the per-division newest completed date."""
+
+    def __init__(self, rows: list[dict]):
+        self.rows = rows
+        self.calls: list[tuple[str, list]] = []
+        self.version = "fake"
+
+    def __enter__(self) -> FakeFdLake:
+        return self
+
+    def __exit__(self, *exc) -> None:
+        return None
+
+    def sql_batches(self, query, params=None):
+        self.calls.append((query, params or []))
+        lo, hi = Day.fromisoformat(params[0]), Day.fromisoformat(params[1])
+        keep = [r for r in self.rows if lo <= r["match_date"] < hi]
+        if keep:
+            yield pa.RecordBatch.from_pylist(keep)
+
+    def sql(self, query, params=None):
+        self.calls.append((query, params or []))
+        newest: dict[str, Day] = {}
+        for r in self.rows:
+            if r["division"] in (params or []) and r["ft_home_goals"] is not None:
+                newest[r["division"]] = max(newest.get(r["division"], r["match_date"]), r["match_date"])
+        return pd.DataFrame({"division": list(newest), "d": [pd.Timestamp(v) for v in newest.values()]})
+
+
+@pytest.fixture
+def fd_lake(lake_fd_rows) -> FakeFdLake:
+    return FakeFdLake(lake_fd_rows)
 
 
 @pytest.fixture

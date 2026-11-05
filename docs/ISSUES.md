@@ -471,3 +471,22 @@ projects; M8 traceability; S2 lake capacity; S4 decimal-odds instrument with CLV
   lake rows, with the same columns and point-in-time stamps.
 - Blocked by: none. Blocks: none.
 - Commits: none yet.
+- Progress (2026-11-05, design (b)): the spine's football-data `matches` and `odds` are built from the
+  `lake_fd_matches` mirror by `src/pitch_edge/lake/spine.py` (same columns, `match_id` scheme, `source` label and
+  `snapshot_ts` stamps; incremental by calendar-year window, checkpoint + fingerprint in `lake_sync_state`, one
+  transaction per window). `ingest_football_data`, the connector, `PITCH_EDGE_FD_ARCHIVE_DIR` and their tests are
+  deleted; the vocabulary `store_matches` needs lives in `data/fd_vocab.py`. `ingest`/`refresh` call
+  `build_football_data_spine`; `lake-sync` rebuilds the spine after `fd_matches`. `scripts/lake_sync_fd.sh` and
+  `scripts/launchd/local.pitch-edge.lake-sync-fd.plist.example` (14:00 and 20:00 local, `--skip-if-busy`) are written,
+  not installed. `pitch-edge health` shows mirror last sync, spine last build and per-league lag (warns above 3 days
+  behind the lake, 48 h since the sync, or any spine-behind-mirror gap). Dry-run against the stale mirror in the
+  warehouse (read-only, nothing written): 227,435 spine rows, 6,951,795 odds rows, identical to the stored
+  football-data rows on every shared id (main-division odds exact) except: (1) the 16 extra-league files' Pinnacle,
+  Max and Avg prices are now closing (`is_closing` True, 450,890 rows; the CSV parse had stored them as opens); (2)
+  `ROU` league label `Romania - Superliga` (was `Liga 1`), 513 `ARG` rows capitalised differently; (3) 242 `MEX` rows use
+  the lake's `UNAM Pumas` spelling, and 688 `MEX`/`BRA` ids change with the lake's club renames (`Tigres UANL`,
+  `Athletico-PR`; no features, weather or backtest rows keyed on them); (4) two `P1` fixtures the lake re-dated by one
+  day change id (18 `backtest_bets`, 6 `model_predictions` rows keyed on the old ids); (5) 8 lake-corrected stat cells and
+  trailing whitespace trimmed from 86 referee/kickoff strings; (6) +15,851 rows the stored spine lacks (extra leagues
+  since 2024-02, and lower-division matches from 2024-02 to 2024-06, e.g. SP2 172, F2 153, E3 152, E2 148). Still open: the first real `lake-sync` plus
+  spine build (needs a warehouse slot), the owner's launchd bootstrap, then close.

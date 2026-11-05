@@ -49,7 +49,6 @@ class Settings:
         default_factory=lambda: _env("PITCH_EDGE_EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
     )
     http_min_interval_s: float = field(default_factory=lambda: float(_env("PITCH_EDGE_HTTP_MIN_INTERVAL", "1.0")))
-    fd_archive_dir: str | None = field(default_factory=lambda: os.environ.get("PITCH_EDGE_FD_ARCHIVE_DIR"))
     local_llm_model: str = field(default_factory=lambda: _env("PITCH_EDGE_LOCAL_LLM_MODEL", "llama3.1:8b"))
     local_llm_base_url: str = field(
         default_factory=lambda: _env("PITCH_EDGE_LOCAL_LLM_BASE_URL", "http://localhost:11434")

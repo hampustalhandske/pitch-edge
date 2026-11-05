@@ -118,7 +118,7 @@ def load_espn_soccer_data(
     return counts
 
 
-# league_code (matches LEAGUE_CODES in football_data_co_uk.py) -> the exact ESPN leagueName.
+# league_code (matches LEAGUE_CODES in data/fd_vocab.py) -> the exact ESPN leagueName.
 # Only the leagues football-data.co.uk already covers are mapped; ESPN's other ~200 competitions
 # stay unmapped (NULL league_code in espn_fixtures_mapped) until there's a reason to widen this.
 ESPN_LEAGUE_NAME_TO_CODE: dict[str, str] = {
