@@ -543,3 +543,15 @@ projects; M8 traceability; S2 lake capacity; S4 decimal-odds instrument with CLV
   id, or `pitch-edge health` reports orphaned match-keyed rows by table, so a stored result can always be traced.
 - Blocked by: none. Blocks: none.
 - Commits: none yet.
+
+## PE-32 CI never runs the R6 live-model paper strategy tests
+- Status: open
+- Priority: nice (test coverage)
+- Raised by: pitch-edge (local CI run on `c482c75`, 2026-11-05)
+- Evidence: all 10 tests in `tests/unit/test_paper_v2.py` carry `needs_coef`, which skips them unless
+  `data/research/r6/v2_live_coefficients.json` exists. `data/` is git-ignored, so on a clean checkout (CI) the
+  `soft-vs-sharp-live-v2` golden test, the coefficient-hash guard and the decision-time tests are all skipped.
+- Fix: split the tests. Keep the hash check against the real file behind `needs_coef`. Run the model,
+  hash-guard and decision-time logic against a small synthetic coefficients file written in `tmp_path`, so they
+  run everywhere.
+- Blocked by: none. Blocks: none.
