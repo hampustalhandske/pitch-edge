@@ -412,7 +412,7 @@ projects; M8 traceability; S2 lake capacity; S4 decimal-odds instrument with CLV
 - Commits: none yet.
 
 ## PE-27 Propose new hypotheses tradable on current data
-- Status: in-progress (registered; scoring next)
+- Status: done (2026-11-06)
 - Priority: should (owner goal: more strategies tested on data we have)
 - Raised by: coordinator, round 2
 - Evidence: Betfair historical data is not obtainable from Sweden and no paid datasets are bought, so new tests
@@ -436,7 +436,9 @@ projects; M8 traceability; S2 lake capacity; S4 decimal-odds instrument with CLV
   writing the code. Study code in `research/studies/soft-open-vs-betfair-exchange-lag/` (pull, outcome-blind
   count, selection, one score). The evaluation window has 2,388 fixtures with both books, so `min_n` 300 needs
   about one bet per eight fixtures.
-- Blocked by: H4's score waits for a stable lake build (LK-61). Blocks: none.
+- H4 scored (2026-11-06, trial `9caa2889`, lake `dd9d55801115.96244a759c69`): L1 counted null, +0.25% net of 2%
+  commission [-0.46, +0.97] n 361, p 0.24 (REPORT in the study folder). All four family hypotheses are counted.
+- Blocked by: none. Blocks: none.
 - Commits: see git log for `PE-27`.
 
 ## PE-28 The warehouse spine has no 2026/27 football-data matches
