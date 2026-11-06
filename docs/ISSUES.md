@@ -204,7 +204,8 @@ projects; M8 traceability; S2 lake capacity; S4 decimal-odds instrument with CLV
   copy of the paper ledger: 12 UCL decisions of 2026-10-21 (all provisional) match 12/12 fixtures, 11 get a valid
   close (Real Madrid v RB Leipzig is stale, 22 min); the 29 of 3-4 November are listed by OddsPapi without
   Pinnacle rows (recorder stalled, LK-61) and wait. Not yet run: `paper settle` on the live ledger.
-- Blocked by: LK-61 (recorder stalled since 2026-10-28) for decisions after 2026-11-01. Blocks: none.
+- Blocked by: the paper loop reload (owner, after edgelab's grading spec, E2) and the lake confirming OddsPapi
+  recording runs again (LK-61 is done, so recording is back in the hourly cycle). Blocks: none.
 - Commits: none yet.
 
 ## PE-14 Paper strategies that cannot produce evidence
@@ -506,7 +507,7 @@ projects; M8 traceability; S2 lake capacity; S4 decimal-odds instrument with CLV
   spine build (needs a warehouse slot), the owner's launchd bootstrap, then close.
 
 ## PE-30 The football-data CSV ingest stored extra-league closes as opens
-- Status: done
+- Status: open (spine fixed; derived `features` and RAG rows for `fdx_` matches wait on one `refresh`)
 - Priority: should (point-in-time: no hindsight price may pass as a pre-match one)
 - Raised by: pitch-edge (PE-29 dry run)
 - Evidence: for football-data's 16 extra-league files (`fdx_` match ids: MLS, Brazil, Argentina, Mexico, Japan,
@@ -523,7 +524,7 @@ projects; M8 traceability; S2 lake capacity; S4 decimal-odds instrument with CLV
 - Result: the spine built from the lake (654f2ee, first build 2026-11-05) stores them as closes. Left as a
   follow-up, not a blocker: `features` rows and the RAG index for `fdx_` matches still hold values derived from
   the old rows until the next `refresh` (a warehouse slot).
-- Blocked by: none. Blocks: none.
+- Blocked by: a heavy slot for `pitch-edge refresh` (1-3 h, not measured; it also runs PE-12's duplicate purge). Blocks: none.
 - Commits: 654f2ee (Refs PE-29).
 
 ## PE-31 Match-keyed rows outlive the matches the spine replaces
