@@ -239,7 +239,9 @@ def test_polymarket_ucl_decision_keeps_its_bar_close_and_records_the_pinnacle_sh
     lake = CountingLake(_frame())
     settle(store, LakeCloseSource(lake), now=KO + timedelta(days=5))
     assert store.settlements().empty or store.settlements().iloc[0]["closing_source"] != PINNACLE_CLOSE_SOURCE
-    assert store.decision_flags().empty
+    # The OddsPapi rule never flags a Polymarket decision; without a token it is flagged for its own Polymarket close.
+    reasons = list(store.decision_flags()["reason"])
+    assert reasons == ["no Polymarket token recorded for home"]  # the seeded quote carries no token id
 
 
 def test_a_listed_fixture_without_pinnacle_rows_is_retried():

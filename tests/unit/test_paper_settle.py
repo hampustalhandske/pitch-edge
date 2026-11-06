@@ -201,6 +201,38 @@ def test_a_flagged_polymarket_decision_gets_no_fallback_after_the_horizon(store)
     assert store.settlements().empty and store.provisional_settlements().empty
 
 
+def test_a_polymarket_decision_with_no_bar_is_no_benchmark_after_grace_with_no_fallback(store):
+    d = _seed(store, venue="polymarket", selection="home", price=2.2)
+    src = FakeSource(FdClose((2.0, 3.6, 4.4), "home"), FRESH)  # the home token has no bar
+    assert settle(store, src, now=KO + timedelta(days=1)) == {"settled": 0, "waiting": 1}
+    assert store.decision_flags().empty
+    settle(store, src, now=KO + timedelta(days=5))
+    assert store.settlements().empty and store.provisional_settlements().empty
+    flags = store.decision_flags()
+    assert list(flags["decision_id"]) == [d.decision_id] and list(flags["flag"]) == ["no_benchmark"]
+    assert flags.iloc[0]["reason"] == "no Polymarket home bar in the 14 days before kickoff"
+
+
+def test_a_failed_bar_lookup_after_grace_is_not_a_verdict(store):
+    _seed(store, venue="polymarket", selection="home", price=2.2)
+
+    class DownBars(FakeSource):
+        def pm_last_bars(self, asset_ids, before):
+            raise RuntimeError("lake down")
+
+    settle(store, DownBars(FdClose((2.0, 3.6, 4.4), "home")), now=KO + timedelta(days=5))
+    assert store.settlements().empty and store.provisional_settlements().empty and store.decision_flags().empty
+
+
+def test_an_unflagged_polymarket_decision_is_no_benchmark_at_the_horizon(store):
+    d = _seed(store, venue="polymarket", selection="home", price=2.2)
+    settle(store, FakeSource(None), now=KO + timedelta(days=31))
+    assert store.provisional_settlements().empty
+    flags = store.decision_flags()
+    assert list(flags["decision_id"]) == [d.decision_id]
+    assert flags.iloc[0]["reason"] == "no valid Polymarket close within the final horizon"
+
+
 def test_a_stale_bar_on_another_token_drops_only_the_normalisation(store):
     _seed(store, venue="polymarket", selection="home", price=2.2)
     bars = {"tok-home": 0.47, "tok-draw": PmBar(0.27, KO - timedelta(hours=5)), "tok-away": 0.28}

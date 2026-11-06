@@ -11,8 +11,9 @@ Segments per strategy:
 Within a segment the CLV metric (mean CLV, 95% block-bootstrap CI by match-day via
 `research/stats.py::block_bootstrap`, ROI) uses only *final* settlements, which are lake-sourced closes.
 Provisional settlements (our own snapshot or no close) are counted and averaged separately and never enter
-the metric. Void decisions and decisions flagged `no_benchmark` by settlement (an OddsPapi-benchmarked
-decision with no valid Pinnacle close, or a Polymarket decision whose token's newest bar was stale at kickoff) are
+the metric; `n_provisional_own_snapshot` counts the ones priced from our own snapshot. Void decisions and decisions
+flagged `no_benchmark` by settlement (an OddsPapi-benchmarked decision with no valid Pinnacle close, or a Polymarket
+decision with no bar, or only a stale one, at kickoff) are
 counted as `n_void` / `n_no_benchmark` and excluded from every metric.
 
 Every row carries a `benchmark`: `betfair_close` (the Betfair Exchange close from football-data, and the
@@ -51,6 +52,7 @@ COLUMNS = [
     "n_no_benchmark",
     "n_final",
     "n_provisional",
+    "n_provisional_own_snapshot",
     "n_unsettled",
     "mean_clv",
     "clv_ci_lo",
@@ -160,6 +162,7 @@ def _segment_row(g: pd.DataFrame, n_boot: int, seed: int) -> dict[str, Any]:
         "n_no_benchmark": int((g["no_benchmark"] & ~g["void"]).sum()),
         "n_final": len(benchmarked[benchmarked["final"]]),
         "n_provisional": len(prov),
+        "n_provisional_own_snapshot": int(prov["prov_source"].str.startswith("own_snapshot:", na=False).sum()),
         "n_unsettled": int((~benchmarked["final"] & ~benchmarked["provisional"]).sum()),
         "mean_clv": float(final["clv_log"].mean()) if len(final) else np.nan,
         "clv_ci_lo": lo,
@@ -194,7 +197,9 @@ def summarise(
 
         ledger = Ledger()
     final = store.settlements()
-    prov = store.provisional_settlements().rename(columns={"clv_log": "prov_clv_log"})[["decision_id", "prov_clv_log"]]
+    prov = store.provisional_settlements().rename(columns={"clv_log": "prov_clv_log", "closing_source": "prov_source"})[
+        ["decision_id", "prov_clv_log", "prov_source"]
+    ]
     df = decisions.merge(final[["decision_id", "clv_log", "pnl", "closing_source"]], on="decision_id", how="left")
     df = df.merge(prov, on="decision_id", how="left")
     df["final"] = df["decision_id"].isin(set(final["decision_id"]))
@@ -252,7 +257,8 @@ def report_notes(rep: pd.DataFrame) -> list[str]:
     notes = [
         "mean_clv / CI / ROI use final settlements only (lake closes: Betfair Exchange close from fd_matches, or "
         "the last pre-kickoff Polymarket bar); provisional settlements (our own post-decision snapshot or no "
-        "close) are shown separately as provisional_mean_clv and never enter the metric.",
+        "close) are shown separately as provisional_mean_clv and never enter the metric. n_provisional counts "
+        "them; n_provisional_own_snapshot is the part priced from our own snapshot, which is not a market close.",
         "benchmark: `betfair_close` rows are measured against the de-vigged Betfair Exchange close from fd_matches "
         "(Polymarket-venue decisions against the last pre-kickoff bar); `pinnacle_close` rows (UCL, UEL, which "
         "football-data does not cover) against the de-vigged Pinnacle close from the lake's OddsPapi tables "
@@ -260,7 +266,8 @@ def report_notes(rep: pd.DataFrame) -> list[str]:
         "different benchmarks and never pooled. The registrations of bookmaker-line-structure-live-soft-vs-sharp-v1 "
         "and -v2 name the Betfair Exchange close, so the pinnacle_close rows are a stated deviation, not part of "
         "the registered primary result. n_no_benchmark counts decisions settlement flagged as having no valid "
-        "Pinnacle close, or (Polymarket) a newest bar more than 3 h old at kickoff (reason in decision_flags); "
+        "Pinnacle close, or (Polymarket) no bar or a newest bar more than 3 h old at kickoff (reason in "
+        "decision_flags); "
         "a fixture OddsPapi does not list yet is retried, not flagged.",
         "pm-vs-sharp-gap (hypothesis 'pending-r1') no longer runs; its recorded decisions used placeholder "
         "parameters, never R1's registered rule, so all of them are unregistered.",

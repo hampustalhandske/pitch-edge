@@ -9,11 +9,12 @@ Closing source, in order of preference:
    different benchmark from the Betfair close and is reported separately.
 2. Polymarket decisions: the last hourly bar known before kickoff (`hour_start + 1h <= kickoff_at`) for
    each of the fixture's three Yes tokens in the lake's `pm_soccer_bars_1h`, power-normalised when all
-   three are present. A bar that ended more than `PM_MAX_BAR_AGE` before kickoff is stale and is not a close:
-   when the decision's own token has only a stale bar, the decision gets a `no_benchmark` flag once `grace`
-   has passed and no fallback price is written for it (a fresh bar arriving before `final_horizon` still
-   settles it). The Betfair close is still recorded alongside as `sharp_fair_close_odds`.
-3. Fallback, only once `grace` has passed since kickoff without (1)/(2): our own last quote snapshot
+   three are present. A bar that ended more than `PM_MAX_BAR_AGE` before kickoff is stale and is not a close.
+   A Polymarket decision with no valid close (no token, no bar, only a stale bar, an implausible book) gets a
+   `no_benchmark` flag with the reason once `grace` has passed, and no fallback price is written for it: our
+   own snapshot is not the market close. It is still asked for until `final_horizon`, and a valid bar arriving
+   by then settles it. The Betfair close is still recorded alongside as `sharp_fair_close_odds`.
+3. Fallback for bookmaker / exchange decisions, only once `grace` has passed since kickoff without (1): our own last quote snapshot
    captured after the decision and before kickoff (Pinnacle, then Betfair UK/EU, then Smarkets, then the
    decision's venue), labelled `own_snapshot:<source>@<captured_at>`, or `none` when no such snapshot
    exists. Fallbacks are written to `provisional_settlements`, never as final settlements; a lake close
@@ -325,17 +326,19 @@ def _pm_bar_close(
 ) -> tuple[_Close | None, str | None]:
     """The Polymarket close of `selection` from the fixture's Yes-token bars, and the reason it was refused.
 
-    Bars that ended more than `PM_MAX_BAR_AGE` before kickoff are dropped. When the selection's own token has
-    only such a stale bar the close is refused with a reason; a missing token or bar gives (None, None), and a
-    stale bar on another token only drops the three-way normalisation."""
+    Exactly one of the two is None. Bars that ended more than `PM_MAX_BAR_AGE` before kickoff are dropped: a
+    stale bar on the selection's own token refuses the close, a stale bar on another token only drops the
+    three-way normalisation."""
     quotes = store.quotes_for_fixture(fixture, before=kickoff)
     pm = quotes[(quotes["source"] == "polymarket") & quotes["instrument_id"].notna()]
-    if pm.empty:
-        return None, None
+    if pm.empty or selection not in set(pm["selection"]):
+        return None, f"no Polymarket token recorded for {selection}"
     tokens = pm.sort_values("captured_at").groupby("selection")["instrument_id"].last().to_dict()
     bars = source.pm_last_bars(sorted(tokens.values()), kickoff)
-    own = bars.get(tokens[selection]) if selection in tokens else None
-    if own is not None and kickoff - own.ends_at > PM_MAX_BAR_AGE:
+    own = bars.get(tokens[selection])
+    if own is None:
+        return None, f"no Polymarket {selection} bar in the 14 days before kickoff"
+    if kickoff - own.ends_at > PM_MAX_BAR_AGE:
         age_h = (kickoff - own.ends_at).total_seconds() / 3600
         limit_h = PM_MAX_BAR_AGE.total_seconds() / 3600
         return (
@@ -348,11 +351,12 @@ def _pm_bar_close(
     }
     p = prices.get(selection)
     if p is None or not 0.0 < p < 1.0:
-        return None, None
+        return None, f"Polymarket {selection} bar close {p} is outside (0, 1)"
     if set(SELECTIONS) <= set(prices) and all(v is not None and 0.0 < v < 1.0 for v in prices.values()):
         if not plausible_book([float(prices[s]) for s in SELECTIONS]):  # type: ignore[arg-type]
-            logger.warning("pm bars for %s sum to %.3f; rejected as a close", fixture, sum(prices.values()))  # type: ignore[arg-type]
-            return None, None
+            total = sum(prices.values())  # type: ignore[arg-type]
+            logger.warning("pm bars for %s sum to %.3f; rejected as a close", fixture, total)
+            return None, f"Polymarket bars sum to {total:.3f}, outside the plausible book range"
         fair = dict(zip(SELECTIONS, power_normalise_probs([float(prices[s]) for s in SELECTIONS]), strict=True))  # type: ignore[arg-type]
         return _Close(1.0 / p, 1.0 / fair[selection], "lake:pm_soccer_bars_1h"), None
     return _Close(1.0 / p, 1.0 / p, "lake:pm_soccer_bars_1h(single-token)"), None
@@ -400,9 +404,10 @@ def settle(
     - An OddsPapi-benchmarked bookmaker decision is flagged `no_benchmark` (with the reason) when its fixture
       is listed but its Pinnacle close is invalid, or when `final_horizon` passes without a valid close; a
       fixture OddsPapi does not list yet is retried on later calls, never flagged before the horizon.
-    - A Polymarket decision whose own token's newest bar is older than `PM_MAX_BAR_AGE` at kickoff is flagged
-      `no_benchmark` once `grace` has passed and gets no provisional row; it is still asked for until
-      `final_horizon`, and a fresh bar then settles it.
+    - A Polymarket decision without a valid bar close (none, or the newest older than `PM_MAX_BAR_AGE` at
+      kickoff) is flagged `no_benchmark` with the reason once `grace` has passed and never gets a provisional
+      row; it is still asked for until `final_horizon`, and a valid bar then settles it. A failed lake lookup is
+      not a verdict: the decision waits.
 
     Returns {"settled": final rows written, "waiting": decisions still inside `grace`}.
     """
@@ -480,9 +485,10 @@ def settle(
         if in_grace:
             counts["waiting"] += 1
             continue
-        if d.venue == "polymarket" and (pm_refusal is not None or d.decision_id in flagged):
-            if d.decision_id not in flagged and pm_refusal is not None:
-                store.flag_decision(d.decision_id, "no_benchmark", pm_refusal, flagged_at=now)
+        if d.venue == "polymarket":
+            reason = pm_refusal or ("no valid Polymarket close within the final horizon" if past_horizon else None)
+            if reason is not None and d.decision_id not in flagged:
+                store.flag_decision(d.decision_id, "no_benchmark", reason, flagged_at=now)
                 flagged.add(d.decision_id)
             continue
         if oddspapi and past_horizon and d.venue != "polymarket" and d.decision_id not in flagged:

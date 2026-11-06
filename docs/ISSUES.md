@@ -557,7 +557,7 @@ projects; M8 traceability; S2 lake capacity; S4 decimal-odds instrument with CLV
 - Blocked by: none. Blocks: none.
 
 ## PE-33 Paper settle can take a days-old Polymarket bar as the close
-- Status: open
+- Status: done (2026-11-06)
 - Priority: high (paper CLV and P&L correctness)
 - Raised by: pitch-edge (lake LK-88, 2026-11-06)
 - Evidence: `LakeCloseSource.pm_last_bars` takes the last hourly bar per token that is complete by kickoff,
@@ -598,8 +598,14 @@ projects; M8 traceability; S2 lake capacity; S4 decimal-odds instrument with CLV
   token other than the decision's own drops only the three-way normalisation. 6 new tests.
 - Read-only check against the live lake: of the 3 unsettled Polymarket decisions, 2026-11-02 17:30 is refused (own bar
   17.5 h old). 2026-11-01 14:00 has fresh bars (0 h) and would settle. 2026-10-31 15:30 has no bars at all.
-- Open question: a Polymarket decision whose tokens have **no** bar at all still gets the existing fallback after
-  `grace`, our own last pre-kickoff snapshot written as a provisional row. That happened on 2026-10-21 and would
-  happen to the 2026-10-31 decision. The age rule does not cover this case. Treating it as `no_benchmark` too is
-  the master's call.
-- Blocked by: none. Blocks: the next live `paper settle`.
+- Decision (2026-11-06, master): a Polymarket decision with no bar at all is also `no_benchmark` after `grace`,
+  because our own snapshot is not the market close. So is one with no recorded token or an implausible bar book,
+  each with its reason. A Polymarket decision never gets a provisional row. The three 2026-10-21 provisional
+  rows stay as written. The paper report now counts `n_provisional_own_snapshot` (provisional rows priced from
+  our own snapshot) apart from `n_provisional` and from final closes. Paper settle stays off until the loop reloads
+  (E2).
+- Test change: `test_polymarket_ucl_decision_keeps_its_bar_close_and_records_the_pinnacle_sharp_source` asserted
+  that the Polymarket decision gets no flag at all. Its point, that the OddsPapi rule never flags a Polymarket
+  decision, is kept. It now expects the Polymarket reason that the decision above introduces.
+- Blocked by: none. Blocks: none.
+- Commits: `7537dad`, this one.

@@ -136,6 +136,7 @@ def test_primary_metric_uses_only_lake_closes_inside_the_evaluation_window_after
     p = rows.loc[("soft-vs-sharp-live", "primary")]
     assert p["n_decided"] == 6  # 4 final + provisional + void, inside the evaluation window
     assert (p["n_final"], p["n_provisional"], p["n_no_benchmark"], p["n_void"]) == (4, 1, 0, 1)
+    assert p["n_provisional_own_snapshot"] == 1  # its row is priced from our own Pinnacle snapshot
     assert p["mean_clv"] == pytest.approx(np.mean(clvs))
     finals_days = [str((t + timedelta(days=1 + i % 3, hours=2)).date()) for i, t in enumerate(evals, start=1)]
     boot = block_bootstrap(clvs, finals_days, n_boot=500, seed=1)
