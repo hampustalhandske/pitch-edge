@@ -555,3 +555,23 @@ projects; M8 traceability; S2 lake capacity; S4 decimal-odds instrument with CLV
   hash-guard and decision-time logic against a small synthetic coefficients file written in `tmp_path`, so they
   run everywhere.
 - Blocked by: none. Blocks: none.
+
+## PE-33 Paper settle can take a days-old Polymarket bar as the close
+- Status: open
+- Priority: high (paper CLV and P&L correctness)
+- Raised by: pitch-edge (lake LK-88, 2026-11-06)
+- Evidence: `LakeCloseSource.pm_last_bars` takes the last hourly bar per token that is complete by kickoff,
+  looking back 14 days, and returns the price without the bar's time. `_pm_bar_close` then uses it as the close
+  with no age check. The lake's `pm_soccer_bars_1h` has no bars after 2026-11-02 02:00 UTC (LK-87, LK-88).
+  So a Polymarket decision with a later kickoff settles on a bar that ended hours or days before kickoff,
+  and it is labelled `lake:pm_soccer_bars_1h` like a true close. The same happens for any token that stops
+  trading. On 2026-11-06 the paper ledger holds one unsettled Polymarket decision with kickoff 2026-11-02 17:30,
+  so its close would come from a bar more than 15 hours old. The paper loop is unloaded and
+  `paper settle` has not been run since, so nothing stale has been written yet.
+- Fix: return each bar's `hour_start` with its close. Refuse a close whose newest bar ended more than a set
+  age before kickoff (choose the limit from the bar-age distribution of settled decisions, the way
+  `ODDSPAPI_MAX_CLOSE_AGE` bounds the Pinnacle close). Let such a decision fall to the provisional fallback or
+  a `no_benchmark` flag. `tests/unit/test_paper_settle_lake_equivalence.py` repeats the query and needs the
+  same change.
+- Until fixed: do not run `paper settle` on the live paper ledger.
+- Blocked by: none. Blocks: the next live `paper settle`.
