@@ -129,8 +129,8 @@ opens only short-lived read-only connections (`_read_cached` / `_query_cached`, 
   `reports/CASE_STUDY.md`; live ladder: `pitch-edge research status`.
 - **Family `soft-open-vs-betfair` (N 4):** H1 favourite-open L1 null, H2 late-season stakes uninformative (5 test
   bets), H3 soft-books closing-line GBM null after the family correction (mostly line shopping by its placebo),
-  H4 exchange lag (`-exchange-lag-v1`, Pinnacle moves vs Betfair Exchange on OddsPapi paths) registered and
-  amended on the ledger, not yet scored.
+  H4 exchange lag (`-exchange-lag-v1`, Pinnacle moves vs Betfair Exchange on OddsPapi paths) L1 null: +0.25% net of
+  2% commission [−0.46, +0.97] n 361 (Betfair follows Pinnacle by about the commission). All four are counted.
 - **Lake mirror:** 10 `lake_*` mirrors (football-data matches + open/close odds, Polymarket markets and hourly
   bars, Kalshi markets and candles, Understat team matches (xG), Club Elo, Transfermarkt managers/tenures/injuries),
   checkpointed per window in `lake_sync_runs` / `lake_sync_state`. The warehouse spine's football-data `matches`/`odds`
