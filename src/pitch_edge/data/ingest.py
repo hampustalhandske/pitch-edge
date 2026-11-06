@@ -169,8 +169,9 @@ def _replace_secondary_duplicates(wh: Warehouse, df: pd.DataFrame) -> None:
 def purge_duplicate_fixtures(wh: Warehouse) -> int:
     """Delete every non-football-data.co.uk `matches` row that `find_duplicate_fixtures` pairs with a
     football-data.co.uk row (the same fixture under another spelling), with its rows in the match-keyed
-    tables (`odds`, `weather`, `features`). Unpaired rows are kept. Returns the number of matches removed;
-    with no such pairs nothing is touched, so running it repeatedly is harmless."""
+    tables (`odds`, `weather`, `features`), in one transaction, so a failure leaves every table as it was.
+    Unpaired rows are kept. Returns the number of matches removed; with no such pairs nothing is touched, so
+    running it repeatedly is harmless."""
     pairs = find_duplicate_fixtures(wh)
     if pairs.empty:
         return 0
@@ -184,9 +185,15 @@ def purge_duplicate_fixtures(wh: Warehouse) -> int:
     if not ids:
         return 0
     ordered = sorted(ids)
-    for table in ("matches", *MATCH_KEYED_TABLES):
-        if wh.table_exists(table):
+    tables = [t for t in ("matches", *MATCH_KEYED_TABLES) if wh.table_exists(t)]
+    wh._conn.execute("BEGIN TRANSACTION")
+    try:
+        for table in tables:
             wh._conn.execute(f"DELETE FROM {table} WHERE match_id IN (SELECT UNNEST(?::VARCHAR[]))", [ordered])
+        wh._conn.execute("COMMIT")
+    except Exception:
+        wh._conn.execute("ROLLBACK")
+        raise
     logger.info("purged %d matches that duplicate a football-data.co.uk fixture", len(ordered))
     return len(ordered)
 

@@ -133,14 +133,30 @@ class Warehouse:
         return self.count(table) - before
 
     def replace(self, table: str, df: pd.DataFrame) -> int:
-        """Drop-and-recreate a table (features, summaries) from a frame."""
+        """Replace a whole table (features, summaries) with a frame; an empty frame drops the table.
+
+        The new rows are first written to a staging table, then swapped in by one transaction that drops the old
+        table and renames the staging one. A failure or kill at any point leaves either the old table or the new
+        one, never neither. Returns the number of rows written."""
         df = _clean_frame(df)
-        self._conn.execute(f"DROP TABLE IF EXISTS {table}")
-        if df.empty:
-            return 0
-        self._conn.register("incoming_df", df)
-        self._conn.execute(f"CREATE TABLE {table} AS SELECT * FROM incoming_df")
-        self._conn.unregister("incoming_df")
+        staging = f"{table}__staging"
+        self._conn.execute(f"DROP TABLE IF EXISTS {staging}")
+        if not df.empty:
+            self._conn.register("incoming_df", df)
+            try:
+                self._conn.execute(f"CREATE TABLE {staging} AS SELECT * FROM incoming_df")
+            finally:
+                self._conn.unregister("incoming_df")
+        self._conn.execute("BEGIN TRANSACTION")
+        try:
+            self._conn.execute(f"DROP TABLE IF EXISTS {table}")
+            if not df.empty:
+                self._conn.execute(f"ALTER TABLE {staging} RENAME TO {table}")
+            self._conn.execute("COMMIT")
+        except Exception:
+            self._conn.execute("ROLLBACK")
+            self._conn.execute(f"DROP TABLE IF EXISTS {staging}")
+            raise
         return len(df)
 
     # ------------------------------------------------------------------ reads

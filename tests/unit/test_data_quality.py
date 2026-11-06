@@ -107,3 +107,28 @@ def test_purge_is_idempotent(wh):
     assert purge_duplicate_fixtures(wh) == 1
     assert purge_duplicate_fixtures(wh) == 0
     assert wh.read("matches")["match_id"].tolist() == ["fd_1"]
+
+
+def test_a_purge_that_fails_part_way_leaves_every_table_as_it_was(wh):
+    store_matches(wh, pd.DataFrame([{**_match("fd_1", "football_data_co_uk", "M'gladbach", "Dortmund"), "PSH": 2.0}]))
+    store_matches(
+        wh,
+        pd.DataFrame([{**_match("cfmd_1", "club_football_match_data", "Mgladbach", "Dortmund"), "PSH": 2.1}]),
+    )
+    real = wh._conn
+
+    class FailOnOdds:
+        def execute(self, sql, *args):
+            if sql.startswith("DELETE FROM odds"):
+                raise RuntimeError("killed")
+            return real.execute(sql, *args)
+
+        def __getattr__(self, name):
+            return getattr(real, name)
+
+    wh._conn = FailOnOdds()
+    with pytest.raises(RuntimeError, match="killed"):
+        purge_duplicate_fixtures(wh)
+    wh._conn = real
+    assert set(wh.read("matches")["match_id"]) == {"fd_1", "cfmd_1"}  # the matches delete was rolled back
+    assert set(wh.read("odds")["match_id"]) == {"fd_1", "cfmd_1"}
