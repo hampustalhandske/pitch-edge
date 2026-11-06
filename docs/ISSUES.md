@@ -461,7 +461,7 @@ projects; M8 traceability; S2 lake capacity; S4 decimal-odds instrument with CLV
 - Commits: see git log for `PE-28`.
 
 ## PE-29 Read football-data from the lake only
-- Status: open
+- Status: done (2026-11-06)
 - Priority: should (joint plan: the lake serves all data; one source, no second copy that can go stale)
 - Raised by: coordinator, after PE-28
 - Evidence (2026-10-28): the lake's `fd_matches` is fetched daily (latest run 11:04 UTC); in the 11 backtest leagues it
@@ -477,7 +477,12 @@ projects; M8 traceability; S2 lake capacity; S4 decimal-odds instrument with CLV
   `ingest_football_data` and its connector are removed in the same change; a test covers the spine built from the
   lake rows, with the same columns and point-in-time stamps.
 - Blocked by: none. Blocks: none.
-- Commits: none yet.
+- Closing check (2026-11-06): the first scheduled launchd run (`local.pitch-edge.lake-sync-fd`, 14:00 local)
+  exited 0 in 44 s. It wrote 231,995 `lake_fd_matches` rows and rebuilt 10,038 spine matches, with an empty
+  launchd error log. `pitch-edge health` reports football-data lag ok: every backtest league is 0 days behind the
+  lake, both in the mirror and in the spine. The 1,591 duplicate-fixture pairs health lists predate the spine and
+  are purged by the next `refresh` (PE-12, the PE-30 rebuild).
+- Commits: `654f2ee` (spine and launchd template), this one (closing check).
 - Progress (2026-11-05, design (b)): the spine's football-data `matches` and `odds` are built from the
   `lake_fd_matches` mirror by `src/pitch_edge/lake/spine.py` (same columns, `match_id` scheme, `source` label and
   `snapshot_ts` stamps; incremental by calendar-year window, checkpoint + fingerprint in `lake_sync_state`, one
