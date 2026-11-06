@@ -222,7 +222,7 @@ projects; M8 traceability; S2 lake capacity; S4 decimal-odds instrument with CLV
 - Commits: see git log for `PE-14`.
 
 ## PE-15 Stale docs
-- Status: open
+- Status: done (2026-11-06)
 - Priority: nice
 - Raised by: pitch-edge
 - Evidence: `reports/main/CASE_STUDY.md` covers an older model roster; `pitch-edge refresh --fast` help mentions
@@ -232,6 +232,9 @@ projects; M8 traceability; S2 lake capacity; S4 decimal-odds instrument with CLV
 - Progress: the `refresh --fast` help, the `as_of.py` and `keys.py` docstrings and the `pull_prices.py` docstring
   now match the code (`API_KEYS.md` already lists the lake and odds-api credentials outside the registry). Left:
   `reports/main/CASE_STUDY.md` needs a rerun of the main backtest on the current model roster.
+- Decision (2026-11-06, master's re-plan): no rerun. `reports/main/CASE_STUDY.md` carries a banner saying that it
+  describes an older model roster and is not a result for today's models. The index already says so. A rerun
+  (2-6 machine-hours) can be filed fresh if a current main backtest is wanted.
 - Blocked by: none. Blocks: none.
 - Commits: see git log for `PE-15`.
 
@@ -358,7 +361,7 @@ projects; M8 traceability; S2 lake capacity; S4 decimal-odds instrument with CLV
 - Commits: see git log for `PE-23`.
 
 ## PE-24 Exported strategies filter pandas frames on every stake call
-- Status: open
+- Status: backlog (cut from the finish plan by the master, 2026-11-06)
 - Priority: nice (S2)
 - Raised by: pitch-edge (E1 profile, with edgelab EL-32)
 - Evidence: in a profile of edgelab's backtest of the R2-Q3 bet365 strategy (2018-08 to 2020-03, 14,064
@@ -517,7 +520,7 @@ projects; M8 traceability; S2 lake capacity; S4 decimal-odds instrument with CLV
 - Commits: 654f2ee (Refs PE-29).
 
 ## PE-31 Match-keyed rows outlive the matches the spine replaces
-- Status: open
+- Status: backlog (cut from the finish plan by the master, 2026-11-06)
 - Priority: nice (traceability of stored results)
 - Raised by: pitch-edge (PE-29 first sync)
 - Evidence: `store_matches` deletes a non-football-data `matches` row (and its `odds`) when football-data brings
@@ -545,7 +548,7 @@ projects; M8 traceability; S2 lake capacity; S4 decimal-odds instrument with CLV
 - Commits: none yet.
 
 ## PE-32 CI never runs the R6 live-model paper strategy tests
-- Status: open
+- Status: backlog (cut from the finish plan by the master, 2026-11-06)
 - Priority: nice (test coverage)
 - Raised by: pitch-edge (local CI run on `c482c75`, 2026-11-05)
 - Evidence: all 10 tests in `tests/unit/test_paper_v2.py` carry `needs_coef`, which skips them unless
