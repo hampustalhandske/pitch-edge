@@ -9,7 +9,10 @@ Closing source, in order of preference:
    different benchmark from the Betfair close and is reported separately.
 2. Polymarket decisions: the last hourly bar known before kickoff (`hour_start + 1h <= kickoff_at`) for
    each of the fixture's three Yes tokens in the lake's `pm_soccer_bars_1h`, power-normalised when all
-   three are present. The Betfair close is still recorded alongside as `sharp_fair_close_odds`.
+   three are present. A bar that ended more than `PM_MAX_BAR_AGE` before kickoff is stale and is not a close:
+   when the decision's own token has only a stale bar, the decision gets a `no_benchmark` flag once `grace`
+   has passed and no fallback price is written for it (a fresh bar arriving before `final_horizon` still
+   settles it). The Betfair close is still recorded alongside as `sharp_fair_close_odds`.
 3. Fallback, only once `grace` has passed since kickoff without (1)/(2): our own last quote snapshot
    captured after the decision and before kickoff (Pinnacle, then Betfair UK/EU, then Smarkets, then the
    decision's venue), labelled `own_snapshot:<source>@<captured_at>`, or `none` when no such snapshot
@@ -68,6 +71,10 @@ class FdClose:
 ODDSPAPI_KICKOFF_TOLERANCE = timedelta(hours=3)
 ODDSPAPI_MAX_CLOSE_AGE = timedelta(minutes=15)
 PINNACLE_CLOSE_SOURCE = "lake:oddspapi.pinnacle_close"
+# Longest gap between the end of a token's newest complete hourly bar and kickoff for the bar to count as the
+# Polymarket close. Set from the bar-age distribution of mapped 1X2 markets (2025-08..2026-10, n=8,438 with a
+# bar): 90.6% are under 3 h, and beyond 3 h the remainder is a long tail of tokens that stopped trading.
+PM_MAX_BAR_AGE = timedelta(hours=3)
 _OUTCOME_CODES = {"home": 0, "draw": 1, "away": 2}
 
 
@@ -82,12 +89,20 @@ class PinnacleClose:
     retry: bool = False  # True when the fixture is not listed yet: a later lake refresh may supply it
 
 
+@dataclass(frozen=True)
+class PmBar:
+    """A token's newest complete hourly bar before a cut-off: its close price and when the bar ended."""
+
+    close: float
+    ends_at: datetime
+
+
 class CloseSource(Protocol):
     def fd_match(self, league: str, kickoff_at: datetime, home: str, away: str) -> FdClose | None: ...
 
     def pinnacle_close(self, league: str, kickoff_at: datetime, home: str, away: str) -> PinnacleClose: ...
 
-    def pm_last_bars(self, asset_ids: list[str], before: datetime) -> dict[str, float]: ...
+    def pm_last_bars(self, asset_ids: list[str], before: datetime) -> dict[str, PmBar]: ...
 
 
 class LakeLike(Protocol):
@@ -227,19 +242,25 @@ class LakeCloseSource:
             )
         return PinnacleClose(tuple(float(by_outcome[o].price) for o in _OUTCOME_CODES))  # type: ignore[arg-type]
 
-    def pm_last_bars(self, asset_ids: list[str], before: datetime) -> dict[str, float]:
-        """Close of the last hourly bar per token that was complete (hour_start + 1h) by `before`."""
+    def pm_last_bars(self, asset_ids: list[str], before: datetime) -> dict[str, PmBar]:
+        """The last hourly bar per token that was complete (hour_start + 1h) by `before`, looking back 14 days:
+        its close and its end time. Tokens without such a bar are absent."""
         if not asset_ids:
             return {}
         marks = ", ".join("?" for _ in asset_ids)
         df = self._sql_once(
             ("pm", tuple(sorted(asset_ids)), before),
-            f"SELECT asset_id, arg_max(close, hour_start) AS close FROM pm_soccer_bars_1h "
+            f"SELECT asset_id, arg_max(close, hour_start) AS close, "
+            f"CAST(max(hour_start) + INTERVAL 1 HOUR AS VARCHAR) AS ends_at FROM pm_soccer_bars_1h "
             f"WHERE asset_id IN ({marks}) AND hour_start >= CAST(? AS TIMESTAMPTZ) "
             f"AND hour_start + INTERVAL 1 HOUR <= CAST(? AS TIMESTAMPTZ) GROUP BY asset_id",
             [*asset_ids, (before - timedelta(days=14)).isoformat(), before.isoformat()],
         )
-        return {str(r.asset_id): float(r.close) for r in df.itertuples() if pd.notna(r.close)}
+        return {
+            str(r.asset_id): PmBar(float(r.close), pd.Timestamp(r.ends_at).tz_convert("UTC").to_pydatetime())
+            for r in df.itertuples()
+            if pd.notna(r.close)
+        }
 
 
 @dataclass(frozen=True)
@@ -301,24 +322,40 @@ def _own_snapshot_close(
 
 def _pm_bar_close(
     store: PaperStore, source: CloseSource, fixture: str, kickoff: datetime, selection: str
-) -> _Close | None:
+) -> tuple[_Close | None, str | None]:
+    """The Polymarket close of `selection` from the fixture's Yes-token bars, and the reason it was refused.
+
+    Bars that ended more than `PM_MAX_BAR_AGE` before kickoff are dropped. When the selection's own token has
+    only such a stale bar the close is refused with a reason; a missing token or bar gives (None, None), and a
+    stale bar on another token only drops the three-way normalisation."""
     quotes = store.quotes_for_fixture(fixture, before=kickoff)
     pm = quotes[(quotes["source"] == "polymarket") & quotes["instrument_id"].notna()]
     if pm.empty:
-        return None
+        return None, None
     tokens = pm.sort_values("captured_at").groupby("selection")["instrument_id"].last().to_dict()
     bars = source.pm_last_bars(sorted(tokens.values()), kickoff)
-    prices = {s: bars.get(t) for s, t in tokens.items()}
+    own = bars.get(tokens[selection]) if selection in tokens else None
+    if own is not None and kickoff - own.ends_at > PM_MAX_BAR_AGE:
+        age_h = (kickoff - own.ends_at).total_seconds() / 3600
+        limit_h = PM_MAX_BAR_AGE.total_seconds() / 3600
+        return (
+            None,
+            f"Polymarket close is stale: newest {selection} bar ended {age_h:.1f} h before kickoff (limit {limit_h:.0f} h)",
+        )
+    prices = {
+        s: bars[t].close if t in bars and kickoff - bars[t].ends_at <= PM_MAX_BAR_AGE else None
+        for s, t in tokens.items()
+    }
     p = prices.get(selection)
     if p is None or not 0.0 < p < 1.0:
-        return None
+        return None, None
     if set(SELECTIONS) <= set(prices) and all(v is not None and 0.0 < v < 1.0 for v in prices.values()):
         if not plausible_book([float(prices[s]) for s in SELECTIONS]):  # type: ignore[arg-type]
             logger.warning("pm bars for %s sum to %.3f; rejected as a close", fixture, sum(prices.values()))  # type: ignore[arg-type]
-            return None
+            return None, None
         fair = dict(zip(SELECTIONS, power_normalise_probs([float(prices[s]) for s in SELECTIONS]), strict=True))  # type: ignore[arg-type]
-        return _Close(1.0 / p, 1.0 / fair[selection], "lake:pm_soccer_bars_1h")
-    return _Close(1.0 / p, 1.0 / p, "lake:pm_soccer_bars_1h(single-token)")
+        return _Close(1.0 / p, 1.0 / fair[selection], "lake:pm_soccer_bars_1h"), None
+    return _Close(1.0 / p, 1.0 / p, "lake:pm_soccer_bars_1h(single-token)"), None
 
 
 def _kickoff_moved(store: PaperStore, fixture: str, kickoff: datetime, now: datetime) -> datetime | None:
@@ -363,6 +400,9 @@ def settle(
     - An OddsPapi-benchmarked bookmaker decision is flagged `no_benchmark` (with the reason) when its fixture
       is listed but its Pinnacle close is invalid, or when `final_horizon` passes without a valid close; a
       fixture OddsPapi does not list yet is retried on later calls, never flagged before the horizon.
+    - A Polymarket decision whose own token's newest bar is older than `PM_MAX_BAR_AGE` at kickoff is flagged
+      `no_benchmark` once `grace` has passed and gets no provisional row; it is still asked for until
+      `final_horizon`, and a fresh bar then settles it.
 
     Returns {"settled": final rows written, "waiting": decisions still inside `grace`}.
     """
@@ -419,11 +459,12 @@ def settle(
             else:
                 logger.warning("Betfair close %s for %s fails the book-sum check", fd.betfair_close, d.fixture_key)
         primary: _Close | None = None
+        pm_refusal: str | None = None
         if past_horizon:
             primary = None
         elif d.venue == "polymarket":
             try:
-                primary = _pm_bar_close(store, source, d.fixture_key, kickoff, d.selection)
+                primary, pm_refusal = _pm_bar_close(store, source, d.fixture_key, kickoff, d.selection)
             except Exception as exc:
                 logger.warning("pm_soccer_bars_1h lookup for %s failed: %s", d.fixture_key, exc)
         else:
@@ -438,6 +479,11 @@ def settle(
             continue
         if in_grace:
             counts["waiting"] += 1
+            continue
+        if d.venue == "polymarket" and (pm_refusal is not None or d.decision_id in flagged):
+            if d.decision_id not in flagged and pm_refusal is not None:
+                store.flag_decision(d.decision_id, "no_benchmark", pm_refusal, flagged_at=now)
+                flagged.add(d.decision_id)
             continue
         if oddspapi and past_horizon and d.venue != "polymarket" and d.decision_id not in flagged:
             store.flag_decision(

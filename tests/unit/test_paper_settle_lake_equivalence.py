@@ -18,7 +18,7 @@ import pytest
 
 from pitch_edge.data.teams import TeamNameResolver
 from pitch_edge.paper.fixtures import FD_DIVISIONS, canonical_team, team_similarity
-from pitch_edge.paper.settle import _FD_RESULT, FdClose, LakeCloseSource, settle
+from pitch_edge.paper.settle import _FD_RESULT, FdClose, LakeCloseSource, PmBar, settle
 from pitch_edge.paper.store import Decision, PaperStore, Quote
 
 pytestmark = pytest.mark.unit
@@ -72,17 +72,22 @@ class PerDecisionLakeCloseSource:
         result = _FD_RESULT.get(str(r["ft_result"])) if pd.notna(r["ft_result"]) else None
         return FdClose(betfair_close=betfair, result=result)  # type: ignore[arg-type]
 
-    def pm_last_bars(self, asset_ids: list[str], before: datetime) -> dict[str, float]:
+    def pm_last_bars(self, asset_ids: list[str], before: datetime) -> dict[str, PmBar]:
         if not asset_ids:
             return {}
         marks = ", ".join("?" for _ in asset_ids)
         df = self.lake.sql(
-            f"SELECT asset_id, arg_max(close, hour_start) AS close FROM pm_soccer_bars_1h "
+            f"SELECT asset_id, arg_max(close, hour_start) AS close, "
+            f"CAST(max(hour_start) + INTERVAL 1 HOUR AS VARCHAR) AS ends_at FROM pm_soccer_bars_1h "
             f"WHERE asset_id IN ({marks}) AND hour_start >= CAST(? AS TIMESTAMPTZ) "
             f"AND hour_start + INTERVAL 1 HOUR <= CAST(? AS TIMESTAMPTZ) GROUP BY asset_id",
             [*asset_ids, (before - timedelta(days=14)).isoformat(), before.isoformat()],
         )
-        return {str(r.asset_id): float(r.close) for r in df.itertuples() if pd.notna(r.close)}
+        return {
+            str(r.asset_id): PmBar(float(r.close), pd.Timestamp(r.ends_at).tz_convert("UTC").to_pydatetime())
+            for r in df.itertuples()
+            if pd.notna(r.close)
+        }
 
 
 # --------------------------------------------------------------------------- the fake lake
@@ -138,8 +143,10 @@ class RecordingLake:
             return self.fd.loc[m, FD_COLS].reset_index(drop=True)
         assert "FROM pm_soccer_bars_1h" in query
         assets = params[:-2]
+        ends_at = (pd.Timestamp(params[-1]) - pd.Timedelta(hours=1)).isoformat()  # a fresh bar: the hour before
         return pd.DataFrame(
-            [{"asset_id": a, "close": PM_BARS[a]} for a in assets if a in PM_BARS], columns=["asset_id", "close"]
+            [{"asset_id": a, "close": PM_BARS[a], "ends_at": ends_at} for a in assets if a in PM_BARS],
+            columns=["asset_id", "close", "ends_at"],
         )
 
     def fd_windows(self) -> list[tuple[str, date]]:

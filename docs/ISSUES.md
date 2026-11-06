@@ -574,4 +574,32 @@ projects; M8 traceability; S2 lake capacity; S4 decimal-odds instrument with CLV
   a `no_benchmark` flag. `tests/unit/test_paper_settle_lake_equivalence.py` repeats the query and needs the
   same change.
 - Until fixed: do not run `paper settle` on the live paper ledger.
+- Decision (2026-11-06, master go with four conditions): a refused close becomes `no_benchmark` with its reason and
+  is reported apart from the rest (as in PE-13). No other source's price replaces it, so no provisional row. Past
+  settlements are not rewritten. The paper loop stays unloaded.
+- Limit: **3 hours** between the end of a token's newest complete bar and kickoff (`PM_MAX_BAR_AGE`). It was
+  chosen from the bar-age distribution alone, with no P&L or CLV looked at. Sample: every Yes token of a mapped
+  Polymarket 1X2 market (`win_home`/`draw`/`win_away` with an `fd_match_key`) whose `close_at` (kickoff) is in
+  2025-08-01..2026-10-31. That is 8,992 markets; 8,438 have a bar in the 14 days before kickoff. Age = kickoff
+  minus (newest `hour_start` + 1 h). Median 0.5 h, p75 0.75 h, p90 2.5 h, p95 8 h, p99 113 h, max 317 h.
+  Cumulative share of markets with a bar: 82.4% under 1 h, 87.8% under 2 h, 90.6% under 3 h, 94.0% under 6 h,
+  97.5% under 24 h. Reason: hourly bars and kickoffs at :15/:30/:45 put the freshest possible bar up to 0.75 h
+  before kickoff. New markets come in at 460 per extra hour between 1 and 2 h and 235 between 2 and 3 h. After
+  that the rate drops to about 95 per hour (3-6 h) and 30 per hour (6-12 h), a long tail of tokens that stopped
+  trading. So 3 h allows the hourly grid plus one quiet hour, and anything older is a stale price, not a close.
+- Re-check of past settlements: all 88 are bookmaker decisions settled on `lake:fd_matches.betfair_ex_close`. None
+  used a Polymarket bar, so 0 would be refused. The provisional rows are 12: 9 Pinnacle-venue rows and 3
+  Polymarket-venue rows (kickoff 2026-10-21). One of the Polymarket rows uses our own Polymarket snapshot; the
+  other two have no close. Those three tokens have no bar at all in the 14 days before kickoff, so the age rule
+  does not apply to them, and their rows stay as written.
+- Progress (2026-11-06): `PM_MAX_BAR_AGE` implemented in `paper/settle.py`. `pm_last_bars` now returns each bar's
+  end time (`PmBar`). A refused close waits inside `grace`. After that it gets one `no_benchmark` flag with its
+  reason and no provisional row, and it can still settle on a fresh bar until `final_horizon`. A stale bar on a
+  token other than the decision's own drops only the three-way normalisation. 6 new tests.
+- Read-only check against the live lake: of the 3 unsettled Polymarket decisions, 2026-11-02 17:30 is refused (own bar
+  17.5 h old). 2026-11-01 14:00 has fresh bars (0 h) and would settle. 2026-10-31 15:30 has no bars at all.
+- Open question: a Polymarket decision whose tokens have **no** bar at all still gets the existing fallback after
+  `grace`, our own last pre-kickoff snapshot written as a provisional row. That happened on 2026-10-21 and would
+  happen to the 2026-10-31 decision. The age rule does not cover this case. Treating it as `no_benchmark` too is
+  the master's call.
 - Blocked by: none. Blocks: the next live `paper settle`.

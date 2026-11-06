@@ -12,7 +12,8 @@ Within a segment the CLV metric (mean CLV, 95% block-bootstrap CI by match-day v
 `research/stats.py::block_bootstrap`, ROI) uses only *final* settlements, which are lake-sourced closes.
 Provisional settlements (our own snapshot or no close) are counted and averaged separately and never enter
 the metric. Void decisions and decisions flagged `no_benchmark` by settlement (an OddsPapi-benchmarked
-decision with no valid Pinnacle close) are counted as `n_void` / `n_no_benchmark` and excluded from every metric.
+decision with no valid Pinnacle close, or a Polymarket decision whose token's newest bar was stale at kickoff) are
+counted as `n_void` / `n_no_benchmark` and excluded from every metric.
 
 Every row carries a `benchmark`: `betfair_close` (the Betfair Exchange close from football-data, and the
 Polymarket bar close of Polymarket-venue decisions) or `pinnacle_close` (the OddsPapi Pinnacle close, used for
@@ -259,7 +260,8 @@ def report_notes(rep: pd.DataFrame) -> list[str]:
         "different benchmarks and never pooled. The registrations of bookmaker-line-structure-live-soft-vs-sharp-v1 "
         "and -v2 name the Betfair Exchange close, so the pinnacle_close rows are a stated deviation, not part of "
         "the registered primary result. n_no_benchmark counts decisions settlement flagged as having no valid "
-        "Pinnacle close (reason in decision_flags); a fixture OddsPapi does not list yet is retried, not flagged.",
+        "Pinnacle close, or (Polymarket) a newest bar more than 3 h old at kickoff (reason in decision_flags); "
+        "a fixture OddsPapi does not list yet is retried, not flagged.",
         "pm-vs-sharp-gap (hypothesis 'pending-r1') no longer runs; its recorded decisions used placeholder "
         "parameters, never R1's registered rule, so all of them are unregistered.",
         "soft-vs-sharp-live deviation from the v1 registration: the registered sanity rule 'price <= the max quote for that outcome in the response' "

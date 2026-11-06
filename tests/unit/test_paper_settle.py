@@ -9,7 +9,7 @@ import pandas as pd
 import pytest
 
 from pitch_edge.paper.pricing import power_devig_odds, power_normalise_probs
-from pitch_edge.paper.settle import FdClose, LakeCloseSource, settle
+from pitch_edge.paper.settle import PM_MAX_BAR_AGE, FdClose, LakeCloseSource, PmBar, settle
 from pitch_edge.paper.store import Decision, PaperStore, Quote
 
 pytestmark = pytest.mark.unit
@@ -20,7 +20,9 @@ SEL = ("home", "draw", "away")
 
 
 class FakeSource:
-    def __init__(self, fd: FdClose | None = None, bars: dict[str, float] | None = None):
+    """Answers from fixed values. A bar given as a bare price is fresh: it ends one hour before the cut-off."""
+
+    def __init__(self, fd: FdClose | None = None, bars: dict[str, float | PmBar] | None = None):
         self.fd, self.bars = fd, bars or {}
         self.bar_calls: list[tuple[list[str], datetime]] = []
 
@@ -29,7 +31,12 @@ class FakeSource:
 
     def pm_last_bars(self, asset_ids, before):
         self.bar_calls.append((list(asset_ids), before))
-        return {a: self.bars[a] for a in asset_ids if a in self.bars}
+        out = {}
+        for a in asset_ids:
+            if a in self.bars:
+                b = self.bars[a]
+                out[a] = b if isinstance(b, PmBar) else PmBar(float(b), before - timedelta(hours=1))
+        return out
 
 
 @pytest.fixture
@@ -144,6 +151,65 @@ def test_polymarket_decision_settles_against_the_last_pre_kickoff_bar(store):
     assert sorted(src.bar_calls[0][0]) == ["tok-away", "tok-draw", "tok-home"] and src.bar_calls[0][1] == KO
 
 
+FRESH = {"tok-draw": 0.27, "tok-away": 0.28}  # bare prices: bars ending an hour before kickoff
+
+
+def test_a_bar_at_the_age_limit_is_still_the_close(store):
+    _seed(store, venue="polymarket", selection="home", price=2.2)
+    bars = {"tok-home": PmBar(0.47, KO - PM_MAX_BAR_AGE), **FRESH}
+    settle(store, FakeSource(FdClose((2.0, 3.6, 4.4), "home"), bars), now=KO + timedelta(days=1))
+    assert store.settlements().iloc[0]["closing_source"] == "lake:pm_soccer_bars_1h"
+
+
+def test_a_stale_own_bar_waits_inside_grace_and_is_never_settled_on(store):
+    _seed(store, venue="polymarket", selection="home", price=2.2)
+    bars = {"tok-home": PmBar(0.47, KO - PM_MAX_BAR_AGE - timedelta(minutes=1)), **FRESH}
+    src = FakeSource(FdClose((2.0, 3.6, 4.4), "home"), bars)
+    assert settle(store, src, now=KO + timedelta(days=1)) == {"settled": 0, "waiting": 1}
+    assert store.settlements().empty and store.decision_flags().empty
+
+
+def test_a_stale_own_bar_after_grace_is_no_benchmark_with_no_fallback_price(store):
+    d = _seed(store, venue="polymarket", selection="home", price=2.2)
+    stale = {"tok-home": PmBar(0.47, KO - timedelta(days=2, hours=12)), **FRESH}
+    src = FakeSource(FdClose((2.0, 3.6, 4.4), "home"), stale)
+    for days in (5, 6):  # flagged once, however often settle runs
+        settle(store, src, now=KO + timedelta(days=days), grace=timedelta(days=4))
+    assert store.settlements().empty
+    assert store.provisional_settlements().empty  # no own snapshot stands in for the Polymarket close
+    flags = store.decision_flags()
+    assert list(flags["decision_id"]) == [d.decision_id] and list(flags["flag"]) == ["no_benchmark"]
+    assert (
+        flags.iloc[0]["reason"] == "Polymarket close is stale: newest home bar ended 60.0 h before kickoff (limit 3 h)"
+    )
+
+
+def test_a_refused_close_settles_when_a_fresh_bar_arrives_before_the_horizon(store):
+    _seed(store, venue="polymarket", selection="home", price=2.2)
+    stale = {"tok-home": PmBar(0.47, KO - timedelta(hours=10)), **FRESH}
+    settle(store, FakeSource(FdClose((2.0, 3.6, 4.4), "home"), stale), now=KO + timedelta(days=5))
+    refilled = {"tok-home": 0.47, **FRESH}
+    settle(store, FakeSource(FdClose((2.0, 3.6, 4.4), "home"), refilled), now=KO + timedelta(days=8))
+    assert store.settlements().iloc[0]["closing_source"] == "lake:pm_soccer_bars_1h"
+
+
+def test_a_flagged_polymarket_decision_gets_no_fallback_after_the_horizon(store):
+    _seed(store, venue="polymarket", selection="home", price=2.2)
+    stale = {"tok-home": PmBar(0.47, KO - timedelta(hours=10)), **FRESH}
+    settle(store, FakeSource(FdClose((2.0, 3.6, 4.4), "home"), stale), now=KO + timedelta(days=5))
+    settle(store, FakeSource(None), now=KO + timedelta(days=31))
+    assert store.settlements().empty and store.provisional_settlements().empty
+
+
+def test_a_stale_bar_on_another_token_drops_only_the_normalisation(store):
+    _seed(store, venue="polymarket", selection="home", price=2.2)
+    bars = {"tok-home": 0.47, "tok-draw": PmBar(0.27, KO - timedelta(hours=5)), "tok-away": 0.28}
+    settle(store, FakeSource(FdClose((2.0, 3.6, 4.4), "home"), bars), now=KO + timedelta(days=1))
+    s = store.settlements().iloc[0]
+    assert s["closing_source"] == "lake:pm_soccer_bars_1h(single-token)"
+    assert s["fair_close_odds"] == pytest.approx(1 / 0.47)
+
+
 def test_waits_for_the_lake_close_inside_the_grace_period(store):
     _seed(store)
     assert settle(store, FakeSource(None), now=KO + timedelta(days=1), grace=timedelta(days=4)) == {
@@ -206,9 +272,19 @@ def test_lake_adapter_returns_none_for_leagues_outside_football_data():
     assert lake.calls == []
 
 
+BAR_FRAME = {
+    "asset_id": ["t1", "t2"],
+    "close": [0.4, 0.3],
+    "ends_at": ["2026-10-24 15:00:00+02", "2026-10-24 11:00:00+00"],
+}
+BARS = {"t1": PmBar(0.4, KO - timedelta(hours=1)), "t2": PmBar(0.3, KO - timedelta(hours=3))}
+
+
 def test_lake_adapter_reads_last_bar_known_before_kickoff():
-    lake = FakeLake([pd.DataFrame({"asset_id": ["t1", "t2"], "close": [0.4, 0.3]})])
-    assert LakeCloseSource(lake).pm_last_bars(["t1", "t2"], KO) == {"t1": 0.4, "t2": 0.3}
+    lake = FakeLake([pd.DataFrame(BAR_FRAME)])
+    got = LakeCloseSource(lake).pm_last_bars(["t1", "t2"], KO)
+    assert got == BARS
+    assert all(b.ends_at.utcoffset() == timedelta(0) for b in got.values())  # read back in UTC
     query, params = lake.calls[0]
     assert "INTERVAL 1 HOUR" in query and params[-1] == KO.isoformat()
 
@@ -299,7 +375,7 @@ def test_lake_adapter_does_not_retry_a_failed_window_within_one_settle():
 
 
 def test_lake_adapter_queries_the_same_token_set_once():
-    lake = FakeLake([pd.DataFrame({"asset_id": ["t1", "t2"], "close": [0.4, 0.3]})])
+    lake = FakeLake([pd.DataFrame(BAR_FRAME)])
     source = LakeCloseSource(lake)
-    assert source.pm_last_bars(["t1", "t2"], KO) == source.pm_last_bars(["t2", "t1"], KO) == {"t1": 0.4, "t2": 0.3}
+    assert source.pm_last_bars(["t1", "t2"], KO) == source.pm_last_bars(["t2", "t1"], KO) == BARS
     assert len(lake.calls) == 1
