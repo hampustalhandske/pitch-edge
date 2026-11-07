@@ -176,6 +176,8 @@ projects; M8 traceability; S2 lake capacity; S4 decimal-odds instrument with CLV
   of the 11 backtest leagues from them; 39 of those matches are in `pmxt_match_map`; `model_predictions` and
   `backtest_bets` hold rows for them. Owner decision (2026-10-28): keep every `cfmd_`-only row until another source
   covers 2023/24 and 2026/27 for those leagues.
+- Purge run 2026-11-07 (with the PE-30 rebuild): 1,591 duplicate pairs before, 0 after; 1,590 matches purged (one
+  non-football-data id paired with two football-data rows).
 - Commits: see git log for `PE-12`.
 
 ## PE-13 UCL paper decisions have no benchmark
@@ -507,7 +509,7 @@ projects; M8 traceability; S2 lake capacity; S4 decimal-odds instrument with CLV
   spine build (needs a warehouse slot), the owner's launchd bootstrap, then close.
 
 ## PE-30 The football-data CSV ingest stored extra-league closes as opens
-- Status: open (spine fixed; derived `features` and RAG rows for `fdx_` matches wait on one `refresh`)
+- Status: done
 - Priority: should (point-in-time: no hindsight price may pass as a pre-match one)
 - Raised by: pitch-edge (PE-29 dry run)
 - Evidence: for football-data's 16 extra-league files (`fdx_` match ids: MLS, Brazil, Argentina, Mexico, Japan,
@@ -521,11 +523,13 @@ projects; M8 traceability; S2 lake capacity; S4 decimal-odds instrument with CLV
   engine's bet price and `pipeline.py`. Unaffected: the 11 backtest leagues (main divisions, `fd_` ids) and every
   registered study (they read the lake directly).
 - Acceptance: the spine stores these prices as closes, and the derived tables built from the old rows are rebuilt.
-- Result: the spine built from the lake (654f2ee, first build 2026-11-05) stores them as closes. Left as a
-  follow-up, not a blocker: `features` rows and the RAG index for `fdx_` matches still hold values derived from
-  the old rows until the next `refresh` (a warehouse slot).
-- Blocked by: a heavy slot for `pitch-edge refresh` (1-3 h, not measured; it also runs PE-12's duplicate purge). Blocks: none.
-- Commits: 654f2ee (Refs PE-29).
+- Result: the spine built from the lake (654f2ee, first build 2026-11-05) stores them as closes. The derived tables
+  were rebuilt on 2026-11-07 (duplicate purge, feature build, RAG index; 257 s wall, peak RSS 3.69 GB): `features`
+  holds 42,755 rows and none for `fdx_` matches (the feature build reads only the backtest leagues). The RAG index
+  holds 25,271 docs; its 2,174 `fdx_` match docs are all dated 2025-2026, after the old rows ended (2024-02-22),
+  and none carries an odds line. The same run purged 1,590 duplicate matches (PE-12): duplicate pairs 1,591 to 0.
+- Blocked by: none. Blocks: none.
+- Commits: 654f2ee (Refs PE-29), 72f656f (crash-safe table replace and purge, run before the rebuild).
 
 ## PE-31 Match-keyed rows outlive the matches the spine replaces
 - Status: backlog (cut from the finish plan by the master, 2026-11-06)
