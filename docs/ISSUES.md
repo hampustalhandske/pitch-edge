@@ -624,3 +624,24 @@ projects; M8 traceability; S2 lake capacity; S4 decimal-odds instrument with CLV
   decision, is kept. It now expects the Polymarket reason that the decision above introduces.
 - Blocked by: none. Blocks: none.
 - Commits: `7537dad`, this one.
+
+## PE-34 Lake tables whose deduplicated view picks arbitrarily between rows (LK-13)
+- Status: backlog (lake fix LK-13 is due in week 1 after the freeze; no pitch-edge change before it)
+- Priority: nice (no current reader is affected)
+- Raised by: the lake (key_collisions scan, 2026-11-09)
+- Evidence: where one write stored two different rows under one key, the view `<table>` keeps one of them by
+  DuckDB's row order. Of the lake's list, pitch-edge reads three football tables through the view; none of the
+  others (`fpl_gameweek_stats`, `tm_market_value_history`, the SEC, macro and calendar tables, `instrument_prices`).
+  Checked read-only against the lake log on 2026-11-09:
+  - `tm_injuries` (20 keys, all in today's view; `until_date`, `days_out`, `games_missed` differ): read by the
+    `lake_tm_injuries` mirror and the R3 pull. No feature, study or `ask` path reads either: injury features are
+    not point-in-time testable (R3 report), and those three columns are hindsight anyway.
+  - `club_alias` (58 keys, none in today's view): read by the R3 and R4 pulls. Every collision is in one write at
+    2026-09-25 13:35:51 UTC and was replaced 2 s later, before any pitch-edge pull.
+  - `fd_matches` (1 key, none in today's view): USA 2026-09-24 Seattle Sounders v Real Salt Lake, two Betfair
+    Exchange closes in the writes of 09-28, 10-01 and 10-02, replaced by a single row on 10-03. The study pulls
+    and the mirror (first fd sync 2026-11-05) all read after 10-03; the mirror holds one row for the key.
+- Fix: after LK-13 lands, re-sync `lake_tm_injuries`. Any future read pinned at a past T uses the lake's log form
+  (all rows of the key's newest write at or before T).
+- Blocked by: LK-13. Blocks: none.
+- Commits: none yet.
