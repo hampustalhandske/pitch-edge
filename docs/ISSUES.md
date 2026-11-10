@@ -721,6 +721,12 @@ projects; M8 traceability; S2 lake capacity; S4 decimal-odds instrument with CLV
   - `features/context.py:134`: `any_value(g.referee)`, `any_value(g.game_id)` when more than one game matches.
   - `odds/steam.py:90-92`: `sort_values("snapshot_ts")` (not stable) then `first()`/`last()`.
   - `data/sources/transfermarkt_open.py:99`: `any_value(club_name)` (a display name only).
+- Missed by the audit (found while building, 2026-11-10): `features/live_lineups.py` `_usual_xi_values`
+  (`ORDER BY v.date DESC LIMIT 1` ties on a same-day valuation) and `_latest_value` (`.iloc[0]` of an unordered
+  name match); `features/squad_value.py` (the `ASOF LEFT JOIN` ties on two valuations of one date;
+  `drop_duplicates("match_id")` on an unordered result); `paper/settle.py` `_kickoff_moved` and
+  `_own_snapshot_close`'s exchange branch (`sort_values("captured_at")` then the last row). A repo-wide sweep for
+  the remaining pick patterns goes with them.
 - Acceptance: every listed pick has a total order (all key columns, then a stable id) or an explicit refusal on a
   tie; one test per pick inserts tied rows in two orders and requires the same pick, and fails on the code
   without the tie-break (negative control).
@@ -883,4 +889,15 @@ projects; M8 traceability; S2 lake capacity; S4 decimal-odds instrument with CLV
   is missing; the write freeze is the lake's own and does not stop reads. The API also answers non-allowed clients
   with HTTP 423 during a read freeze, so the client must not retry a 423. Final shape to be confirmed by the lake.
 - Blocked by: none for the local switch; LK-126 for the B2 part. Blocks: none.
+- Commits: none yet.
+
+## PE-45 Squad-value missing share is NaN when nobody is missing
+- Status: open
+- Priority: should (feature correctness; found while building PE-36)
+- Raised by: pitch-edge (cleanup B1)
+- Evidence: in `features/squad_value.py` the missing value is a SQL sum over the usual XI's missing players, which
+  is NULL when none is missing, so `sv_*_missing_pct` comes out NaN instead of 0 for a full-strength side.
+- Acceptance: a side with no missing usual starter gets 0; a test covers no-one missing, one missing and all
+  missing, and fails on the current code.
+- Blocked by: none. Blocks: the feature-store rerun of the cleanup plan.
 - Commits: none yet.
