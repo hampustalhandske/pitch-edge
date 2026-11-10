@@ -822,7 +822,8 @@ projects; M8 traceability; S2 lake capacity; S4 decimal-odds instrument with CLV
   stream cut mid-body raises at once. The lake restarts on demand and will restart for LK-111, so any pull, sync
   or settle running then fails (the settle waits for the next cycle, `paper/settle.py:444`; the mirror resumes at
   its next start).
-- Acceptance: transient transport errors are retried with bounded backoff, a partial stream is never yielded as a
+- Acceptance (master ruling 2026-11-10): HTTP 503 and a refused or reset connection are retried with bounded,
+  logged backoff totalling about 6.5 minutes, so a lake restart is a quiet retry; a partial stream is never yielded as a
   result, and mocked tests cover each case, with a negative control (a non-transient 4xx is not retried).
 - Blocked by: none. Blocks: none.
 - Commits: none yet.
@@ -852,5 +853,10 @@ projects; M8 traceability; S2 lake capacity; S4 decimal-odds instrument with CLV
 - Acceptance: scheduled jobs run from a worktree at a named sha (or refuse on a dirty tree or an unrecorded sha),
   and they and the study pulls read a freeze state at start and refuse during it; tests plant a dirty tree and an
   active freeze.
+- Interim (master ruling 2026-11-10): `local.pitch-edge.lake-sync-fd` is disabled across reboots and unloaded from
+  2026-11-10 09:11 UTC (`launchctl disable`, then `bootout`; the plist stays). It comes back after this fix lands, and
+  in any case after the lake's freeze ends; a missed sync is caught up at its next run. Undo:
+  `launchctl enable gui/$(id -u)/local.pitch-edge.lake-sync-fd`, then
+  `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/local.pitch-edge.lake-sync-fd.plist`.
 - Blocked by: none (a lake-side freeze signal would replace the local one). Blocks: none.
 - Commits: none yet.
