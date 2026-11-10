@@ -114,7 +114,7 @@ class PolymarketOddsProvider(OddsProvider):
             f"""
             SELECT asset_id, timestamp_received, price FROM pmxt_orderbook
             WHERE condition_id IN ({cond_placeholders}) AND asset_id IN ({asset_placeholders})
-            ORDER BY timestamp_received
+            ORDER BY timestamp_received, asset_id, side, price, size
             """,
             list(side_by_condition) + list(asset_to_side),
         )
@@ -124,6 +124,8 @@ class PolymarketOddsProvider(OddsProvider):
         trades["side"] = trades["asset_id"].map(asset_to_side)
         trades["timestamp_received"] = pd.to_datetime(trades["timestamp_received"], utc=True, errors="coerce")
         trades = trades.dropna(subset=["timestamp_received"])
+        # Rows are in the warehouse key's order, so "last" at a shared timestamp is the row with the largest
+        # (side, price, size) whatever order the table returns them in.
         wide = trades.pivot_table(index="timestamp_received", columns="side", values="price", aggfunc="last")
         wide = wide.reindex(columns=["home", "draw", "away"]).ffill().dropna(how="any")
         if wide.empty:

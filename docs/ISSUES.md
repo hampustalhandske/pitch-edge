@@ -932,8 +932,12 @@ projects; M8 traceability; S2 lake capacity; S4 decimal-odds instrument with CLV
     `r1-common/diagnostics.py:31-32` (diagnostic), `r3-common/features.py:234` (two Club Elo slugs for one team
     on one date), `r3-common/features.py:367,378` (two manager tenures starting the same day),
     `r4-common/linking.py:159` (posts with the same `created_utc`).
+  - Found by the row-pick census (`tests/unit/test_row_pick_census.py`): `r6-cross-book-close/r6lib.py`
+    `load_panel` keeps the first pulled row per `match_id` (`drop_duplicates`) on an unordered lake frame, which
+    matters only if `fd_matches` repeats a (division, date, home, away) key. Every item above is allowlisted in
+    `tests/row_pick_allowlist.txt` with "PE-46"; fixing one means updating its entry to the total order it uses.
 - Acceptance: `upsert` callers state their order and the upsert uses it (or refuses a duplicate key); reviews are
   read in chain order; each study pick gets a total order in a new study-code version before its counted rerun,
   with the change recorded as a deviation in the study's report.
-- Blocked by: none (study items: the rerun plan). Blocks: the counted reruns of R1, R3, R4, R5.
+- Blocked by: none (study items: the rerun plan). Blocks: the counted reruns of R1, R3, R4, R5, and any rerun of R6.
 - Commits: none yet.

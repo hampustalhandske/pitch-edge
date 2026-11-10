@@ -1,0 +1,222 @@
+# Row-pick sites in src/pitch_edge (vendor/ excluded) and research/studies (test files excluded), checked by
+# tests/unit/test_row_pick_census.py. One entry per line: <path from the repo root>::<enclosing function or
+# <module>>::<pattern>[#n] | <total-order key or reason>. A fixed site states the total order it relies on; any
+# other site says why it cannot tie, why its order is not used, or which issue owns it.
+
+# FIXED: total order the pick relies on (src)
+src/pitch_edge/agents/qa_data.py::resolve_fixture::sort_values[stable] | total: (date, match_id); the earliest meeting wins
+src/pitch_edge/backtest/engine.py::WalkForwardBacktester._prepare::sort_values | total: (date, match_id), match_id unique
+src/pitch_edge/backtest/report.py::_best_strategy::sort_values[stable] | total: (model, mean_clv_pct desc, strategy)
+src/pitch_edge/backtest/report.py::_best_strategy::drop_duplicates | total: first row per model after the (model, mean_clv_pct desc, strategy) sort
+src/pitch_edge/data/alt/venues.py::VenueGeocoder.fetch_country_venues::sort_values[stable] | total: (club, venue, lat, lon)
+src/pitch_edge/data/alt/venues.py::VenueGeocoder.fetch_country_venues::drop_duplicates | total: first venue per club after the (club, venue, lat, lon) sort
+src/pitch_edge/edgelab/export.py::_resolution_frame::sort_values[stable] | total: one resolution per market
+src/pitch_edge/edgelab/export.py::_snapshot_frame::sort_values[stable] | total: (market, ts, level), one snapshot level per market and time
+src/pitch_edge/edgelab/export.py::export_prediction_market_dataset::sort_values[stable] | total: (symbol, ts, name); duplicate (market, ts) is refused above it
+src/pitch_edge/features/build.py::FeatureBuilder.build::sort_values | total: (date, match_id), match_id unique
+src/pitch_edge/features/build.py::FeatureBuilder._add_rolling_form::sort_values | total: (team, date, match_id)
+src/pitch_edge/features/context.py::club_id_map::sort_values[stable] | total: (last_season desc, numeric club_id, name)
+src/pitch_edge/features/context.py::club_id_map::drop_duplicates | total: first club per resolved team after the (last_season desc, club_id, name) sort
+src/pitch_edge/features/context.py::transfermarkt_context::sql:row_number | total: (game_id, referee NULLS LAST) per match
+src/pitch_edge/features/live_lineups.py::_latest_value::sql:order_by_limit | total: (date desc, market_value_in_eur desc) for one player; namesakes are refused
+src/pitch_edge/features/live_lineups.py::_usual_xi_values::sql:order_by_limit | total: (date desc, market_value_in_eur desc) per player
+src/pitch_edge/features/live_lineups.py::_usual_xi_values::sql:row_number | total: (mins desc, player_id)
+src/pitch_edge/features/squad_value.py::squad_value_context::sql:row_number#1 | total: smallest game_id per match (sv_games)
+src/pitch_edge/features/squad_value.py::squad_value_context::sql:row_number#2 | total: (timestamp desc, market_value_in_eur desc) per (player, day) (sv_val)
+src/pitch_edge/features/squad_value.py::squad_value_context::sql:row_number#3 | total: (mins desc, player_id) per match (usual XI)
+src/pitch_edge/features/squad_value.py::squad_value_context::sql:asof#1 | total: sv_val holds one row per (player_id, day), so the as-of match is unique
+src/pitch_edge/features/squad_value.py::squad_value_context::sql:asof#2 | total: sv_val holds one row per (player_id, day), so the as-of match is unique
+src/pitch_edge/lake/mirror.py::_store::sql:row_number | total: scraped_at desc NULLS LAST, then every non-key batch column ascending NULLS LAST (_dedupe_order)
+src/pitch_edge/models/sequence.py::chronological::sort_values[stable] | total: the keys passed in end with match_id
+src/pitch_edge/odds/providers.py::PolymarketOddsProvider.get_quotes::agg.last | total: rows ordered by the warehouse key (timestamp_received, asset_id, side, price, size), so the last row at a shared timestamp is fixed
+src/pitch_edge/odds/steam.py::detect_steam::sort_values[stable] | total: (match_id, bookmaker, side, snapshot_ts, price)
+src/pitch_edge/odds/steam.py::detect_steam::groupby.first | total: first row per (match, book, side) after the stable (…, snapshot_ts, price) sort
+src/pitch_edge/odds/steam.py::detect_steam::groupby.last | total: last row per (match, book, side) after the stable (…, snapshot_ts, price) sort
+src/pitch_edge/paper/settle.py::LakeCloseSource._fd_window::sort_values[stable] | total: (match_date, home_team, away_team); equally similar different pairs are refused in fd_match
+src/pitch_edge/paper/settle.py::_kickoff_moved::sort_values[stable] | total: (captured_at, kickoff_at); the latest capture's latest kickoff
+src/pitch_edge/paper/settle.py::_kickoff_moved::sort_values.pick | total: (captured_at, kickoff_at) stable sort, last row
+src/pitch_edge/paper/settle.py::_own_snapshot_close::sort_values[stable] | total: (captured_at, selection, source_event_id, quote_id)
+src/pitch_edge/paper/settle.py::_own_snapshot_close::drop_duplicates | total: smallest (source_event_id, quote_id) per (captured_at, selection)
+src/pitch_edge/paper/settle.py::_own_snapshot_close::groupby.tail | total: one quote per (captured_at, selection) after the dedupe, latest capture per selection
+src/pitch_edge/paper/settle.py::_pm_bar_close::sort_values[stable] | total: (captured_at, instrument_id)
+src/pitch_edge/paper/settle.py::_pm_bar_close::groupby.last | total: last row per selection after the stable (captured_at, instrument_id) sort
+src/pitch_edge/paper/store.py::PaperStore.latest_quotes::sql:row_number | total: (captured_at desc, source_event_id, quote_id)
+src/pitch_edge/paper/store.py::PaperStore.known_kickoffs::sql:row_number | total: (captured_at desc, kickoff_at desc)
+src/pitch_edge/paper/store.py::PaperStore.budget::sql:order_by_limit | total: (called_at desc, remaining asc); the balance only falls
+src/pitch_edge/paper/store.py::PaperStore.cost_per_call::sql:order_by_limit | total: (called_at desc, cost desc)
+src/pitch_edge/paper/store.py::PaperStore.last_used::sql:order_by_limit | total: (called_at desc, used desc); the count only grows
+src/pitch_edge/paper/strategies.py::_best_quote::sort_values[stable] | total: (decimal_odds desc, source, quote_id)
+src/pitch_edge/pipeline.py::build_rag_index::sort_values[stable]#1 | total: (date, match_id) before the 1500-row cut
+src/pitch_edge/pipeline.py::build_rag_index::sort_values[stable]#2 | total: (published_at, item_id) before the 2000-row cut
+src/pitch_edge/pipeline.py::build_rag_index::sql:order_by_limit | total: (date desc, eventId)
+src/pitch_edge/pipeline.py::upcoming_fixture_frame::sort_values[stable] | total: (date, home_team, away_team) before the 60-row cut
+src/pitch_edge/rag/documents.py::match_documents::sort_values[stable] | total: (date desc, match_id)
+src/pitch_edge/rag/documents.py::espn_documents::sort_values[stable] | total: (keyEventOrder, keyEventShortText) nulls last; rows tied on both carry the same text
+src/pitch_edge/rag/documents.py::espn_documents::drop_duplicates | total: keeps the smallest non-null text per keyEventOrder after the stable sort above
+src/pitch_edge/research/gates.py::_grid_points::sort_values | total: (run_at, trial_id), trial_id unique
+src/pitch_edge/research/gates.py::_results_of_record::sort_values | total: (run_at, trial_id), trial_id unique
+src/pitch_edge/research/gates.py::_results_of_record::groupby.head | total: first row per (hypothesis, test key, window) after the (run_at, trial_id) sort
+src/pitch_edge/research/ledger.py::Ledger._append::sql:order_by_limit | total: seq is the chain's primary key
+
+# CANNOT TIE, or the order is not used for a pick (src)
+src/pitch_edge/research/summary.py::_hypothesis_summary::sort_values#1 | cannot tie in effect: an (n, run_at) tie keeps grid order (gradable is built in registration grid order; the sort is a lexsort, which is stable)
+src/pitch_edge/research/summary.py::_hypothesis_summary::sort_values.pick | cannot tie in effect: an (n, run_at) tie keeps registration grid order
+src/pitch_edge/research/summary.py::_hypothesis_summary::sort_values#2 | display order of secondary segments; one result of record per window, a run_at tie needs two windows run in one microsecond
+src/pitch_edge/agents/qa_graph.py::_best_edge_row::max_key | ties only on exactly equal float edges; rows come in the fixed model order
+src/pitch_edge/backtest/report.py::league_table::sort_values | display order of the per-league table
+src/pitch_edge/backtest/slices.py::add_slice_columns::drop_duplicates | features hold one row per match_id (table key)
+src/pitch_edge/backtest/slices.py::select_trusted_model::idxmax | ties only on exactly equal float edge_bits; first in the slice-evidence CSV order
+src/pitch_edge/backtest/tick_timing.py::run_tick_timing_backtest::max_key | ties only on exactly equal outcome probabilities; fixed outcome order
+src/pitch_edge/backtest/tick_timing.py::run_tick_timing_backtest::sort_values#1 | row order only; no pick, and the models sort their own training frames
+src/pitch_edge/backtest/tick_timing.py::run_tick_timing_backtest::sort_values#2 | display order of the summary
+src/pitch_edge/cli.py::rag_eval::sort_values | reads the largest run_id value; a tie cannot change a value
+src/pitch_edge/cli.py::rag_eval::sort_values.pick | reads the largest run_id value; a tie cannot change a value
+src/pitch_edge/data/alt/news.py::sentiment_velocity::sort_values | feeds max, mean and counts per team; order not used
+src/pitch_edge/data/alt/pmxt_match_map.py::build_pmxt_match_map::min_key | a home/away pair meets once within ±1 day, so two equally close candidates cannot exist
+src/pitch_edge/data/alt/referee.py::referee_features::sort_values | a referee has at most one match per date
+src/pitch_edge/data/alt/travel.py::rest_and_congestion::sort_values | a team has at most one match per date
+src/pitch_edge/data/alt/weather.py::OpenMeteoWeather.forecast_at::idxmin | hourly forecast grid against a floored hour: one exact match
+src/pitch_edge/data/storage.py::Warehouse.health::sort_values | finished_at is stamped per run with microseconds by one writer; display only
+src/pitch_edge/data/storage.py::Warehouse.health::groupby.last#1 | finished_at is stamped per run with microseconds by one writer; display only
+src/pitch_edge/data/storage.py::Warehouse.health::groupby.last#2 | finished_at is stamped per run with microseconds by one writer; display only
+src/pitch_edge/data/storage.py::Warehouse.matches_with_closing_odds::agg.first | one odds row per (match, book, side, closing): snapshot_ts is the match date, one per match
+src/pitch_edge/edgelab/export.py::export_prediction_market_dataset::groupby.first | kickoff and market type are checked constant per market just above
+src/pitch_edge/features/build.py::FeatureBuilder.build::drop_duplicates#1 | context frames hold one row per match_id by construction
+src/pitch_edge/features/build.py::FeatureBuilder.build::drop_duplicates#2 | weather is keyed by match_id (table key)
+src/pitch_edge/features/context.py::news_context::sort_values | feeds windowed means and counts; order not used
+src/pitch_edge/lake/mirror.py::_open_run::sql:order_by_limit | at most one unfinished run per (table, full_refresh, since): a new run is created only when none is unfinished
+src/pitch_edge/lake/spine.py::spine_frame::drop_duplicates | match_id derives from the mirror's unique (division, match_date, home_team, away_team)
+src/pitch_edge/models/gbdt.py::GBDTMatchModel.feature_importance::sort_values | display order of feature importances
+src/pitch_edge/models/sequence.py::SequenceMatchModel._to_long::sort_values | a team has at most one match per date
+src/pitch_edge/models/sequence.py::SequenceMatchModel.observe::sort_values | a team has at most one match per date; exact duplicates are dropped first
+src/pitch_edge/models/stochastic.py::StochasticStrengthModel.fit::sort_values#1 | feeds a draw rate and a mean; order not used
+src/pitch_edge/models/stochastic.py::StochasticStrengthModel.fit::sort_values#2 | a team has at most one match per date, so per-team Elo diffs are ordered
+src/pitch_edge/paper/settle.py::LakeCloseSource.pinnacle_close::drop_duplicates | fixture columns are constant per fixture_id
+src/pitch_edge/paper/strategies.py::ControlFavPinnacle.decide::min_key | equal odds resolve to the first outcome in the fixed (home, draw, away) order
+src/pitch_edge/pipeline.py::build_rag_index::sort_values | reads the largest run_id value; a tie cannot change a value
+src/pitch_edge/pipeline.py::build_rag_index::sort_values.pick | reads the largest run_id value; a tie cannot change a value
+src/pitch_edge/pipeline.py::latest_backtest_tables::sort_values | reads the largest run_id value; a tie cannot change a value
+src/pitch_edge/pipeline.py::latest_backtest_tables::sort_values.pick | reads the largest run_id value; a tie cannot change a value
+src/pitch_edge/pipeline.py::upcoming_fixture_frame::sort_values#1 | a team has at most one home match per date
+src/pitch_edge/pipeline.py::upcoming_fixture_frame::sort_values#2 | a team has at most one away match per date
+src/pitch_edge/pipeline.py::upcoming_fixture_frame::groupby.tail#1 | a team has at most one home match per date
+src/pitch_edge/pipeline.py::upcoming_fixture_frame::groupby.tail#2 | a team has at most one away match per date
+src/pitch_edge/rag/documents.py::prediction_documents::max_key | ties only on exactly equal float edges; fixed outcome order
+src/pitch_edge/research/gates.py::_select::min_key | ties keep registration grid order (run is built from expand_grid)
+src/pitch_edge/research/summary.py::_top::max_key | ties keep hypothesis order, which follows registrations ORDER BY recorded_at, id
+
+# FIRST WINS BY DESIGN: the caller's or source's row order decides (src)
+src/pitch_edge/data/storage.py::Warehouse.upsert::drop_duplicates | PE-46: first row per key in the caller's order; some callers put the preferred row first, a value order needs a per-caller review
+src/pitch_edge/data/alt/news.py::NewsScanner.fetch_all_feeds::drop_duplicates | first wins by design: an item in several feeds keeps the first feed in the fixed FEEDS order
+src/pitch_edge/data/alt/referee_announcements.py::parse_assignments::drop_duplicates | first wins by design: the first mention in the article's text order
+src/pitch_edge/data/alt/wikipedia_attention.py::WikipediaAttentionSource.fetch_daily::drop_duplicates | first wins by design: overlapping fetch windows in request order report one count per (article, date)
+src/pitch_edge/data/sources/openfootball.py::OpenFootballSource._normalize::drop_duplicates | first wins by design: the first line for a fixture in the source file's order
+src/pitch_edge/data/sources/openfootball.py::OpenFootballSource.fetch_sweden::drop_duplicates | first wins by design: tiers fetched in a fixed order
+
+# STUDY CODE (research/studies): PE-46 items
+research/studies/r1-common/common.py::PriceBook.__init__::sort_values | PE-46: ties, fix before the counted rerun (duplicate bars per asset and hour, LK-13)
+research/studies/r1-common/common.py::PriceBook.__init__::drop_duplicates | PE-46: ties, fix before the counted rerun (duplicate bars per asset and hour, LK-13)
+research/studies/r1-common/diagnostics.py::roll_noise::sort_values | PE-46: ties, fix before the counted rerun (diagnostic; duplicate bars per hour)
+research/studies/r1-common/diagnostics.py::roll_noise::drop_duplicates | PE-46: ties, fix before the counted rerun (diagnostic; duplicate bars per hour)
+research/studies/r3-common/features.py::club_elo::drop_duplicates | PE-46: ties, fix before the counted rerun (two Club Elo slugs for one team on one date)
+research/studies/r3-common/features.py::manager::sort_values#1 | PE-46: ties, fix before the counted rerun (two tenures starting the same day)
+research/studies/r4-common/linking.py::link_reddit::sort_values#2 | PE-46: ties, fix before the counted rerun (posts with the same created_utc)
+research/studies/r4-common/linking.py::link_reddit::drop_duplicates | PE-46: ties, fix before the counted rerun (posts with the same created_utc)
+research/studies/r5-common/prices.py::OrderBooks.__init__::sort_values | PE-46: ties, fix before the counted rerun (duplicate book rows per condition and ts)
+research/studies/r5-common/prices.py::OrderBooks.__init__::drop_duplicates | PE-46: ties, fix before the counted rerun (duplicate book rows per condition and ts)
+research/studies/r5-common/prices.py::pm_hourly::sort_values | PE-46: ties, fix before the counted rerun (duplicate bars per asset and hour, LK-13)
+research/studies/r5-common/prices.py::pm_hourly::drop_duplicates | PE-46: ties, fix before the counted rerun (duplicate bars per asset and hour, LK-13)
+research/studies/r6-cross-book-close/r6lib.py::load_panel::drop_duplicates | PE-46 review: keeps the first pulled row if fd_matches repeats a (division, date, home, away) key
+
+# STUDY CODE: cannot tie, or the order is not used for a pick
+research/studies/r1-common/common.py::load_matches::drop_duplicates | exactly one condition per (match, side) is required just above; rows per key are identical in condition_id
+research/studies/r1-common/common.py::load_matches::agg.first#1 | pm_source is constant per fd_match_key
+research/studies/r1-common/common.py::load_matches::agg.first#2 | league_code is constant per fd_match_key
+research/studies/r1-common/common.py::load_matches::agg.first#3 | one market per (match, side) is required above, so one winning label per cell
+research/studies/r1-common/dq.py::main::sort_values | printed summary only
+research/studies/r1-pm-gap-trade-v1/run.py::decisions::sort_values | row order of the decision frame; results are per-decision sums and means
+research/studies/r2-common/harness.py::decisions::sort_values | total: (block, decision_id), decision_id unique
+research/studies/r2-common/strat.py::clv_matrix::sort_values[stable] | stable sort of a date Series; ties keep the frame's own order, which the caller fixes
+research/studies/r3-common/features.py::club_elo::sort_values#1 | (fd_key, date) is unique after the dedupe above; merge_asof needs it sorted
+research/studies/r3-common/features.py::club_elo::sort_values#2 | merge_asof left side; each left row is matched on its own, a tie does not change a match
+research/studies/r3-common/features.py::club_elo::sort_values#3 | restores row order by the unique index column i
+research/studies/r3-common/features.py::manager::sort_values#2 | merge_asof left side; each left row is matched on its own
+research/studies/r3-common/features.py::pi_ratings::sort_values[stable]#1 | stable by match_date; the frame arrives in fd pull order, one row per match
+research/studies/r3-common/features.py::pi_ratings::sort_values[stable]#2 | stable by snapshot_date; each target row is looked up on its own
+research/studies/r3-common/features.py::schedule::sort_values | rows are exact-deduplicated (key, day) pairs; the arrays are sets of days
+research/studies/r3-common/features.py::tm_mapping::sort_values | a vote tie fails the votes >= 3 x runner-up filter, so a tied best is never kept
+research/studies/r3-common/features.py::tm_mapping::drop_duplicates | a vote tie fails the votes >= 3 x runner-up filter, so a tied best is never kept
+research/studies/r3-common/features.py::xg_luck::sort_values#1 | a team has at most one match per day
+research/studies/r3-common/features.py::xg_luck::sort_values#2 | merge_asof left side; each left row is matched on its own
+research/studies/r3-common/features.py::xg_luck::sort_values#3 | restores row order by the unique index column i
+research/studies/r3-common/features.py::xg_luck::sort_values[stable] | stable by day for merge_asof; (fd_key, day) is unique
+research/studies/r3-common/r3lib.py::reproduction_check::sort_values | total: (run_at, trial_id), trial_id unique
+research/studies/r3-common/r3lib.py::reproduction_check::sort_values.pick | total: (run_at, trial_id), trial_id unique
+research/studies/r3-features/run.py::main::sort_values#1 | total: (match_date, match_id), match_id unique
+research/studies/r3-features/run.py::main::sort_values#2 | total: (match_date, match_id), match_id unique
+research/studies/r3-strategy/ablation.py::main::sort_values | total: (match_date, match_id), match_id unique
+research/studies/r3-strategy/run.py::main::sort_values#1 | total: (match_date, match_id), match_id unique
+research/studies/r3-strategy/run.py::main::sort_values#2 | total: (match_date, match_id), match_id unique
+research/studies/r4-common/coverage.py::by_league::sort_values | display order of a coverage table
+research/studies/r4-common/linking.py::link_reddit::sort_values#1 | sorted for a searchsorted lookup by kickoff; matches are found by value
+research/studies/r4-common/linking.py::pm_groups::agg.first#1 | one market per (group, side) is required above, so one condition per cell
+research/studies/r4-common/linking.py::pm_groups::agg.first#2 | home_club_id is constant per event group
+research/studies/r4-common/linking.py::pm_groups::agg.first#3 | away_club_id is constant per event group
+research/studies/r4-common/linking.py::pm_groups::agg.first#4 | fd_match_key is constant per event group
+research/studies/r4-common/linking.py::pm_groups::agg.first#5 | event_slug is constant per event group
+research/studies/r4-common/model.py::h1_frame::sort_values | total: (ko, decision_id, h_before), one row per decision and horizon
+research/studies/r4-common/model.py::h2_frame::sort_values | row order only; the frame feeds a regression over all rows
+research/studies/r4-common/model.py::per_decision::agg.first#1 | block is constant per decision_id
+research/studies/r4-common/model.py::per_decision::agg.first#2 | league is constant per decision_id
+research/studies/r4-common/model.py::per_decision::sort_values | total: (block, decision_id), one row per decision
+research/studies/r4-common/panel.py::Bars.__init__::sort_values | (condition_id, H) is unique after pm_hourly's dedupe
+research/studies/r4-common/pull_data.py::pull_bars::drop_duplicates | one kickoff per condition_id
+research/studies/r4-common/pull_data.py::pull_bars::sort_values | chunking order of lake queries only
+research/studies/r5-common/family_bh.py::main::sort_values#1 | total: (run_at, trial_id), trial_id unique
+research/studies/r5-common/family_bh.py::main::groupby.head | total: first row per (hypothesis, config) after the (run_at, trial_id) sort
+research/studies/r5-common/family_bh.py::main::sort_values#2 | printed table only
+research/studies/r5-common/mapping.py::kalshi_events::agg.first#1 | series_ticker is constant per event_ticker
+research/studies/r5-common/mapping.py::kalshi_events::agg.first#2 | home is constant per event_ticker
+research/studies/r5-common/mapping.py::kalshi_events::agg.first#3 | away is constant per event_ticker
+research/studies/r5-common/mapping.py::kalshi_events::agg.first#4 | date is constant per event_ticker
+research/studies/r5-common/mapping.py::main::sort_values | a score tie between the top two is marked ambiguous (margin check) and not mapped
+research/studies/r5-common/mapping.py::main::groupby.head#1 | a score tie between the top two is marked ambiguous (margin check) and not mapped
+research/studies/r5-common/mapping.py::main::groupby.head#2 | a score tie between the top two is marked ambiguous (margin check) and not mapped
+research/studies/r5-common/mapping.py::main::groupby.nth | a score tie between the top two is marked ambiguous (margin check) and not mapped
+research/studies/r5-common/mapping.py::pm_groups::agg.first#1 | one market per (group, side) is required above, so one condition per cell
+research/studies/r5-common/mapping.py::pm_groups::agg.first#2 | fd_match_key is constant per event group
+research/studies/r5-common/mapping.py::pm_groups::agg.first#3 | event_slug is constant per event group
+research/studies/r5-common/partb.py::panel::sort_values#1 | merge_asof right side; (condition_id, H) is unique after pm_hourly's dedupe
+research/studies/r5-common/partb.py::panel::sort_values#2 | merge_asof left side; each left row is matched on its own
+research/studies/r5-common/partb.py::panel::sort_values#3 | total: (event_ticker, side, H), one candle per hour
+research/studies/r5-common/pull_prices.py::_windowed::drop_duplicates | one kickoff per key
+research/studies/r5-common/pull_prices.py::_windowed::sort_values | chunking order of lake queries only
+research/studies/r5-common/resolution_check.py::main::drop_duplicates | one row per condition_id in the R5 1X2 market file; a check script
+research/studies/r5-xv-arb-v1/run.py::main::sort_values | display order of a per-series summary
+research/studies/r5-xv-arb-v1/run.py::wide::agg.first#1 | one quote per (event, hour, side) cell
+research/studies/r5-xv-arb-v1/run.py::wide::agg.first#2 | ko is constant per event_ticker
+research/studies/r5-xv-arb-v1/run.py::wide::agg.first#3 | match_day is constant per event_ticker
+research/studies/r5-xv-arb-v1/run.py::wide::agg.first#4 | series is constant per event_ticker
+research/studies/r5-xv-leadlag-v1/run.py::close_frame::sort_values | one panel row per (event_ticker, side, H)
+research/studies/r5-xv-leadlag-v1/run.py::close_frame::groupby.tail | one panel row per (event_ticker, side, H), so the latest H is unique
+research/studies/r6-cross-book-close/h3.py::main::sort_values | display order of a ranking table
+research/studies/r6-cross-book-close/r6lib.py::load_panel::sort_values | total: (match_date, match_id), match_id unique after the dedupe
+research/studies/r6-cross-book-close/run.py::run_prediction::sort_values#1 | total: (match_date, match_id), match_id unique
+research/studies/r6-cross-book-close/run.py::run_prediction::sort_values#2 | total: (match_date, match_id), match_id unique
+research/studies/r6-cross-book-close/run.py::run_prediction::sort_values#3 | total: (match_date, match_id), match_id unique
+research/studies/r7-outcome-models/generate.py::main::sort_values | total: (date, match_id), match_id unique
+research/studies/r7-outcome-models/probe_elo.py::<module>::sort_values | total: (team, date, mid)
+research/studies/r7-outcome-models/run.py::stability::sort_values | total: (date, match_id), match_id unique
+research/studies/r7-outcome-models/run.py::top4_frame::sort_values | total: (window, edge desc, match_id)
+research/studies/r7-outcome-models/run.py::top4_frame::groupby.head | total: first TOP_N per window after the (window, edge desc, match_id) sort
+research/studies/soft-open-vs-betfair-common/sobf.py::per_decision::sort_values | total: (block, decision_id), decision_id unique
+research/studies/soft-open-vs-betfair-common/sobf.py::pick::min_key | ties keep the candidate list order, which the caller builds from a fixed grid
+research/studies/soft-open-vs-betfair-exchange-lag/exchange_lag.py::build_paths::sort_values[stable] | total: (bookmaker, outcome, observed_ns); a duplicate is refused with ValueError
+research/studies/soft-open-vs-betfair-exchange-lag/exchange_lag.py::decide::sort_values[stable]#1 | total: (fixture_id, j, t_ns)
+research/studies/soft-open-vs-betfair-exchange-lag/exchange_lag.py::decide::groupby.head#1 | total: first row per (fixture, j) after the (fixture_id, j, t_ns) sort
+research/studies/soft-open-vs-betfair-exchange-lag/exchange_lag.py::decide::sort_values[stable]#2 | total: (fixture_id, t_ns, shortening desc, j)
+research/studies/soft-open-vs-betfair-exchange-lag/exchange_lag.py::decide::groupby.head#2 | total: first row per fixture after the (fixture_id, t_ns, shortening desc, j) sort
+research/studies/soft-open-vs-betfair-exchange-lag/exchange_lag.py::decide::sort_values[stable]#3 | total: (kickoff_ns, fixture_id), one bet per fixture
+research/studies/soft-open-vs-betfair-exchange-lag/exchange_lag.py::per_decision::sort_values | total: (block, decision_id), decision_id unique
+research/studies/soft-open-vs-betfair-gbm-close/gbm_close.py::train_universe::sort_values[stable] | stable by match_date; the frame arrives in a fixed pull order, and the model fit does not depend on row order within a date
+research/studies/soft-open-vs-betfair-late-season-stakes/late_stakes.py::count_bets::groupby.first | complete is constant per (division, season)

@@ -26,12 +26,13 @@ from pitch_edge.features.context import club_id_map, transfermarkt_context
 from pitch_edge.features.live_lineups import _latest_value, _usual_xi_values
 from pitch_edge.features.squad_value import squad_value_context
 from pitch_edge.lake.mirror import MIRRORS, sync_mirror
+from pitch_edge.odds.providers import PolymarketOddsProvider
 from pitch_edge.odds.steam import detect_steam
 from pitch_edge.odds.utils import no_vig_probabilities
 from pitch_edge.paper.pricing import power_devig_odds
 from pitch_edge.paper.settle import LakeCloseSource, PmBar, _kickoff_moved, _own_snapshot_close, _pm_bar_close
 from pitch_edge.paper.store import PaperStore, Quote
-from pitch_edge.rag.documents import match_documents
+from pitch_edge.rag.documents import espn_documents, match_documents
 
 pytestmark = pytest.mark.unit
 
@@ -897,3 +898,65 @@ def test_best_quote_breaks_an_odds_tie_by_source_then_quote_id(reverse):
     cands = cands.iloc[::-1] if reverse else cands
     top = _best_quote(cands)
     assert (top["source"], top["quote_id"]) == ("odds_api:betvictor", "q2")
+
+
+# --------------------------------------------------------------------------- Polymarket ticks, ESPN key events
+class _DuckWarehouse:
+    """A warehouse stand-in: `query` runs on an in-memory DuckDB whose tables are inserted in a given row order."""
+
+    def __init__(self, tables: dict[str, pd.DataFrame]) -> None:
+        self.con = duckdb.connect()
+        for name, frame in tables.items():
+            self.con.register("_src", frame)
+            self.con.execute(f"CREATE TABLE {name} AS SELECT * FROM _src")
+            self.con.unregister("_src")
+
+    def query(self, sql: str, params: list[Any] | None = None) -> pd.DataFrame:
+        return self.con.execute(sql, params or []).df()
+
+
+def test_polymarket_ticks_break_a_timestamp_tie_by_side_price_and_size():
+    sides = {"c_home": "home", "c_draw": "draw", "c_away": "away"}
+    book = [
+        {"condition_id": "c_home", "asset_id": "a_home", "timestamp_received": "2024-03-02 10:00:00",
+         "side": side, "price": price, "size": 10.0}
+        for side, price in (("ask", 0.52), ("bid", 0.48), ("ask", 0.55), ("bid", 0.47))
+    ] + [
+        {"condition_id": cid, "asset_id": f"a_{s}", "timestamp_received": "2024-03-02 10:00:00",
+         "side": "bid", "price": 0.25, "size": 5.0}
+        for cid, s in sides.items() if s != "home"
+    ]  # fmt: skip
+    homes = []
+    for rows in _both_orders(book):
+        wh = _DuckWarehouse(
+            {
+                "pmxt_match_map": pd.DataFrame(
+                    {"match_id": "m1", "condition_id": list(sides), "outcome_side": list(sides.values())}
+                ),
+                "dim_soccer_markets": pd.DataFrame(
+                    {"condition_id": list(sides), "clob_token_ids": [f'["a_{s}", "n_{s}"]' for s in sides.values()]}
+                ),
+                "pmxt_orderbook": pd.DataFrame(rows),
+            }
+        )
+        quotes = PolymarketOddsProvider(wh).get_quotes("m1")  # type: ignore[arg-type]
+        homes.append([q.home_odds for q in quotes])
+    assert homes[0] == homes[1] == [pytest.approx(1 / 0.48)]
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+def test_espn_key_events_keep_the_smallest_text_of_an_event_order(reverse):
+    fixtures = pd.DataFrame(
+        [{"matched_match_id": "m1", "eventId": 7, "home_team": "A", "away_team": "B", "homeTeamScore": 1,
+          "awayTeamScore": 0, "league_code": "E0", "date": "2024-03-02"}]
+    )  # fmt: skip
+    events = pd.DataFrame(
+        {
+            "eventId": 7,
+            "keyEventOrder": [1, 1, 1, 2],
+            "keyEventShortText": [None, "Goal - Smith", "Goal - Jones", "Yellow card"],
+        }
+    )
+    events = events.iloc[::-1] if reverse else events
+    (doc,) = espn_documents(fixtures, pd.DataFrame(), events)
+    assert "Key events: Goal - Jones; Yellow card." in doc.text

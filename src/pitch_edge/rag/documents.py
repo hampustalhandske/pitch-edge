@@ -221,9 +221,10 @@ def espn_documents(fixtures: pd.DataFrame, team_stats: pd.DataFrame, key_events:
         ev = events_by_event.get(r["eventId"])
         if ev is not None and not ev.empty:
             # Substitutions/goals carry one row per participant (scorer+assister, sub in+out),
-            # all sharing the same keyEventOrder — keep one row per order so the list reads clean.
+            # all sharing the same keyEventOrder — keep one row per order so the list reads clean:
+            # the smallest non-null text of that order, so the pick does not depend on row order.
             texts = (
-                ev.sort_values("keyEventOrder")
+                ev.sort_values(["keyEventOrder", "keyEventShortText"], kind="stable", na_position="last")
                 .drop_duplicates(subset="keyEventOrder")["keyEventShortText"]
                 .dropna()
                 .head(8)
