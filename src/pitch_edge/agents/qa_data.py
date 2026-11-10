@@ -64,7 +64,9 @@ def resolve_fixture(
     features: pd.DataFrame, as_of: pd.Timestamp, home_team: str, away_team: str, window_days: int = 60
 ) -> pd.DataFrame | None:
     """The candidate window's row for this fixture (fuzzy team-name matched, either side), or
-    `None` if no real-odds fixture between these two teams exists in the window."""
+    `None` if no real-odds fixture between these two teams exists in the window. When the two meet more than
+    once with the asked home side, or else more than once reversed, the earliest (by date, then match_id) is
+    returned."""
     window = filter_window(features, as_of, window_days)
     candidates = window[real_odds_mask(window)]
     if candidates.empty:
@@ -77,7 +79,7 @@ def resolve_fixture(
     match = candidates[(candidates["home_team"] == home) & (candidates["away_team"] == away)]
     if match.empty:
         match = candidates[(candidates["home_team"] == away) & (candidates["away_team"] == home)]
-    return match.iloc[[0]] if not match.empty else None
+    return match.sort_values(["date", "match_id"], kind="stable").iloc[[0]] if not match.empty else None
 
 
 def run_models(

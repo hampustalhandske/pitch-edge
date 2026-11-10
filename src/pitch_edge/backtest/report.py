@@ -103,11 +103,15 @@ def _overall_edge(calib: pd.DataFrame) -> pd.DataFrame:
 
 
 def _best_strategy(summary: pd.DataFrame) -> pd.DataFrame:
-    """One row per model: the staking strategy with the best CLV (the edge evidence), not the
-    best ROI (noise over a few hundred bets)."""
+    """One row per model, ordered by model: the staking strategy with the best CLV (the edge evidence), not
+    the best ROI (noise over a few hundred bets). Strategies tied on CLV (the same bets under another stake
+    size) resolve to the alphabetically first strategy."""
     if summary.empty:
         return summary
-    return summary.loc[summary.groupby("model")["mean_clv_pct"].idxmax()].reset_index(drop=True)
+    ranked = summary.dropna(subset=["mean_clv_pct"]).sort_values(
+        ["model", "mean_clv_pct", "strategy"], ascending=[True, False, True], kind="stable"
+    )
+    return ranked.drop_duplicates("model").reset_index(drop=True)
 
 
 def write_report(

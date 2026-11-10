@@ -11,20 +11,27 @@ from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 import duckdb
+import numpy as np
 import pandas as pd
 import pyarrow as pa
 import pytest
 
+from pitch_edge import pipeline
+from pitch_edge.agents.qa_data import resolve_fixture
+from pitch_edge.backtest.report import _best_strategy
+from pitch_edge.data.alt.venues import VenueGeocoder
 from pitch_edge.data.sources.transfermarkt_open import TransfermarktOpenSource
 from pitch_edge.data.storage import Warehouse
-from pitch_edge.features.context import transfermarkt_context
-from pitch_edge.features.live_lineups import _usual_xi_values
+from pitch_edge.features.context import club_id_map, transfermarkt_context
+from pitch_edge.features.live_lineups import _latest_value, _usual_xi_values
 from pitch_edge.features.squad_value import squad_value_context
 from pitch_edge.lake.mirror import MIRRORS, sync_mirror
 from pitch_edge.odds.steam import detect_steam
 from pitch_edge.odds.utils import no_vig_probabilities
-from pitch_edge.paper.settle import LakeCloseSource, PmBar, _pm_bar_close
+from pitch_edge.paper.pricing import power_devig_odds
+from pitch_edge.paper.settle import LakeCloseSource, PmBar, _kickoff_moved, _own_snapshot_close, _pm_bar_close
 from pitch_edge.paper.store import PaperStore, Quote
+from pitch_edge.rag.documents import match_documents
 
 pytestmark = pytest.mark.unit
 
@@ -412,3 +419,446 @@ def test_substitution_profile_names_a_club_by_its_smallest_name(tmp_path, revers
     con.close()
     prof = TransfermarktOpenSource(cache_dir=tmp_path).substitution_profile(min_games=1)
     assert prof["club_name"].tolist() == ["AFC"]
+
+
+# =========================================================================== follow-up picks
+# --------------------------------------------------------------------------- live_lineups valuation lookups
+def _valuation_rows(wh: Warehouse, rows: list[tuple[int, str, int]]) -> None:
+    """Create `tm_player_valuations` and insert `rows` (player_id, date, value) one by one in the given order,
+    bypassing the warehouse key so two values of one (player, date) can be stored."""
+    wh._conn.execute("CREATE TABLE tm_player_valuations (player_id BIGINT, date TIMESTAMP, market_value_in_eur BIGINT)")
+    for row in rows:
+        wh._conn.execute("INSERT INTO tm_player_valuations VALUES (?, ?, ?)", list(row))
+
+
+def test_usual_xi_value_breaks_a_same_day_valuation_tie_by_the_larger_value(tmp_path):
+    same_day = [(1, "2024-01-01", 5_000_000), (1, "2024-01-01", 7_000_000), (1, "2024-01-01", 6_000_000)]
+    picks = []
+    for i, order in enumerate(_both_orders(same_day)):
+        with Warehouse(tmp_path / f"wh{i}.duckdb") as wh:
+            _valuation_rows(wh, order)
+            apps = pd.DataFrame(
+                {
+                    "appearance_id": ["a1"],
+                    "player_id": [1],
+                    "player_club_id": [1],
+                    "date": [pd.Timestamp("2024-06-01")],
+                    "minutes_played": [90],
+                }
+            )
+            wh.upsert("tm_appearances", apps, keys=["appearance_id"])
+            wh.upsert("tm_players", pd.DataFrame({"player_id": [1], "name": ["P1"]}), keys=["player_id"])
+            picks.append(_usual_xi_values(wh, 1, date(2024, 8, 1))["value"].tolist())
+    assert picks == [[7_000_000], [7_000_000]]
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+def test_latest_value_refuses_a_name_shared_by_two_players(tmp_path, reverse):
+    players = [(7, "Danilo"), (3, "Danilo"), (5, "Rodri")]
+    if reverse:
+        players.reverse()
+    with Warehouse(tmp_path / "wh.duckdb") as wh:
+        _valuation_rows(wh, [(7, "2024-01-01", 10_000_000), (3, "2024-01-01", 20_000_000), (5, "2024-01-01", 9)])
+        wh.upsert(
+            "tm_players",
+            pd.DataFrame({"player_id": [p for p, _ in players], "name": [n for _, n in players]}),
+            keys=["player_id"],
+        )
+        assert _latest_value(wh, "danilo", date(2024, 8, 1)) == 0.0  # ambiguous: no value rather than a guess
+        assert _latest_value(wh, "Rodri", date(2024, 8, 1)) == 9.0
+
+
+# --------------------------------------------------------------------------- squad_value as-of value and game pick
+def _seed_one_game_lineups(wh: Warehouse, games: dict[int, list[int]], vals: list[tuple[int, str, int]]) -> None:
+    """tm_games / tm_game_lineups for club 1 at home to club 2 on 2024-08-01, `games` = {game_id: starters}, and
+    the valuations `vals` (player_id, date, value) upserted in the given order. `tm_appearances` gets one row of
+    an unrelated club when it does not exist yet, so the usual-XI step has its table."""
+    if not wh.table_exists("tm_appearances"):
+        wh.upsert(
+            "tm_appearances",
+            pd.DataFrame(
+                {
+                    "appearance_id": ["other"],
+                    "player_id": [999],
+                    "player_club_id": [9],
+                    "date": [pd.Timestamp("2024-06-01")],
+                    "minutes_played": [90],
+                }
+            ),
+            keys=["appearance_id"],
+        )
+    wh.upsert(
+        "tm_games",
+        pd.DataFrame(
+            {"game_id": list(games), "date": pd.Timestamp("2024-08-01"), "home_club_id": 1, "away_club_id": 2}
+        ),
+        keys=["game_id"],
+    )
+    lineups = [(g, p) for g, starters in games.items() for p in starters]
+    wh.upsert(
+        "tm_game_lineups",
+        pd.DataFrame(
+            {
+                "game_lineups_id": [f"{g}_{p}" for g, p in lineups],
+                "game_id": [g for g, _ in lineups],
+                "club_id": 1,
+                "player_id": [p for _, p in lineups],
+                "type": "starting_lineup",
+            }
+        ),
+        keys=["game_lineups_id"],
+    )
+    for pid, when, value in vals:
+        wh.upsert(
+            "tm_player_valuations",
+            pd.DataFrame({"player_id": [pid], "date": [pd.Timestamp(when)], "market_value_in_eur": [value]}),
+            keys=["player_id", "date"],
+        )
+
+
+def test_squad_value_takes_the_latest_valuation_of_a_day(tmp_path):
+    vals = [(5, "2024-01-01 00:00", 9_000_000), (5, "2024-01-01 12:00", 3_000_000)]  # one day, two stamps
+    picks = []
+    for i, order in enumerate(_both_orders(vals)):
+        with Warehouse(tmp_path / f"wh{i}.duckdb") as wh:
+            _seed_one_game_lineups(wh, {100: [5]}, order)
+            out = squad_value_context(wh, pd.DataFrame({"match_id": ["m1"], "tm_game_id": [100]}))
+            picks.append(float(out["sv_home_xi_value"].iloc[0]))
+    assert picks == [pytest.approx(np.log1p(3_000_000))] * 2
+
+
+def test_squad_value_uses_the_smallest_game_id_when_a_match_links_two_games(tmp_path):
+    vals = [(1, "2024-01-01", 1_000_000), (2, "2024-01-01", 2_000_000)]
+    links = [("m1", 101), ("m1", 100)]
+    picks = []
+    for i, order in enumerate(_both_orders(links)):
+        with Warehouse(tmp_path / f"wh{i}.duckdb") as wh:
+            _seed_one_game_lineups(wh, {100: [1], 101: [2]}, vals)
+            ctx = pd.DataFrame({"match_id": [m for m, _ in order], "tm_game_id": [g for _, g in order]})
+            out = squad_value_context(wh, ctx)
+            picks.append(out[["match_id", "sv_home_xi_value"]].values.tolist())
+    assert picks == [[["m1", pytest.approx(np.log1p(1_000_000))]]] * 2
+
+
+# --------------------------------------------------------------------------- PE-45: missing share
+@pytest.mark.parametrize(("absent", "share"), [((), 0.0), ((11,), 1 / 11), (tuple(range(1, 12)), 1.0)])
+def test_squad_value_missing_share_is_zero_one_part_or_all(tmp_path, absent, share):
+    """Usual XI: players 1-11 (club 1, equal value). Today's lineup fields the usual XI minus `absent`, plus
+    player 99 so the lineup is never empty."""
+    with Warehouse(tmp_path / "wh.duckdb") as wh:
+        apps = pd.DataFrame(
+            {
+                "appearance_id": [f"a{p}" for p in range(1, 12)],
+                "player_id": list(range(1, 12)),
+                "player_club_id": 1,
+                "date": pd.Timestamp("2024-06-01"),
+                "minutes_played": 90,
+            }
+        )
+        wh.upsert("tm_appearances", apps, keys=["appearance_id"])
+        starters = [p for p in range(1, 12) if p not in absent] + [99]
+        _seed_one_game_lineups(wh, {100: starters}, [(p, "2024-01-01", 1_000_000) for p in [*range(1, 12), 99]])
+        out = squad_value_context(wh, pd.DataFrame({"match_id": ["m1"], "tm_game_id": [100]}))
+    assert out["sv_home_missing_pct"].iloc[0] == pytest.approx(share)
+
+
+# --------------------------------------------------------------------------- settle: kickoff move, own snapshot
+def test_kickoff_moved_breaks_a_capture_time_tie_by_the_later_kickoff(tmp_path):
+    late = CAPTURED + timedelta(hours=3)
+    quotes = [
+        _quote("e1", "home", source="odds_api:pinnacle", decimal_odds=2.0),
+        _quote("e1", "home", source="odds_api:pinnacle", decimal_odds=2.0, captured=late),
+        _quote(
+            "e1", "home", source="odds_api:betfair_ex_uk", decimal_odds=2.0, captured=late, ko=KO + timedelta(hours=5)
+        ),
+    ]
+    picks = []
+    for store in _stores(tmp_path, [quotes, [quotes[0], quotes[2], quotes[1]]]):
+        fixture = str(store.fixtures()["fixture_key"].iloc[0])
+        assert store.quotes_for_fixture(fixture, before=KO + timedelta(days=1))["fixture_key"].nunique() == 1
+        picks.append(_kickoff_moved(store, fixture, KO, KO + timedelta(days=1)))
+    assert picks == [KO + timedelta(hours=5)] * 2
+
+
+def test_own_snapshot_exchange_close_takes_the_smallest_event_id_at_a_tied_capture(tmp_path):
+    decided = CAPTURED - timedelta(hours=1)
+    books = {"pm1": (0.40, 0.30, 0.30), "pm2": (0.50, 0.25, 0.25)}
+    quotes = [
+        _quote(eid, s, source="polymarket", bid=p - 0.02, ask=p + 0.02, instrument_id=f"{eid}-{s}")
+        for eid, probs in books.items()
+        for s, p in zip(SEL, probs, strict=True)
+    ]
+    picks = []
+    for store in _stores(tmp_path, _both_orders(quotes)):
+        fixture = str(store.fixtures()["fixture_key"].iloc[0])
+        assert store.quotes_for_fixture(fixture, before=KO)["source_event_id"].nunique() == 2
+        close = _own_snapshot_close(store, fixture, KO, "home", "polymarket", decided)
+        picks.append(None if close is None else close.closing_price)
+    assert picks == [pytest.approx(1 / 0.40)] * 2
+
+
+def test_own_snapshot_bookmaker_close_takes_the_smallest_event_id_at_a_tied_capture(tmp_path):
+    decided = CAPTURED - timedelta(hours=1)
+    books = {"e1": (2.0, 3.5, 4.0), "e2": (2.2, 3.4, 3.6)}
+    quotes = [_quote(eid, s, decimal_odds=o) for eid, odds in books.items() for s, o in zip(SEL, odds, strict=True)]
+    picks = []
+    for store in _stores(tmp_path, _both_orders(quotes)):
+        fixture = str(store.fixtures()["fixture_key"].iloc[0])
+        close = _own_snapshot_close(store, fixture, KO, "home", "odds_api:williamhill", decided)
+        picks.append(None if close is None else (close.closing_price, close.fair_close_odds))
+    fair_home = power_devig_odds(list(books["e1"]))[0]
+    assert picks == [(2.0, pytest.approx(1 / fair_home))] * 2
+
+
+# =========================================================================== sweep picks
+# --------------------------------------------------------------------------- context.club_id_map
+@pytest.mark.parametrize("reverse", [False, True])
+def test_club_id_map_breaks_a_last_season_tie_by_the_smallest_club_id(tmp_path, reverse):
+    clubs = [("7", "Team00 FC"), ("12", "Team00 Club"), ("3", "Team00")]
+    if reverse:
+        clubs.reverse()
+    with Warehouse(tmp_path / "wh.duckdb") as wh:
+        wh.upsert(
+            "tm_clubs",
+            pd.DataFrame({"club_id": [c for c, _ in clubs], "name": [n for _, n in clubs], "last_season": 2025}),
+            keys=["club_id"],
+        )
+        assert club_id_map(wh, ["Team00", "Team01"]) == {"Team00": 3}
+
+
+# --------------------------------------------------------------------------- settle.fd_match
+class FrameLake:
+    """Answers every query with one fixed frame."""
+
+    def __init__(self, frame: pd.DataFrame):
+        self.frame = frame
+
+    def sql(self, query, params=None):
+        return self.frame
+
+
+FD_COLS = [
+    "match_date",
+    "home_team",
+    "away_team",
+    "ft_result",
+    "betfair_ex_home_close",
+    "betfair_ex_draw_close",
+    "betfair_ex_away_close",
+]
+
+
+def test_fd_match_refuses_two_equally_similar_fixtures():
+    rows = [
+        (pd.Timestamp("2026-10-24"), "Alphaville United", "Betaford Town", "H", 1.8, 3.9, 5.0),
+        (pd.Timestamp("2026-10-24"), "Alphaville City", "Betaford Town", "A", 2.5, 3.3, 3.0),
+    ]
+    picks = [
+        LakeCloseSource(FrameLake(pd.DataFrame(order, columns=FD_COLS))).fd_match(
+            "EPL", KO, "Alphaville", "Betaford Town"
+        )
+        for order in _both_orders(rows)
+    ]
+    assert picks == [None, None]
+
+
+# --------------------------------------------------------------------------- qa_data.resolve_fixture
+def test_resolve_fixture_takes_the_earliest_meeting_in_the_window():
+    rows = [
+        ("m-late", pd.Timestamp("2024-03-20"), "Arsenal", "Chelsea"),
+        ("m-cup", pd.Timestamp("2024-03-05"), "Chelsea", "Arsenal"),
+        ("m-early", pd.Timestamp("2024-03-05"), "Arsenal", "Chelsea"),
+    ]
+    picks = []
+    for order in _both_orders(rows):
+        feats = pd.DataFrame(order, columns=["match_id", "date", "home_team", "away_team"]).assign(
+            PSH=2.0, PSD=3.4, PSA=3.8
+        )
+        got = resolve_fixture(feats, pd.Timestamp("2024-03-01"), "Arsenal", "Chelsea")
+        picks.append(got["match_id"].tolist())
+    assert picks == [["m-early"]] * 2
+
+
+# --------------------------------------------------------------------------- backtest report: best staking rule
+def test_best_strategy_breaks_a_mean_clv_tie_by_strategy_name():
+    rows = [
+        {"model": "gbdt", "strategy": "kelly", "n_bets": 10, "mean_clv_pct": 1.5},
+        {"model": "gbdt", "strategy": "flat", "n_bets": 10, "mean_clv_pct": 1.5},
+        {"model": "gbdt", "strategy": "value", "n_bets": 10, "mean_clv_pct": 0.5},
+        {"model": "dc", "strategy": "flat", "n_bets": 10, "mean_clv_pct": -0.2},
+    ]
+    picks = [_best_strategy(pd.DataFrame(order))[["model", "strategy"]].values.tolist() for order in _both_orders(rows)]
+    assert picks == [[["dc", "flat"], ["gbdt", "flat"]]] * 2
+
+
+# --------------------------------------------------------------------------- RAG cut points
+class FakeIndex:
+    """Collects the documents `build_rag_index` adds."""
+
+    def __init__(self) -> None:
+        self.ids: list[str] = []
+
+    def add(self, docs) -> None:
+        self.ids += [d.doc_id for d in docs]
+
+
+def test_match_documents_cut_breaks_a_date_tie_by_match_id():
+    rows = [
+        {"match_id": f"m{i:02d}", "date": pd.Timestamp("2024-03-02"), "home_team": "A", "away_team": "B",
+         "home_goals": 1, "away_goals": 0}
+        for i in range(30)
+    ] + [{"match_id": "old", "date": pd.Timestamp("2024-03-01"), "home_team": "A", "away_team": "B",
+          "home_goals": 0, "away_goals": 0}]  # fmt: skip
+    picks = [[d.doc_id for d in match_documents(pd.DataFrame(order), limit=5)] for order in _both_orders(rows)]
+    assert picks == [[f"match:m{i:02d}" for i in range(5)]] * 2
+
+
+def _rag_ids(tmp_path, name: str, tables: dict[str, tuple[pd.DataFrame, list[str]]], **kw) -> list[str]:
+    """Doc ids `build_rag_index` adds from a warehouse holding `tables` ({table: (frame, keys)}), frames stored
+    in their row order."""
+    with Warehouse(tmp_path / f"{name}.duckdb") as wh:
+        for table, (frame, keys) in tables.items():
+            wh.upsert(table, frame, keys=keys)
+        index = FakeIndex()
+        pipeline.build_rag_index(wh, index, **kw)  # type: ignore[arg-type]
+    return sorted(index.ids)
+
+
+def test_rag_prediction_cut_breaks_a_date_tie_by_match_id(tmp_path, monkeypatch):
+    monkeypatch.setattr(pipeline, "get_settings", lambda: type("S", (), {"backtest_dir": tmp_path / "none"})())
+    preds = pd.DataFrame(
+        {
+            "match_id": [f"m{i:04d}" for i in range(1502)],
+            "model_name": "gbdt",
+            "run_id": "r1",
+            "date": pd.Timestamp("2024-03-02"),
+            "home_team": "A",
+            "away_team": "B",
+            "p_home": 0.5,
+            "p_draw": 0.3,
+            "p_away": 0.2,
+        }
+    )
+    picks = [
+        _rag_ids(tmp_path, f"p{i}", {"model_predictions": (f, ["match_id", "model_name", "run_id"])})
+        for i, f in enumerate(_both_orders_frame(preds))
+    ]
+    assert picks[0] == picks[1] == sorted(f"pred:gbdt:m{i:04d}" for i in range(2, 1502))
+
+
+def test_rag_news_cut_breaks_a_time_tie_by_item_id(tmp_path, monkeypatch):
+    monkeypatch.setattr(pipeline, "get_settings", lambda: type("S", (), {"backtest_dir": tmp_path / "none"})())
+    news = pd.DataFrame(
+        {
+            "item_id": [f"n{i:04d}" for i in range(2003)],
+            "published_at": pd.Timestamp("2024-03-02 10:00"),
+            "title": "t",
+            "summary": "s",
+        }
+    )
+    picks = [
+        _rag_ids(tmp_path, f"n{i}", {"news_items": (f, ["item_id"])}) for i, f in enumerate(_both_orders_frame(news))
+    ]
+    assert picks[0] == picks[1] == sorted(f"news:n{i:04d}" for i in range(3, 2003))
+
+
+def test_rag_espn_cut_breaks_a_date_tie_by_event_id(tmp_path, monkeypatch):
+    monkeypatch.setattr(pipeline, "get_settings", lambda: type("S", (), {"backtest_dir": tmp_path / "none"})())
+    fx = pd.DataFrame(
+        {
+            "eventId": list(range(40)),
+            "matched_match_id": [f"m{i:02d}" for i in range(40)],
+            "date": pd.Timestamp("2024-03-02"),
+            "home_team": "A",
+            "away_team": "B",
+            "league_code": "E0",
+            "homeTeamScore": 1,
+            "awayTeamScore": 0,
+            "homeTeamId": 1,
+            "awayTeamId": 2,
+            "statusId": 28,
+        }
+    )
+    stats = pd.DataFrame({"eventId": [0], "teamId": [1]})
+    events = pd.DataFrame({"eventId": [0], "keyEventOrder": [1], "keyEventShortText": ["goal"]})
+    picks = [
+        _rag_ids(
+            tmp_path,
+            f"e{i}",
+            {
+                "espn_fixtures_mapped": (f, ["eventId"]),
+                "espn_team_stats": (stats, ["eventId", "teamId"]),
+                "espn_key_events": (events, ["eventId", "keyEventOrder"]),
+            },
+            max_matches=5,
+        )
+        for i, f in enumerate(_both_orders_frame(fx))
+    ]
+    assert picks[0] == picks[1] == sorted(f"espn:m{i:02d}" for i in range(5))
+
+
+def _both_orders_frame(frame: pd.DataFrame) -> list[pd.DataFrame]:
+    return [frame.reset_index(drop=True), frame.iloc[::-1].reset_index(drop=True)]
+
+
+def test_upcoming_fixtures_cut_breaks_a_date_tie_by_teams(monkeypatch):
+    day = (pd.Timestamp.now().normalize() + pd.Timedelta(days=3)).date()
+    teams = [f"Club{i:02d}" for i in range(70)]
+    fixtures = pd.DataFrame({"date": [day] * 70, "home_team": teams, "away_team": teams[1:] + teams[:1]})
+
+    class FakeOpenFootball:
+        order = fixtures
+
+        def fetch_upcoming_fixtures(self, code, year):
+            return FakeOpenFootball.order.copy()
+
+    monkeypatch.setattr(pipeline, "OpenFootballSource", FakeOpenFootball)
+    monkeypatch.setattr(pipeline, "_apply_confirmed_lineups", lambda wh, fx: fx)
+    features = pd.DataFrame(
+        {"home_team": teams, "away_team": teams[1:] + teams[:1], "date": pd.Timestamp("2024-01-01")}
+    )
+    picks = []
+    for order in _both_orders_frame(fixtures):
+        FakeOpenFootball.order = order
+        got = pipeline.upcoming_fixture_frame(None, features, leagues=["E0"])  # type: ignore[arg-type]
+        picks.append(sorted(got["home_team"]))
+    assert picks[0] == picks[1] == teams[:60]
+
+
+# --------------------------------------------------------------------------- paper store: collect log
+def test_collect_log_reads_break_a_call_time_tie_conservatively(tmp_path):
+    t = CAPTURED
+    calls = [
+        {"remaining": 480, "used": 20, "cost": 2},
+        {"remaining": 470, "used": 30, "cost": 3},
+        {"remaining": 490, "used": 10, "cost": 1},
+    ]
+    picks = []
+    for i, order in enumerate(_both_orders(calls)):
+        store = PaperStore(tmp_path / f"paper{i}.duckdb")
+        try:
+            for c in order:
+                store.record_call("odds_api", "soccer_epl", status="ok", called_at=t, **c)
+            picks.append((store.budget("odds_api"), store.last_used("odds_api"), store.cost_per_call("odds_api")))
+        finally:
+            store.close()
+    assert picks == [(470, 30, 3)] * 2
+
+
+# --------------------------------------------------------------------------- venues: one venue per club
+@pytest.mark.parametrize("reverse", [False, True])
+def test_country_venues_keep_the_smallest_venue_name_per_club(tmp_path, reverse):
+    bindings = [
+        {"clubLabel": {"value": "Arsenal"}, "venueLabel": {"value": "Highbury"}, "coord": {"value": "Point(-0.10 51.55)"}},
+        {"clubLabel": {"value": "Arsenal"}, "venueLabel": {"value": "Emirates Stadium"}, "coord": {"value": "Point(-0.11 51.56)"}},
+        {"clubLabel": {"value": "Chelsea"}, "venueLabel": {"value": "Stamford Bridge"}, "coord": {"value": "Point(-0.19 51.48)"}},
+    ]  # fmt: skip
+    if reverse:
+        bindings.reverse()
+
+    class FakeHttp:
+        def get_json(self, url, params=None, headers=None):
+            return {"results": {"bindings": bindings}}
+
+    got = VenueGeocoder(cache_dir=tmp_path, http=FakeHttp()).fetch_country_venues("England")  # type: ignore[arg-type]
+    assert got.set_index("club")["venue"].to_dict() == {"Arsenal": "Emirates Stadium", "Chelsea": "Stamford Bridge"}

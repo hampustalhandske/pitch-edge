@@ -42,7 +42,8 @@ CONTEXT_COLUMNS = [*ROTATION_FEATURES, "tm_referee", "tm_game_id"]
 
 
 def club_id_map(wh: Warehouse, teams: list[str]) -> dict[str, int]:
-    """Spine team name -> Transfermarkt club_id (resolver over club names; latest-season club wins ties)."""
+    """Spine team name -> Transfermarkt club_id (resolver over club names). When several clubs resolve to one
+    team, the one with the latest `last_season` wins, then the smallest club_id."""
     if not wh.table_exists("tm_clubs"):
         return {}
     clubs = wh.query("SELECT club_id, name, last_season FROM tm_clubs")
@@ -52,7 +53,10 @@ def club_id_map(wh: Warehouse, teams: list[str]) -> dict[str, int]:
     clubs["canonical"] = clubs["name"].map(lambda n: resolver.resolve(str(n)))
     clubs = clubs.dropna(subset=["canonical"])
     clubs["last_season"] = pd.to_numeric(clubs["last_season"], errors="coerce").fillna(0)
-    clubs = clubs.sort_values("last_season", ascending=False).drop_duplicates("canonical")
+    clubs["club_num"] = pd.to_numeric(clubs["club_id"], errors="coerce")
+    clubs = clubs.sort_values(
+        ["last_season", "club_num", "name"], ascending=[False, True, True], kind="stable"
+    ).drop_duplicates("canonical")
     return {str(c): int(i) for c, i in zip(clubs["canonical"], clubs["club_id"], strict=True)}
 
 

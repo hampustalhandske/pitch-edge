@@ -652,27 +652,31 @@ class PaperStore:
         )
 
     def last_used(self, source: str) -> int | None:
-        """Most recently reported cumulative credits used for `source`, or None."""
+        """Most recently reported cumulative credits used for `source`, or None (calls logged at the same time:
+        the highest, since the count only grows)."""
         row = self.con.execute(
-            "SELECT used FROM collect_log WHERE source = ? AND used IS NOT NULL ORDER BY called_at DESC LIMIT 1",
+            "SELECT used FROM collect_log WHERE source = ? AND used IS NOT NULL "
+            "ORDER BY called_at DESC, used DESC LIMIT 1",
             [source],
         ).fetchone()
         return None if row is None else int(row[0])
 
     def cost_per_call(self, source: str, default: int = 2) -> int:
-        """Credits the most recent measured successful call of `source` cost, else `default`."""
+        """Credits the most recent measured successful call of `source` cost, else `default` (calls logged at the
+        same time: the highest cost)."""
         row = self.con.execute(
             "SELECT cost FROM collect_log WHERE source = ? AND status = 'ok' AND cost IS NOT NULL "
-            "ORDER BY called_at DESC LIMIT 1",
+            "ORDER BY called_at DESC, cost DESC LIMIT 1",
             [source],
         ).fetchone()
         return default if row is None else int(row[0])
 
     def budget(self, source: str) -> int | None:
-        """Most recently reported remaining credits for `source`, or None if never reported."""
+        """Most recently reported remaining credits for `source`, or None if never reported (calls logged at the
+        same time: the lowest, since the balance only falls)."""
         row = self.con.execute(
             "SELECT remaining FROM collect_log WHERE source = ? AND remaining IS NOT NULL "
-            "ORDER BY called_at DESC LIMIT 1",
+            "ORDER BY called_at DESC, remaining ASC LIMIT 1",
             [source],
         ).fetchone()
         return None if row is None else int(row[0])

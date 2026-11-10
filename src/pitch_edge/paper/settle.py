@@ -143,16 +143,22 @@ class LakeCloseSource:
         return answer
 
     def _fd_window(self, division: str, day: date) -> pd.DataFrame:
-        """fd_matches rows of `division` with match_date within a day of `day`."""
-        return self._sql_once(
+        """fd_matches rows of `division` with match_date within a day of `day`, ordered by match_date, home_team
+        and away_team (whatever order the lake returned them in)."""
+        df = self._sql_once(
             ("fd", division, day),
             "SELECT match_date, home_team, away_team, ft_result, betfair_ex_home_close, betfair_ex_draw_close, "
             "betfair_ex_away_close FROM fd_matches WHERE division = ? AND match_date BETWEEN ? AND ?",
             [division, (day - timedelta(days=1)).isoformat(), (day + timedelta(days=1)).isoformat()],
         )
+        return df.sort_values(["match_date", "home_team", "away_team"], kind="stable").reset_index(drop=True)
 
     def fd_match(self, league: str, kickoff_at: datetime, home: str, away: str) -> FdClose | None:
-        """The fd_matches row for this fixture (match_date within a day of the UTC kickoff date), or None."""
+        """The fd_matches row for this fixture (match_date within a day of the UTC kickoff date), or None.
+
+        The row is the one whose resolved team names equal the fixture's; failing that, the one most similar
+        to it (at least 0.75). Several rows for one pair of names take the earliest match_date; two different
+        pairs equally most similar are ambiguous and give None."""
         division = FD_DIVISIONS.get(league)
         if division is None:
             return None
@@ -173,7 +179,11 @@ class LakeCloseSource:
             )
             if sims.max() < 0.75:
                 return None
-            rows = df.loc[[sims.idxmax()]]
+            best = df[sims == sims.max()]
+            if len(best[["home_team", "away_team"]].drop_duplicates()) > 1:
+                logger.warning("fd_matches: %d fixtures equally similar to %s v %s; no match", len(best), home, away)
+                return None
+            rows = best
         r = rows.iloc[0]
         closes = [r["betfair_ex_home_close"], r["betfair_ex_draw_close"], r["betfair_ex_away_close"]]
         betfair = tuple(float(c) for c in closes) if all(pd.notna(c) and float(c) > 1.0 for c in closes) else None
@@ -308,7 +318,10 @@ def _own_snapshot_close(
     store: PaperStore, fixture: str, kickoff: datetime, selection: str, venue: str, decided_at: datetime
 ) -> _Close | None:
     """Our last quote set captured strictly after `decided_at` and before `kickoff` (never the snapshot the
-    decision itself saw), in `_OWN_PREFERENCE` order then the decision's venue; None when there is none."""
+    decision itself saw), in `_OWN_PREFERENCE` order then the decision's venue; None when there is none.
+
+    When two events of one source map to the fixture and quote a selection at the same capture time, the quote
+    of the smallest `source_event_id` (then `quote_id`) is used, the rule of `PaperStore.latest_quotes`."""
     quotes = store.quotes_for_fixture(fixture, before=kickoff)
     quotes = quotes[quotes["captured_at"] > pd.Timestamp(decided_at)]
     if quotes.empty:
@@ -317,8 +330,11 @@ def _own_snapshot_close(
         q = quotes[quotes["source"] == src]
         if q.empty:
             continue
+        q = q.sort_values(["captured_at", "selection", "source_event_id", "quote_id"], kind="stable").drop_duplicates(
+            ["captured_at", "selection"]
+        )
         if src.startswith(_EXCHANGE_SOURCES):
-            latest = q.sort_values("captured_at").groupby("selection").tail(1).set_index("selection")
+            latest = q.groupby("selection").tail(1).set_index("selection")
             if not set(SELECTIONS) <= set(latest.index):
                 continue
             mids = []
@@ -401,11 +417,12 @@ def _pm_bar_close(
 
 def _kickoff_moved(store: PaperStore, fixture: str, kickoff: datetime, now: datetime) -> datetime | None:
     """The newest kickoff any source lists for `fixture`, when it differs from `kickoff` by more than
-    `KICKOFF_MOVE_VOID` (postponed or rescheduled); else None."""
+    `KICKOFF_MOVE_VOID` (postponed or rescheduled); else None. The newest kickoff is the one of the latest
+    capture; when quotes of that capture list different kickoffs, the latest of them."""
     quotes = store.quotes_for_fixture(fixture, before=now)
     if quotes.empty:
         return None
-    latest = quotes.sort_values("captured_at")["kickoff_at"].iloc[-1].to_pydatetime()
+    latest = quotes.sort_values(["captured_at", "kickoff_at"], kind="stable")["kickoff_at"].iloc[-1].to_pydatetime()
     return latest if abs(latest - kickoff) > KICKOFF_MOVE_VOID else None
 
 

@@ -75,7 +75,7 @@ def resolve_fixture_ids(
 
 def _usual_xi_values(wh: Warehouse, club_id: int, asof_date, lookback_days: int = 365) -> pd.DataFrame:
     """Trailing-`lookback_days` minutes leaders (top 11; equal minutes: smaller player id first) for a club, with
-    their latest known value."""
+    their latest known value (two values on the same latest date: the larger)."""
     if not (wh.table_exists("tm_appearances") and wh.table_exists("tm_player_valuations")):
         return pd.DataFrame(columns=["player_id", "player_name", "value"])
     return wh.query(
@@ -97,7 +97,7 @@ def _usual_xi_values(wh: Warehouse, club_id: int, asof_date, lookback_days: int 
         )
         SELECT r.player_id, p.name AS player_name,
                (SELECT v.market_value_in_eur FROM val v WHERE v.player_id = r.player_id
-                ORDER BY v.date DESC LIMIT 1) AS value
+                ORDER BY v.date DESC, v.market_value_in_eur DESC LIMIT 1) AS value
         FROM ranked r
         LEFT JOIN tm_players p ON CAST(p.player_id AS BIGINT) = r.player_id
         WHERE r.rk <= 11
@@ -107,22 +107,27 @@ def _usual_xi_values(wh: Warehouse, club_id: int, asof_date, lookback_days: int 
 
 
 def _latest_value(wh: Warehouse, player_name: str, asof_date) -> float:
+    """Latest market value on or before `asof_date` of the one Transfermarkt player named `player_name`
+    (case-insensitive); two values on that date: the larger. 0.0 when no player, or more than one, has the
+    name: a namesake's value is not a value for this player."""
     if not (wh.table_exists("tm_players") and wh.table_exists("tm_player_valuations")):
         return 0.0
     rows = wh.query(
         """
-        SELECT p.player_id, p.name FROM tm_players p WHERE lower(p.name) = lower(?)
+        SELECT DISTINCT CAST(p.player_id AS BIGINT) AS player_id FROM tm_players p WHERE lower(p.name) = lower(?)
         """,
         params=[player_name],
     )
-    if rows.empty:
+    if len(rows) != 1:
+        if len(rows) > 1:
+            logger.debug("%d Transfermarkt players are named %r; no value taken", len(rows), player_name)
         return 0.0
     player_id = int(rows["player_id"].iloc[0])
     val = wh.query(
         """
         SELECT market_value_in_eur FROM tm_player_valuations
         WHERE CAST(player_id AS BIGINT) = ? AND date <= CAST(? AS DATE) AND market_value_in_eur IS NOT NULL
-        ORDER BY date DESC LIMIT 1
+        ORDER BY date DESC, market_value_in_eur DESC LIMIT 1
         """,
         params=[player_id, str(asof_date)],
     )

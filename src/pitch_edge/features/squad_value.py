@@ -48,8 +48,11 @@ SQUAD_VALUE_FEATURES = [
 def squad_value_context(wh: Warehouse, tm_context: pd.DataFrame) -> pd.DataFrame:
     """`tm_context`: output of `features.context.transfermarkt_context` (needs match_id + tm_game_id).
 
-    Returns one row per match_id with `SQUAD_VALUE_FEATURES`; empty frame if lineups/valuations are
-    absent or nothing maps.
+    Returns one row per match_id with `SQUAD_VALUE_FEATURES`, ordered by match_id; empty frame if
+    lineups/valuations are absent or nothing maps. A match linked to several Transfermarkt games uses the
+    one with the smallest game id. A player's value on a day is his latest valuation stamped that day (two
+    with one stamp: the larger). A side whose usual XI is all present has a missing share of 0; a side with
+    no usual XI (no appearances in the trailing year) has none (NaN).
     """
     if (
         tm_context.empty
@@ -74,6 +77,7 @@ def squad_value_context(wh: Warehouse, tm_context: pd.DataFrame) -> pd.DataFrame
                    CAST(g.away_club_id AS BIGINT) AS away_club_id
             FROM sv_linked l
             JOIN tm_games g ON CAST(g.game_id AS BIGINT) = l.tm_game_id
+            QUALIFY row_number() OVER (PARTITION BY l.match_id ORDER BY CAST(g.game_id AS BIGINT)) = 1
             """
         )
         conn.execute(
@@ -92,6 +96,10 @@ def squad_value_context(wh: Warehouse, tm_context: pd.DataFrame) -> pd.DataFrame
                    market_value_in_eur
             FROM tm_player_valuations
             WHERE market_value_in_eur IS NOT NULL
+            QUALIFY row_number() OVER (
+                PARTITION BY CAST(player_id AS BIGINT), CAST(date AS DATE)
+                ORDER BY date DESC, market_value_in_eur DESC
+            ) = 1
             """
         )
         # ---- starting-XI value: as-of valuation (latest value on/before kickoff) per starter ----
@@ -150,7 +158,7 @@ def squad_value_context(wh: Warehouse, tm_context: pd.DataFrame) -> pd.DataFrame
                 ),
                 {side}_missing AS (
                     SELECT uv.match_id,
-                           sum(coalesce(uv.val, 0)) FILTER (WHERE p.player_id IS NULL) AS missing_value,
+                           coalesce(sum(coalesce(uv.val, 0)) FILTER (WHERE p.player_id IS NULL), 0) AS missing_value,
                            sum(coalesce(uv.val, 0)) AS usual_value
                     FROM {side}_usual_val uv
                     LEFT JOIN {side}_present p ON p.match_id = uv.match_id AND p.player_id = uv.player_id
@@ -170,12 +178,12 @@ def squad_value_context(wh: Warehouse, tm_context: pd.DataFrame) -> pd.DataFrame
             LEFT JOIN sv_xi_val axi ON axi.match_id = sg.match_id AND axi.club_id = sg.away_club_id
             LEFT JOIN home_missing hm ON hm.match_id = sg.match_id
             LEFT JOIN away_missing am ON am.match_id = sg.match_id
+            ORDER BY sg.match_id
             """
         ).df()
     finally:
         conn.unregister("sv_linked")
 
-    out = out.drop_duplicates("match_id")
     out["sv_home_xi_value"] = np.log1p(out["sv_home_xi_value"].fillna(0.0))
     out["sv_away_xi_value"] = np.log1p(out["sv_away_xi_value"].fillna(0.0))
     out["sv_xi_value_diff"] = out["sv_home_xi_value"] - out["sv_away_xi_value"]

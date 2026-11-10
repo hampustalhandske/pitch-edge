@@ -114,7 +114,8 @@ class VenueGeocoder:
         self.http = http or CachedHttpClient(self.cache_dir, min_interval_s=3.0, timeout_s=90)
 
     def fetch_country_venues(self, country: str) -> pd.DataFrame:
-        """All football clubs in `country` with a geocoded home venue (Wikidata)."""
+        """All football clubs in `country` with a geocoded home venue (Wikidata). A club with several venues
+        keeps the alphabetically first venue name (the query result has no order)."""
         qid = COUNTRY_QIDS.get(country)
         if qid is None:
             return pd.DataFrame(columns=["club", "venue", "lat", "lon", "country"])
@@ -149,7 +150,10 @@ class VenueGeocoder:
                     "country": country,
                 }
             )
-        return pd.DataFrame(rows).drop_duplicates(subset="club")
+        if not rows:
+            return pd.DataFrame(columns=["club", "venue", "lat", "lon", "country"])
+        venues = pd.DataFrame(rows).sort_values(["club", "venue", "lat", "lon"], kind="stable")
+        return venues.drop_duplicates(subset="club").reset_index(drop=True)
 
     def build_team_coordinates(self, teams: list[str], countries: list[str]) -> pd.DataFrame:
         """Map canonical team names -> (lat, lon), Wikidata first, bundled fallback second."""

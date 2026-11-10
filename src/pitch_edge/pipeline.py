@@ -153,10 +153,11 @@ def build_rag_index(wh: Warehouse, index: VectorIndex | None = None, max_matches
         preds = preds[preds["run_id"] == latest]
         feats = wh.read("features")
         for model_name, grp in preds.groupby("model_name"):
-            index.add(prediction_documents(grp.sort_values("date").tail(1500), str(model_name), feats))
+            newest = grp.sort_values(["date", "match_id"], kind="stable").tail(1500)
+            index.add(prediction_documents(newest, str(model_name), feats))
     news = wh.read("news_items")
     if not news.empty:
-        index.add(news_documents(news.sort_values("published_at").tail(2000)))
+        index.add(news_documents(news.sort_values(["published_at", "item_id"], kind="stable").tail(2000)))
     if wh.table_exists("statsbomb_events") and wh.table_exists("statsbomb_matches"):
         ev = wh.read("statsbomb_events")
         sbm = wh.read("statsbomb_matches")
@@ -169,7 +170,7 @@ def build_rag_index(wh: Warehouse, index: VectorIndex | None = None, max_matches
                    homeTeamScore, awayTeamScore, homeTeamId, awayTeamId
             FROM espn_fixtures_mapped
             WHERE matched_match_id IS NOT NULL AND statusId = 28
-            ORDER BY date DESC LIMIT ?
+            ORDER BY date DESC, eventId LIMIT ?
             """,
             [max_matches],
         )
@@ -225,7 +226,8 @@ def upcoming_fixture_frame(wh: Warehouse, features: pd.DataFrame, leagues: list[
     fx["home_team"] = fx["home_team"].map(lambda n: resolver.resolve(str(n)) or n)
     fx["away_team"] = fx["away_team"].map(lambda n: resolver.resolve(str(n)) or n)
     fx = fx[fx["home_team"].isin(teams) & fx["away_team"].isin(teams)]
-    fx = fx[pd.to_datetime(fx["date"]) >= pd.Timestamp.now().normalize()].sort_values("date").head(60)
+    fx = fx[pd.to_datetime(fx["date"]) >= pd.Timestamp.now().normalize()]
+    fx = fx.sort_values(["date", "home_team", "away_team"], kind="stable").head(60)
     if fx.empty:
         return fx
     # latest pre-match snapshot per team = features of their most recent match, carried forward

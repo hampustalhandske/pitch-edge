@@ -22,7 +22,7 @@ class Document:
 
 def match_documents(matches: pd.DataFrame, limit: int | None = None) -> list[Document]:
     docs: list[Document] = []
-    df = matches.sort_values("date", ascending=False)
+    df = matches.sort_values(["date", "match_id"], ascending=[False, True], kind="stable")  # newest first
     if limit:
         df = df.head(limit)
     for _, r in df.iterrows():
