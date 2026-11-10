@@ -656,8 +656,16 @@ projects; M8 traceability; S2 lake capacity; S4 decimal-odds instrument with CLV
   settlements, 8 provisional settlements and 9 flags. Every row was written by the normal code path on this branch
   (the settle includes PE-33's Polymarket rule). The ledger is append-only, so the rows stay. The agent was
   unloaded on 2026-11-10 04:31 UTC and a pause from that time was recorded (`pitch-edge paper pause`).
-- Fix (owner): keep the pause across reboots, either `launchctl disable gui/<uid>/local.pitch-edge.paper-loop`
-  or by moving the plist out of `~/Library/LaunchAgents` until the loop is reloaded on purpose. The owner also
-  decides whether the rows written in the 11-09/10 run count as forward evidence.
+- Done (master ruling 2026-11-10, enforcing the owner's pause): the agent is disabled across reboots with
+  `launchctl disable gui/$(id -u)/local.pitch-edge.paper-loop` (`launchctl print-disabled gui/$(id -u)` shows it
+  `disabled`); the plist stays where it is. To undo, when the owner reloads the loop:
+  `launchctl enable gui/$(id -u)/local.pitch-edge.paper-loop`, then `launchctl load` the plist.
+- Evidence ruling (master, by default until the owner rules): the 157 decisions made in the window (decided
+  2026-11-09 18:47 to 2026-11-10 04:31 UTC) are excluded from forward evidence. Each carries a `void` flag whose
+  reason names this window and PE-35, so `paper report` leaves them out of every metric. Nothing is deleted.
+  None of them has a final settlement. The 213 final settlements written in the window are of decisions made before
+  the pause (the latest 2026-10-28 07:27 UTC); they are the ordinary settle against the lake's closes and stay
+  counted unless the owner rules otherwise. The window's cycles still count towards `window_coverage`.
+- Open (owner): confirm or change the evidence ruling.
 - Blocked by: none. Blocks: none.
 - Commits: none yet.
