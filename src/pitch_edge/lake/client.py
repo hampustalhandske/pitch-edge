@@ -67,7 +67,8 @@ class LakehouseError(RuntimeError):
 
 
 class LakeFrozenError(LakehouseError):
-    """A lake freeze is recorded (`pitch-edge control freeze`), so the lake must not be read until a thaw."""
+    """The lake must not be read now: a freeze is recorded here (`pitch-edge control freeze`, until a thaw), or the
+    lake answered HTTP 423 because its own read freeze does not allow this client. Never retried."""
 
 
 class _StreamCutError(LakehouseError):
@@ -223,6 +224,8 @@ class Lake:
             with self._http.stream("POST", "/v1/sql", json=body) as response:
                 if response.status_code == 503:
                     raise _TransientError(_error_text(response), _retry_after(response))
+                if response.status_code == 423:
+                    raise LakeFrozenError(f"the lake's read freeze refuses this client ({_error_text(response)})")
                 _raise_for_status(response)
                 version = response.headers.get(VERSION_HEADER)
                 if self.require_version and not version:

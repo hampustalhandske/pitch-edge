@@ -372,3 +372,19 @@ def test_a_complete_answer_with_no_rows_is_accepted():
     handler, calls = _scripted(_ok(sink.getvalue()))
     assert list(_lake(handler, []).sql_batches("SELECT 1")) == []
     assert len(calls) == 1
+
+
+@pytest.mark.unit
+def test_a_423_read_freeze_is_raised_as_a_freeze_and_not_retried():
+    from pitch_edge.lake.client import LakeFrozenError
+    from pitch_edge.lake.mirror import is_retryable
+
+    handler, calls = _scripted(httpx.Response(423, json={"detail": "reads frozen: firm-v1 record"}), _ok())
+    sleeps: list[float] = []
+    with pytest.raises(LakeFrozenError, match=r"read freeze refuses this client \(HTTP 423: reads frozen: firm-v1"):
+        _lake(handler, sleeps).sql("SELECT 1")
+    assert len(calls) == 1 and sleeps == []
+    try:
+        _lake(_scripted(httpx.Response(423, json={"detail": "x"}))[0], []).sql("SELECT 1")
+    except LakeFrozenError as exc:
+        assert not is_retryable(exc)  # the mirror does not re-run the window either

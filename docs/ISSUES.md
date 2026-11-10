@@ -730,6 +730,9 @@ projects; M8 traceability; S2 lake capacity; S4 decimal-odds instrument with CLV
 - Acceptance: every listed pick has a total order (all key columns, then a stable id) or an explicit refusal on a
   tie; one test per pick inserts tied rows in two orders and requires the same pick, and fails on the code
   without the tie-break (negative control).
+- Lake (2026-11-10): from R1, `/v1/tables` gives per-table `keys` and `tie_order`, and the current row is the first
+  under `ORDER BY scraped_at DESC, <tie_order ASC NULLS LAST>`. B2: where the mirror deduplicates a batch itself, use
+  the lake's `tie_order` from the vendored contract, so the mirror keeps the same row as the lake's view.
 - Blocked by: none. Blocks: the reruns of the cleanup plan (paper settle, mirror re-sync, feature store).
 - Commits: none yet.
 
@@ -893,7 +896,12 @@ projects; M8 traceability; S2 lake capacity; S4 decimal-odds instrument with CLV
   reason, since}]}`. A client refuses when `reads.active` and it is not `allowed`, and fails closed when the field
   is missing; the write freeze is the lake's own and does not stop reads. The API also answers non-allowed clients
   with HTTP 423 during a read freeze, so the client must not retry a 423. Final shape to be confirmed by the lake.
-- Blocked by: none for the local switch; LK-126 for the B2 part. Blocks: none.
+- Lake (2026-11-10): LK-126 is built and arrives with the R1 release. `/v1/health` and `/v1/status` carry the
+  freeze block above, and `allowed` is computed for the token sent (false without one while reads are frozen). A
+  malformed freeze file refuses everyone. B1 maps HTTP 423 to `LakeFrozenError`, which is never retried by the client
+  or the mirror. B2: check `/v1/health` before the first query and refuse when `reads.active` and not `allowed`;
+  fail closed on a missing block once contract v2 is vendored.
+- Blocked by: none for the local switch; the R1 release and contract v2 for the health check. Blocks: none.
 - Commits: none yet.
 
 ## PE-45 Squad-value missing share is NaN when nobody is missing
