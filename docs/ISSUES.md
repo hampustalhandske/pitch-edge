@@ -645,3 +645,19 @@ projects; M8 traceability; S2 lake capacity; S4 decimal-odds instrument with CLV
   (all rows of the key's newest write at or before T).
 - Blocked by: LK-13. Blocks: none.
 - Commits: none yet.
+
+## PE-35 A reboot reloads the paused paper loop
+- Status: open (owner decision needed)
+- Priority: must (owner decision E2: the paper loop stays paused)
+- Raised by: pitch-edge (freeze-night check, 2026-11-10)
+- Evidence: the loop was paused on 2026-10-28 with `launchctl unload`, which does not persist. Its plist stays in
+  `~/Library/LaunchAgents` with `RunAtLoad`, so the reboot of 2026-11-09 18:38 UTC loaded it again. It ran ten
+  hourly cycles (collect, decide, settle) from 18:47 UTC to 04:31 UTC on 11-10 and wrote 157 decisions, 213
+  settlements, 8 provisional settlements and 9 flags. Every row was written by the normal code path on this branch
+  (the settle includes PE-33's Polymarket rule). The ledger is append-only, so the rows stay. The agent was
+  unloaded on 2026-11-10 04:31 UTC and a pause from that time was recorded (`pitch-edge paper pause`).
+- Fix (owner): keep the pause across reboots, either `launchctl disable gui/<uid>/local.pitch-edge.paper-loop`
+  or by moving the plist out of `~/Library/LaunchAgents` until the loop is reloaded on purpose. The owner also
+  decides whether the rows written in the 11-09/10 run count as forward evidence.
+- Blocked by: none. Blocks: none.
+- Commits: none yet.
