@@ -670,9 +670,14 @@ projects; M8 traceability; S2 lake capacity; S4 decimal-odds instrument with CLV
   2026-11-10 04:31:30 UTC re-confirms it. The ledger cannot express the 11-09/10 run as part of that pause: a pause
   record has only a start and ends at the next cycle, and `window_coverage` counts every hour holding a cycle start
   (`decide_log`), with no reference to pauses. So the window's ten cycles still count as covered hours.
-- Fix, after the freeze: `window_coverage` (and `cycle_gaps`) leave out cycles whose decisions are all void-flagged
-  for PE-35, so 2026-10-28 to the next authorised reload reads as paused; the coverage note names the excluded
-  window. With a test.
+- Root cause: nothing in the loop checks the pause. A pause lives only in launchd state, so any reload trades again.
+- Acceptance (master, 2026-11-10; after the freeze):
+  1. Each cycle reads the ledger's pause state at start, and while a pause is active it exits 0 and writes
+     nothing. A pause ends only at an explicit `paper resume` record, so a launchd reload cannot trade.
+  2. `window_coverage` and `cycle_gaps` read pause intervals (a pause record to the next resume record) and count
+     those hours as paused. With no resume since 2026-10-28, the 11-09/10 cycles fall inside the pause, with no
+     special case for PE-35.
+  3. Tests: a cycle during a pause writes nothing; coverage over a pause interval reads paused. Then CI and a push.
 - Open (owner): confirm or change the evidence ruling.
 - Blocked by: none. Blocks: none.
 - Commits: none yet.
