@@ -103,12 +103,27 @@ class _Backoff:
         self.waited += wait
 
 
+ARROW_EOS = b"\xff\xff\xff\xff\x00\x00\x00\x00"
+"""The Arrow IPC end-of-stream marker. The lake ends every complete answer with it and never ends an aborted one
+with it, so a body that stops without it was cut, even when it stops on a message boundary."""
+
+
 class _ResponseReader(io.RawIOBase):
-    """Read-only file object over a streamed HTTP body, so pyarrow can parse it as it arrives."""
+    """Read-only file object over a streamed HTTP body, so pyarrow can parse it as it arrives. `tail` holds the
+    last bytes read so far (up to the length of `ARROW_EOS`)."""
 
     def __init__(self, response: httpx.Response) -> None:
         self._chunks = response.iter_bytes()
         self._pending = b""
+        self.tail = b""
+
+    def drain(self) -> None:
+        """Read the rest of the body, so `tail` ends where the body ends."""
+        for chunk in self._chunks:
+            self.tail = (self.tail + chunk)[-len(ARROW_EOS) :]
+        if self._pending:
+            self.tail = (self.tail + self._pending)[-len(ARROW_EOS) :]
+            self._pending = b""
 
     def readable(self) -> bool:
         return True
@@ -121,6 +136,7 @@ class _ResponseReader(io.RawIOBase):
                 return 0
         n = min(len(buffer), len(self._pending))
         buffer[:n] = self._pending[:n]
+        self.tail = (self.tail + self._pending[:n])[-len(ARROW_EOS) :]
         self._pending = self._pending[n:]
         return n
 
@@ -250,12 +266,14 @@ def _refuse_if_frozen() -> None:
 def _read_batches(response: httpx.Response) -> Iterator[pa.RecordBatch]:
     """Yield the Arrow batches of a successful response. A connection reset before the first batch is
     `_TransientError` (safe to re-send); a read timeout is a plain `LakehouseError` (not retried); any other
-    transport or Arrow failure is `_StreamCutError`."""
+    transport or Arrow failure, and a body that ends without `ARROW_EOS`, is `_StreamCutError`."""
     n = 0
+    raw = _ResponseReader(response)
     try:
-        for batch in pa.ipc.open_stream(io.BufferedReader(_ResponseReader(response))):
+        for batch in pa.ipc.open_stream(io.BufferedReader(raw)):
             yield batch
             n += 1
+        raw.drain()
     except httpx.TimeoutException as exc:
         raise LakehouseError(f"{type(exc).__name__} after {n} batches: {exc}") from exc
     except (httpx.TransportError, pa.ArrowInvalid) as exc:
@@ -263,6 +281,10 @@ def _read_batches(response: httpx.Response) -> Iterator[pa.RecordBatch]:
         if n == 0 and isinstance(exc, _RESET_ERRORS):
             raise _TransientError(cause) from exc
         raise _StreamCutError(f"stream cut after {n} batches: the response was cut off ({cause})") from exc
+    if raw.tail != ARROW_EOS:
+        raise _StreamCutError(
+            f"stream cut after {n} batches: the response was cut off (it ended without the Arrow end-of-stream marker)"
+        )
 
 
 def _retry_after(response: httpx.Response) -> float | None:

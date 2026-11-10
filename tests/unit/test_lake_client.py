@@ -346,3 +346,29 @@ def test_sync_adds_the_version_column_to_an_existing_state_table(tmp_path):
         run_lake_sync(wh, _VersionedLake(), only=["tm_managers"], sleep=lambda s: None)
         versions = wh._conn.execute("SELECT DISTINCT lake_version FROM lake_sync_state").fetchall()
     assert versions == [("856ab2f64e97",)]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("at", ["after 2 batches", "after the last batch"])
+def test_a_body_that_ends_cleanly_without_the_end_of_stream_marker_is_a_cut(at):
+    body, ends = _batched_body()
+    assert body.endswith(client_mod.ARROW_EOS) and len(body) == ends[-1] + len(client_mod.ARROW_EOS)
+    cut = ends[1] if at == "after 2 batches" else ends[-1]
+    handler, calls = _scripted(httpx.Response(200, headers=VERSION, content=body[:cut]), _ok(body))
+    with pytest.raises(LakehouseError, match="ended without the Arrow end-of-stream marker"):
+        list(_lake(handler, []).sql_batches("SELECT 1"))
+    handler, calls = _scripted(httpx.Response(200, headers=VERSION, content=body[:cut]), _ok(body))
+    sleeps: list[float] = []
+    assert _lake(handler, sleeps).sql("SELECT 1")["x"].tolist() == list(range(8))  # sql() re-sends it
+    assert len(calls) == 2 and sleeps == [5.0]
+
+
+@pytest.mark.unit
+def test_a_complete_answer_with_no_rows_is_accepted():
+    schema = pa.schema([("x", pa.int64())])
+    sink = io.BytesIO()
+    with pa.ipc.new_stream(sink, schema):
+        pass
+    handler, calls = _scripted(_ok(sink.getvalue()))
+    assert list(_lake(handler, []).sql_batches("SELECT 1")) == []
+    assert len(calls) == 1

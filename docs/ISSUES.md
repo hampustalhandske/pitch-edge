@@ -844,8 +844,10 @@ projects; M8 traceability; S2 lake capacity; S4 decimal-odds instrument with CLV
   logged backoff totalling about 6.5 minutes, so a lake restart is a quiet retry; a partial stream is never yielded as a
   result, and mocked tests cover each case, with a negative control (a non-transient 4xx is not retried).
 - Progress (B1): built in fce7024 and d59a857 (client retry budget, version check, mirror alignment). Left: an Arrow
-  stream cut exactly at a message boundary with a clean HTTP end is not detectable by the client; asked the lake
-  (2026-11-10) whether /v1/sql always writes the IPC end-of-stream marker, for contract v2 (B2).
+  stream cut exactly at a message boundary with a clean HTTP end used to pass as a shorter result. The lake confirmed
+  (2026-11-10) that every complete /v1/sql Arrow answer ends with the IPC end-of-stream marker and an aborted one
+  never does (pinned by its tests on lake/after-freeze 8f4d7f7, stated in contract v2), so the client now refuses a
+  body without it as a cut stream.
 - Blocked by: none. Blocks: none.
 - Commits: fce7024, d59a857.
 
