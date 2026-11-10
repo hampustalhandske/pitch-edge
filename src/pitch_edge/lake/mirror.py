@@ -41,7 +41,7 @@ import httpx
 import pyarrow as pa
 
 from pitch_edge.data.storage import TABLE_KEYS, Warehouse
-from pitch_edge.lake.client import LakehouseError
+from pitch_edge.lake.client import LakeFrozenError, LakehouseError
 
 logger = logging.getLogger(__name__)
 
@@ -244,13 +244,23 @@ def render_query(spec: MirrorSpec, window: tuple[str, str]) -> tuple[str, list[A
 
 
 def is_retryable(exc: BaseException) -> bool:
-    """True for transient lake failures: transport errors and timeouts, HTTP 502/503/504, and a
-    response cut off mid-stream. Every other error (bad SQL, 4xx) is final."""
+    """True for a lake failure worth re-running the window for: transport errors and timeouts, HTTP 502/503/504,
+    a read timeout, and a response cut off mid-stream (which `Lake.sql_batches` cannot re-send itself). False for
+    a lake freeze, for a failure the client already retried until its budget ran out ("gave up after"), and for
+    every other error (bad SQL, 4xx)."""
+    if isinstance(exc, LakeFrozenError):
+        return False
     if isinstance(exc, httpx.TransportError | httpx.TimeoutException):
         return True
     if isinstance(exc, LakehouseError):
         text = str(exc)
-        return text.startswith(("HTTP 502", "HTTP 503", "HTTP 504")) or "cut off" in text
+        if "gave up after" in text:
+            return False
+        return (
+            text.startswith(("HTTP 502", "HTTP 503", "HTTP 504", "ReadTimeout", "WriteTimeout", "PoolTimeout"))
+            or "cut off" in text
+            or "stream cut after" in text
+        )
     return False
 
 

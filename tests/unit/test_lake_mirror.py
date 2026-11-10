@@ -10,7 +10,7 @@ import pytest
 
 from pitch_edge.data.storage import TABLE_KEYS, Warehouse
 from pitch_edge.lake import mirror
-from pitch_edge.lake.client import Lake, LakehouseError
+from pitch_edge.lake.client import Lake, LakeFrozenError, LakehouseError
 from pitch_edge.lake.mirror import (
     MIRRORS,
     assert_unique,
@@ -170,6 +170,11 @@ def test_token_never_logged(monkeypatch, caplog):
         (LakehouseError("HTTP 400: Conversion Error near 503 rows"), False),
         (ValueError("503 in the message"), False),
         (LakehouseError("HTTP 401: bad token"), False),
+        (LakehouseError("ReadTimeout: timed out"), True),
+        (LakehouseError("stream cut after 2 batches: the response was cut off (ReadError)"), True),
+        (LakehouseError("HTTP 503: all slots busy (gave up after 7 attempts and 360s of waiting)"), False),
+        (LakehouseError("ConnectError: refused (gave up after 10 attempts and 375s of waiting)"), False),
+        (LakeFrozenError("lake freeze since 2026-11-10 07:30:00 UTC (record)"), False),
     ],
 )
 def test_retry_classification(exc, expected):

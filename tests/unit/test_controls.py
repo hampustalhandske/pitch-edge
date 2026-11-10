@@ -488,3 +488,14 @@ def test_pin_refuses_to_move_a_dirty_scheduled_worktree(tmp_path):
     assert proc.returncode == 3 and "uncommitted changes" in proc.stdout
     assert git(wt, "rev-parse", "HEAD") == first
     assert len((root / "data" / "control" / "scheduled_pin.log").read_text().splitlines()) == 1
+
+
+def test_paper_settle_skips_cleanly_while_frozen(monkeypatch, tmp_path):
+    monkeypatch.setenv("LAKEHOUSE_API_TOKEN", "t")
+    monkeypatch.setenv("PITCH_EDGE_PAPER_DB", str(tmp_path / "paper.duckdb"))
+    monkeypatch.setattr(httpx.Client, "send", lambda *a, **k: (_ for _ in ()).throw(AssertionError("no request")))
+    record_freeze(datetime(2026, 11, 10, 9, 11, tzinfo=UTC), "lake rebuild")
+    res = CliRunner().invoke(app, ["paper", "settle"])
+    assert res.exit_code == 0, res.output
+    assert "settle skipped: lake freeze since 2026-11-10 09:11:00 UTC (lake rebuild)" in res.output
+    assert not (tmp_path / "paper.duckdb").exists()  # the ledger was not opened

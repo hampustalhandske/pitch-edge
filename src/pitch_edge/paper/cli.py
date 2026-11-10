@@ -157,15 +157,20 @@ def settle(
     grace_days: float = typer.Option(4.0, help="Days after kickoff before falling back to our own snapshot"),
 ) -> None:
     """Settle finished decisions against the lake's closing prices (Betfair Exchange / Polymarket bars). Does
-    nothing while a pause is active."""
+    nothing while a pause is active, and skips with a message and exit 0 while the lake is frozen."""
     from datetime import timedelta
 
     _stop_if_paused("settle")
-    from pitch_edge.lake.client import Lake
+    from pitch_edge.lake.client import Lake, LakeFrozenError
     from pitch_edge.paper.settle import LakeCloseSource
     from pitch_edge.paper.settle import settle as run_settle
 
-    with PaperStore(paper_db_path()) as store, Lake() as lake:
+    try:
+        lake = Lake()
+    except LakeFrozenError as exc:
+        typer.echo(f"settle skipped: {exc}")
+        return
+    with PaperStore(paper_db_path()) as store, lake:
         counts = run_settle(store, LakeCloseSource(lake), now=utc_now(), grace=timedelta(days=grace_days))
         n_prov = len(store.provisional_settlements())
         n_void = len(store.voided_decision_ids())
