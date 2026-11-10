@@ -771,7 +771,15 @@ projects; M8 traceability; S2 lake capacity; S4 decimal-odds instrument with CLV
   source sha) and validates every artifact it writes or reads against them in CI without the other repo; pitch-edge
   exports the ledger format with a version and its vectors for the consumers to vendor. Each validation is shown to
   fail on a planted bad artifact.
-- Blocked by: edgelab publishing its schemas (with EL-38, EL-74), the lake publishing table schemas. Blocks: any
+- Progress (B1): the ledger format is published as `docs/contracts/research-ledger-format.v1.json` with a
+  `.sha256` file and three chained vectors, built from the ledger's own constants by
+  `pitch_edge.research.ledger_format`; `tests/unit/test_research_ledger_format.py` fails when the files and the
+  code disagree. Edgelab (EL-4) and agentic-trading vendor it.
+- Edgelab's answer (2026-11-10, via master): a v1 `submission.json` stays valid and is graded under its folder's own
+  grading block; grading under 2026.11.1 needs the v2 envelope (policy field), and a v1 folder moves over by
+  rewriting only `submission.json`. Its v2 schema and sha256 come with EL-75; B2 vendors it and moves
+  `write_submission` to v2.
+- Blocked by: edgelab's EL-75 schemas and the lake's contract v2 (LK-119) with its describe/tables schema. Blocks: any
   counted edgelab run of a pitch-edge strategy.
 - Commits: none yet.
 

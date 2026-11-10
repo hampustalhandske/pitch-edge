@@ -5,9 +5,20 @@ Format: row_json = json.dumps({column: canonical value}, sort_keys=True, separat
 datetimes as naive-UTC isoformat, NaN as the string "NaN" and None as null; row_hash =
 sha256_hex(f"{prev_hash}|{table}|{row_json}"); the first entry's prev_hash is "0" * 64."""
 
+import hashlib
+import json
 from datetime import datetime
+from pathlib import Path
 
 from pitch_edge.research.ledger import GENESIS, _chain_hash, _row_json
+from pitch_edge.research.ledger_format import (
+    FORMAT_VERSION,
+    format_spec,
+    render_checksum,
+    render_spec,
+    spec_filename,
+    vector_rows,
+)
 
 REGISTRATION = {
     "id": "demo-v1",
@@ -81,3 +92,35 @@ def test_trial_row_json_encodes_nan_as_string_and_none_as_null():
     assert '"ci_lo":"NaN"' in row_json
     assert '"ci_hi":null' in row_json
     assert '"n":300,' in row_json
+
+
+# --------------------------------------------------------------------------- published, versioned format file
+
+SPEC_DIR = Path(__file__).resolve().parents[2] / "docs" / "contracts"
+
+
+def test_the_published_format_file_matches_the_code():
+    path = SPEC_DIR / spec_filename()
+    assert path.exists(), f"missing {path}: run `pitch_edge.research.ledger_format.write_spec(Path('docs/contracts'))`"
+    assert path.read_text() == render_spec(), "the format changed: bump FORMAT_VERSION and publish a new file"
+    checksum = path.with_name(path.name + ".sha256").read_text()
+    assert checksum == render_checksum()
+    assert checksum.split()[0] == hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def test_the_published_vectors_are_the_fixed_vectors_above():
+    spec = format_spec()
+    assert spec["version"] == FORMAT_VERSION
+    assert [(t, r) for t, r in vector_rows()][0][1] == REGISTRATION
+    assert [v["row_hash"] for v in spec["vectors"]] == [REGISTRATION_HASH, TRIAL_HASH, REVIEW_HASH]
+    for v in spec["vectors"]:
+        payload = f"{v['prev_hash']}|{v['table']}|{v['row_canonical']}".encode()
+        assert hashlib.sha256(payload).hexdigest() == v["row_hash"]
+    assert spec["chain"]["genesis_prev_hash"] == GENESIS
+
+
+def test_a_changed_canonicalisation_no_longer_matches_the_published_file(monkeypatch):
+    import pitch_edge.research.ledger_format as lf
+
+    monkeypatch.setattr(lf, "_row_json", lambda table, row: json.dumps({k: str(v) for k, v in row.items()}))
+    assert lf.render_spec() != (SPEC_DIR / spec_filename()).read_text()
