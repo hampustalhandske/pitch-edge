@@ -194,7 +194,7 @@ projects; M8 traceability; S2 lake capacity; S4 decimal-odds instrument with CLV
   (median 2.9 minutes before kickoff for Pinnacle on UCL). Outcome codes 101/102/103 = home/draw/away are verified
   (the lake matched OddsPapi's Betfair close to football-data's on 54 of 54 matches, 2026-01-13 to 01-17). Next:
   once the backfill finishes (~2026-10-30), settle UCL paper decisions against the de-vigged Pinnacle close from it.
-- Progress (uncommitted, not closed): `paper/settle.py` settles UCL/UEL bookmaker decisions against the de-vigged
+- Progress (committed in af38e21, not closed): `paper/settle.py` settles UCL/UEL bookmaker decisions against the de-vigged
   OddsPapi Pinnacle close (`lake:oddspapi.pinnacle_close`; fixture matched by competition, kickoff within 3 h and
   team names via `fixtures.oddspapi_team`; valid only with all three outcomes present, active, price > 1, the
   latest row at most 15 min before kickoff, and a plausible book sum; one lake query per competition and day per
@@ -693,4 +693,164 @@ projects; M8 traceability; S2 lake capacity; S4 decimal-odds instrument with CLV
   unchanged.
 - Open (owner): confirm or change the evidence ruling.
 - Blocked by: none. Blocks: none.
+- Commits: none yet.
+
+## PE-36 Row-picking queries without a total order
+- Status: open
+- Priority: must (engineering rule 1; found by the 2026-11-10 cleanup audit)
+- Raised by: pitch-edge (cleanup audit)
+- Evidence: each of these picks one row per group by an order that can tie, so the pick can change between runs
+  (the LK-13 pattern):
+  - `lake/mirror.py:360-363`: the mirror keeps one row per key by `scraped_at DESC NULLS LAST` with no tie-break,
+    and orders by the key columns themselves (no order at all) when the batch has no `scraped_at`.
+  - `paper/store.py:466-467` (`latest_quotes`): `row_number() ... ORDER BY captured_at DESC`, partitioned without
+    `source_event_id`, so two events of one source mapped to one fixture tie.
+  - `paper/store.py:474` (`known_kickoffs`): `arg_max(kickoff_at, captured_at)` ties within one capture.
+  - `paper/settle.py:183-184` (OddsPapi Pinnacle close): `arg_max(price, observed_at)` and
+    `arg_max(active, observed_at)` are separate aggregates, so on a tie the price and the active flag can come from
+    different rows.
+  - `paper/settle.py:254` (`pm_last_bars`): `arg_max(close, hour_start)`, unique only while the lake view holds one
+    row per (asset, hour) (LK-13).
+  - `paper/settle.py:336`: `sort_values("captured_at")` (not a stable sort) then `.last()` picks the Polymarket token.
+  - `features/squad_value.py:133` and `features/live_lineups.py:90`: `row_number() OVER (... ORDER BY mins DESC)`
+    picks the usual XI; equal minutes tie.
+  - `features/context.py:134`: `any_value(g.referee)`, `any_value(g.game_id)` when more than one game matches.
+  - `odds/steam.py:90-92`: `sort_values("snapshot_ts")` (not stable) then `first()`/`last()`.
+  - `data/sources/transfermarkt_open.py:99`: `any_value(club_name)` (a display name only).
+- Acceptance: every listed pick has a total order (all key columns, then a stable id) or an explicit refusal on a
+  tie; one test per pick inserts tied rows in two orders and requires the same pick, and fails on the code
+  without the tie-break (negative control).
+- Blocked by: none. Blocks: the reruns of the cleanup plan (paper settle, mirror re-sync, feature store).
+- Commits: none yet.
+
+## PE-37 No pipeline is tested for bit-identical output across processes or after a kill
+- Status: open
+- Priority: must (engineering rules 1 and 2)
+- Raised by: pitch-edge (cleanup audit)
+- Evidence: no test runs a result pipeline twice in two processes and compares the output. The nearest ones are
+  in-process: `run_trial` recomputes its bootstrap (`tests/unit/test_research_trial.py:68`), the grade compares a
+  rerun's numbers (`tests/unit/test_research_gates.py:151`), and the settle compares two query paths
+  (`tests/unit/test_paper_settle_lake_equivalence.py:344`). The resume tests raise inside the process
+  (`tests/unit/test_lake_mirror.py:406`, `tests/unit/test_fd_spine.py:189`,
+  `tests/unit/test_storage.py:98`); nothing kills a process and resumes it.
+- Acceptance: for each result pipeline (study trial run + grade + ledger export; paper decide, settle and report;
+  lake-sync mirror and spine; edgelab export and submission; backtest), a CI test runs it twice in two
+  subprocesses on fixed inputs and requires byte-identical output (ids and wall-clock fields named and excluded),
+  and a test kills it with SIGKILL mid-run, resumes, and requires the same output as an uninterrupted run. Each
+  test is shown to fail on a planted defect (an unseeded draw, a skipped checkpoint).
+- Blocked by: PE-36 (the ties would make the test flaky). Blocks: the reruns of the cleanup plan.
+- Commits: none yet.
+
+## PE-38 Module-level mutable state without a census
+- Status: open
+- Priority: should (engineering rule 2)
+- Raised by: pitch-edge (cleanup audit)
+- Evidence: `research/summary.py:543-544` (`_RESEARCH_CACHE`, `_PAPER_CACHE`, keyed by file mtime and size),
+  `dashboard/web.py:240` (`_ASK_CACHE`, holds a warehouse handle and the graph for the life of the server),
+  `paper/strategies.py:425` (`_REGISTRY`). None is in a result path today; nothing stops the next one.
+- Acceptance: a census test lists every module-level mutable object in `src/` and fails on one that is not on an
+  allowlist with a reason; the test fails when a new `dict` global is planted.
+- Blocked by: none. Blocks: none.
+- Commits: none yet.
+
+## PE-39 Cross-project contracts are checked only when the other repo is present
+- Status: open
+- Priority: must (engineering rule 3; M3, M5)
+- Raised by: pitch-edge (cleanup audit)
+- Evidence:
+  - edgelab `submission.v1` manifest (`edgelab/submission.py:31`, `SCHEMA_VERSION = 1`): validated only by
+    `tests/unit/test_edgelab_submission.py:116`, skipped without `EDGELAB_DIR` (skipped in CI).
+  - edgelab data bundle (`edgelab/export.py`): checked against edgelab's schemas only by
+    `tests/unit/test_edgelab_export.py:203`, skipped in CI.
+  - `strategy.yaml` (`edgelab/scaffold.py:257-275`): written from a hand-copied template (the AT-151 pattern).
+  - the lake API and the table columns pitch-edge reads (`lake/client.py:1-10`, `lake/mirror.py`,
+    `paper/settle.py`): no vendored schema; tests build their frames by hand.
+  - the research-ledger chain format pitch-edge produces for agentic-trading and edgelab (PE-21): fixed vectors in
+    `tests/unit/test_research_ledger_format.py`, but no exported, versioned schema file and no format version.
+- Acceptance: each producer publishes a versioned schema; pitch-edge vendors edgelab's and the lake's (recording the
+  source sha) and validates every artifact it writes or reads against them in CI without the other repo; pitch-edge
+  exports the ledger format with a version and its vectors for the consumers to vendor. Each validation is shown to
+  fail on a planted bad artifact.
+- Blocked by: edgelab publishing its schemas (with EL-38, EL-74), the lake publishing table schemas. Blocks: any
+  counted edgelab run of a pitch-edge strategy.
+- Commits: none yet.
+
+## PE-40 Silent fallbacks in result paths and the CI trigger
+- Status: open
+- Priority: should (engineering rule 4)
+- Raised by: pitch-edge (cleanup audit)
+- Evidence:
+  - `lake/mirror.py:362`: a batch without `scraped_at` is deduplicated by the key columns (no real order).
+  - `lake/client.py:119`: a lake answer without `X-Lakehouse-Version` leaves `Lake.version` None, and the mirror and
+    study pulls record the null build without refusing.
+  - `models/poisson.py:67-73`: a failed per-league fit is logged and replaced by one global fit; the run's card does
+    not record it. `models/dixon_coles.py:145-150` falls back to independent Poisson, then to a uniform matrix,
+    with no record.
+  - `.github/workflows/ci.yml:3-6`: CI runs only on pushes to `main` and on pull requests, so the working branch is
+    never tested on GitHub; the local gate scripts that stand in for it are git-ignored.
+  The `ask`/LLM fallbacks (`agents/llm.py`, `rag/generate.py`, `agents/qa_graph.py`) are narration-only by design
+  and are not in this list.
+- Acceptance: the mirror refuses a batch without a total order; a counted pull refuses a null lake build; model
+  fallbacks are counted in the card; CI runs on every pushed branch, and the gate scripts are tracked. Each refusal
+  has a test that plants the condition.
+- Blocked by: none. Blocks: none.
+- Commits: none yet.
+
+## PE-41 Gates and suites have no coverage census
+- Status: open
+- Priority: must (engineering rule 5)
+- Raised by: pitch-edge (cleanup audit)
+- Evidence:
+  - `research/gates.py:105-130` lists the ladder criteria; `tests/unit/test_research_gates.py` (62 tests) covers
+    them one by one, but nothing fails if a criterion loses its pass or its fail case.
+  - `pyproject.toml:75` (`testpaths = ["tests"]`): the six test files under `research/studies/` never run in CI
+    or the gate.
+  - CI skips 13 tests (10 `needs_coef`, PE-32; 2 `EDGELAB_DIR`, PE-39; 1 live ledger, `test_research_ledger.py:290`)
+    and no check bounds the skips, so a whole area can skip and the suite still passes.
+  - the local gate scripts (`macos_ci.sh`, `linux_ci.sh`) were never run on a planted failing test.
+- Acceptance: a census test requires every criterion in `CRITERIA` to be reached as pass and as fail or
+  not-evaluated by some test; the study tests run in CI; CI fails when the skip set differs from a listed one;
+  each gate script is shown to report a planted failure.
+- Blocked by: none. Blocks: none.
+- Commits: none yet.
+
+## PE-42 The lake client retries only HTTP 503
+- Status: open
+- Priority: should (engineering rule 6)
+- Raised by: pitch-edge (cleanup audit)
+- Evidence: `lake/client.py:112-122` re-sends only on 503; a refused connection, a read timeout, a 502 or a
+  stream cut mid-body raises at once. The lake restarts on demand and will restart for LK-111, so any pull, sync
+  or settle running then fails (the settle waits for the next cycle, `paper/settle.py:444`; the mirror resumes at
+  its next start).
+- Acceptance: transient transport errors are retried with bounded backoff, a partial stream is never yielded as a
+  result, and mocked tests cover each case, with a negative control (a non-transient 4xx is not retried).
+- Blocked by: none. Blocks: none.
+- Commits: none yet.
+
+## PE-43 Lake reads cannot be pinned to (build, T)
+- Status: open
+- Priority: should (engineering rule 7; must before any counted rerun from a fresh pull)
+- Raised by: pitch-edge (cleanup audit)
+- Evidence: the mirror and the study pulls read the lake's current views and record only the build
+  (`lake_sync_state.lake_version`, `snapshot.json` from PE-25). The R2, R3, R6 and R7 pulls predate PE-25 and have
+  no snapshot file at all. The warehouse's own `matches`/`odds` spine is rebuilt whole and keeps no history (see
+  PE-31).
+- Acceptance: every lake read used for a result names (build, T) and reads the lake's pinned form; the pull writes
+  both into its snapshot; a test pins a mocked lake to two builds and gets each one's rows.
+- Blocked by: LK-109 (addressable builds) and LK-13. Blocks: counted reruns that re-pull.
+- Commits: none yet.
+
+## PE-44 Scheduled jobs run the live working tree and ignore a freeze
+- Status: open
+- Priority: should (engineering rule 8; must while fix batches are being built)
+- Raised by: pitch-edge (cleanup audit)
+- Evidence: `local.pitch-edge.lake-sync-fd` is loaded (starts 14:00 and 20:00 local) and runs
+  `scripts/lake_sync_fd.sh:17`, which runs `uv run` in the checkout itself; the paper loop does the same
+  (`scripts/paper_loop.sh:42`). During fix batches a scheduled start runs uncommitted, half-edited code that writes
+  the warehouse. A lake freeze is honoured only by sessions' discipline: nothing in the code stops a sync or a pull
+  during a freeze.
+- Acceptance: scheduled jobs run from a worktree at a named sha (or refuse on a dirty tree or an unrecorded sha),
+  and they and the study pulls read a freeze state at start and refuse during it; tests plant a dirty tree and an
+  active freeze.
+- Blocked by: none (a lake-side freeze signal would replace the local one). Blocks: none.
 - Commits: none yet.
