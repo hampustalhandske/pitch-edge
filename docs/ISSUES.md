@@ -866,5 +866,8 @@ projects; M8 traceability; S2 lake capacity; S4 decimal-odds instrument with CLV
   in any case after the lake's freeze ends; a missed sync is caught up at its next run. Undo:
   `launchctl enable gui/$(id -u)/local.pitch-edge.lake-sync-fd`, then
   `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/local.pitch-edge.lake-sync-fd.plist`.
-- Blocked by: none (a lake-side freeze signal would replace the local one). Blocks: none.
+- Master (2026-11-10): design approved. The client also refuses while the lake's own freeze or hold is active, read
+  from a field the lake serves in contract v2 (asked of the lake: today the freeze is a file in the lake's data folder,
+  not served by the API); that part lands in B2 with LK-119, and the local `control freeze` stays as an extra switch.
+- Blocked by: none for the local switch; the lake-served freeze field (LK-119) for the B2 part. Blocks: none.
 - Commits: none yet.
