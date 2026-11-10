@@ -665,7 +665,14 @@ projects; M8 traceability; S2 lake capacity; S4 decimal-odds instrument with CLV
   reason names this window and PE-35, so `paper report` leaves them out of every metric. Nothing is deleted.
   None of them has a final settlement. The 213 final settlements written in the window are of decisions made before
   the pause (the latest 2026-10-28 07:27 UTC); they are the ordinary settle against the lake's closes and stay
-  counted unless the owner rules otherwise. The window's cycles still count towards `window_coverage`.
+  counted (master ruling 2026-11-10).
+- Coverage: the owner's pause is recorded from 2026-10-28 07:48:17 UTC, and a second pause record from
+  2026-11-10 04:31:30 UTC re-confirms it. The ledger cannot express the 11-09/10 run as part of that pause: a pause
+  record has only a start and ends at the next cycle, and `window_coverage` counts every hour holding a cycle start
+  (`decide_log`), with no reference to pauses. So the window's ten cycles still count as covered hours.
+- Fix, after the freeze: `window_coverage` (and `cycle_gaps`) leave out cycles whose decisions are all void-flagged
+  for PE-35, so 2026-10-28 to the next authorised reload reads as paused; the coverage note names the excluded
+  window. With a test.
 - Open (owner): confirm or change the evidence ruling.
 - Blocked by: none. Blocks: none.
 - Commits: none yet.
