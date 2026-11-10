@@ -11,6 +11,9 @@
 # Every hour, after that: settle finished decisions against the lake's closing prices, so a decision settles
 # in the first cycle after the lake has its close. A cycle that starts more than 1.5 x the interval after the
 # previous one (the Mac slept) is logged as "missed N cycles since <ts>".
+# Pause: at the start of every cycle `paper gate` reads the ledger; while it records an active pause (`paper pause`,
+# ended only by `paper resume`) the loop logs it and exits 0, so launchd (restart on crash only) does not respawn it
+# and a reload or reboot cannot trade. If the gate itself fails (e.g. the ledger is locked), the cycle is skipped.
 # Log: data/logs/paper_loop.log. Stop: kill the PID in data/paper/paper_loop.pid (the trap removes the
 # pidfile; a second copy refuses to start while that pid is alive).
 set -u
@@ -47,13 +50,22 @@ while true; do
     log "missed $(( (cycle_start - last_start + INTERVAL_S / 2) / INTERVAL_S - 1 )) cycles since $(date -u -r "$last_start" +%Y-%m-%dT%H:%M:%SZ)"
   fi
   last_start=$cycle_start
-  log "cycle start"
-  pe paper collect --sources polymarket,kalshi || log "collect polymarket,kalshi exited non-zero"
-  pe -v paper collect --sources odds_api || log "collect odds_api exited non-zero"
-  pe paper decide || log "decide exited non-zero"
-  pe paper settle || log "settle exited non-zero"
+  pe paper gate; gate_rc=$?
+  if [ "$gate_rc" -eq 10 ]; then
+    log "paused in the ledger; exiting without a cycle (record \`paper resume\` to restart)"
+    exit 0
+  fi
+  if [ "$gate_rc" -ne 0 ]; then
+    log "pause check failed (exit $gate_rc); cycle skipped"
+  else
+    log "cycle start"
+    pe paper collect --sources polymarket,kalshi || log "collect polymarket,kalshi exited non-zero"
+    pe -v paper collect --sources odds_api || log "collect odds_api exited non-zero"
+    pe paper decide || log "decide exited non-zero"
+    pe paper settle || log "settle exited non-zero"
+    log "cycle end"
+  fi
   now=$(date +%s)
-  log "cycle end"
   # Wall-clock schedule: wait in short steps until the next cycle is due, so after the machine wakes from sleep
   # (lid closed) an overdue cycle starts within a minute instead of after the remainder of a frozen hour-long sleep.
   next_due=$((now + INTERVAL_S))

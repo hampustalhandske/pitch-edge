@@ -1,6 +1,9 @@
 """`pitch-edge paper ...`: collect quotes, log paper decisions, settle them, report CLV.
 
 Paper only: every command reads public market data or the ledger file; none places an order.
+While the ledger records an active pause (`paper pause`, ended only by `paper resume`), `collect`, `decide` and
+`settle` print the pause and exit 0 without fetching or writing anything, and `paper gate` exits `PAUSED_EXIT`
+so the loop script stops.
 The ledger lives at `$PITCH_EDGE_PAPER_DB` (default `<data_dir>/paper/paper.duckdb`). Collectors fetch
 before opening the ledger for writing, and `status`/`report` open it read-only, so a long network sweep
 never blocks a reader.
@@ -9,6 +12,7 @@ never blocks a reader.
 from __future__ import annotations
 
 import os
+from datetime import datetime
 from pathlib import Path
 
 import typer
@@ -25,6 +29,24 @@ paper_app = typer.Typer(
 )
 
 ALL_SOURCES = ("odds_api", "polymarket", "kalshi")
+PAUSED_EXIT = 10  # `paper gate` exit code while a pause is active
+
+
+def _active_pause() -> datetime | None:
+    """Start of the pause active now in the ledger, or None (also when there is no ledger file yet)."""
+    store = PaperStore.open_read_only(paper_db_path())
+    if store is None:
+        return None
+    with store:
+        return store.active_pause(utc_now())
+
+
+def _stop_if_paused(command: str) -> None:
+    """Exit 0 without doing anything when the ledger records an active pause."""
+    start = _active_pause()
+    if start is not None:
+        rprint(f"paper {command}: the loop is paused since {start:%Y-%m-%d %H:%M:%S} UTC; nothing fetched or written")
+        raise typer.Exit(0)
 
 
 def paper_db_path() -> Path:
@@ -53,9 +75,10 @@ def collect(
     bookmakers: str = typer.Option("", help="the-odds-api bookmaker filter (default: every book in regions uk,eu)"),
     force: bool = typer.Option(False, help="Ignore the the-odds-api cadence window (the budget floor still applies)"),
 ) -> None:
-    """Fetch current quotes from the chosen sources into the ledger."""
+    """Fetch current quotes from the chosen sources into the ledger. Does nothing while a pause is active."""
     from pitch_edge.paper.collectors import KalshiCollector, OddsApiCollector, PolymarketCollector
 
+    _stop_if_paused("collect")
     chosen = _split(sources)
     unknown = set(chosen) - set(ALL_SOURCES)
     if unknown:
@@ -107,9 +130,11 @@ def collect(
 def decide(
     strategy: list[str] = typer.Option(None, "--strategy", help="Strategy id (repeatable; default: all)"),  # noqa: B008
 ) -> None:
-    """Run strategies on the latest quotes and append their paper decisions (immutable)."""
+    """Run strategies on the latest quotes and append their paper decisions (immutable). Does nothing while a
+    pause is active."""
     from pitch_edge.paper.strategies import available_strategies, run_decide
 
+    _stop_if_paused("decide")
     registry = available_strategies()
     ids = list(strategy or []) or list(registry)
     unknown = set(ids) - set(registry)
@@ -131,9 +156,11 @@ def decide(
 def settle(
     grace_days: float = typer.Option(4.0, help="Days after kickoff before falling back to our own snapshot"),
 ) -> None:
-    """Settle finished decisions against the lake's closing prices (Betfair Exchange / Polymarket bars)."""
+    """Settle finished decisions against the lake's closing prices (Betfair Exchange / Polymarket bars). Does
+    nothing while a pause is active."""
     from datetime import timedelta
 
+    _stop_if_paused("settle")
     from pitch_edge.lake.client import Lake
     from pitch_edge.paper.settle import LakeCloseSource
     from pitch_edge.paper.settle import settle as run_settle
@@ -204,8 +231,9 @@ def pause(
     ),
     reason: str = typer.Option(..., "--reason", help="Why the loop was stopped"),
 ) -> None:
-    """Record that the loop was stopped on purpose from --since until its next cycle, so `paper status` counts
-    those cycles as paused rather than missed. Recording the same start twice adds nothing."""
+    """Record that the loop was stopped on purpose from --since. The pause stays active until `paper resume`:
+    meanwhile the loop exits at its next cycle and `collect`/`decide`/`settle` write nothing, and coverage counts
+    those hours as paused. Recording the same start twice adds nothing."""
     import pandas as pd
 
     start = pd.Timestamp(since)
@@ -216,10 +244,40 @@ def pause(
 
 
 @paper_app.command()
+def resume(
+    at: str = typer.Option(..., "--at", help="When the owner restarted the loop, ISO 8601 UTC"),
+    reason: str = typer.Option(..., "--reason", help="Who restarted it and why"),
+) -> None:
+    """End the active pause at --at, so the loop and the writing commands run again. Refuses (exit 1) when no
+    pause is active at --at."""
+    import pandas as pd
+
+    when = pd.Timestamp(at)
+    when = when.tz_localize("UTC") if when.tzinfo is None else when.tz_convert("UTC")
+    with PaperStore(paper_db_path()) as store:
+        added = store.record_resume(when.to_pydatetime(), reason)
+    if not added:
+        rprint(f"[red]no active pause at {when:%Y-%m-%d %H:%M:%S} UTC (or that resume is already recorded)[/red]")
+        raise typer.Exit(1)
+    rprint(f"resume at {when:%Y-%m-%d %H:%M:%S} UTC recorded")
+
+
+@paper_app.command()
+def gate() -> None:
+    """For the loop script, at the start of each cycle: exit 0 when the loop may run, `PAUSED_EXIT` (10) while
+    the ledger records an active pause. Read-only."""
+    start = _active_pause()
+    if start is not None:
+        rprint(f"paused since {start:%Y-%m-%d %H:%M:%S} UTC")
+        raise typer.Exit(PAUSED_EXIT)
+    rprint("not paused")
+
+
+@paper_app.command()
 def status() -> None:
     """Row counts, quotes per source, the-odds-api credits remaining, and loop cycles observed vs expected
     with the longest gaps. Read-only."""
-    from pitch_edge.paper.report import CYCLE_INTERVAL, cycle_gaps, open_pause
+    from pitch_edge.paper.report import CYCLE_INTERVAL, cycle_gaps, in_pause, open_pause
 
     store = PaperStore.open_read_only(paper_db_path())
     if store is None:
@@ -240,7 +298,7 @@ def status() -> None:
             t.add_row(f"quotes[{src}]", f"{n} rows, {fx} fixtures, last {last} UTC")
         t.add_row("odds_api credits remaining", str(store.budget("odds_api")))
         starts = store.cycle_starts()
-        pauses = store.pause_starts()
+        pauses = store.pause_intervals()
         gaps = cycle_gaps(starts, CYCLE_INTERVAL, pauses)
         missed = [g for g in gaps if not g.paused]
         if starts:
@@ -253,9 +311,12 @@ def status() -> None:
             paused = [g for g in gaps if g.paused]
             if paused:
                 t.add_row("paused", f"{len(paused)} pause(s), {sum(g.missed for g in paused)} paused cycles")
-        current = open_pause(starts, pauses)
+        in_pauses = [s for s in starts if in_pause(s, pauses)]
+        if in_pauses:
+            t.add_row("cycles inside a pause", f"{len(in_pauses)} (not counted as coverage)")
+        current = open_pause(pauses, utc_now())
         if current is not None:
-            t.add_row("loop", f"paused since {current:%Y-%m-%d %H:%M} UTC (no cycle since)")
+            t.add_row("loop", f"paused since {current:%Y-%m-%d %H:%M} UTC (until `paper resume`)")
         rprint(t)
         for g in sorted(missed, key=lambda g: g.missed, reverse=True)[:5]:
             rprint(f"gap {g.start:%Y-%m-%d %H:%M} -> {g.end:%Y-%m-%d %H:%M} UTC: {g.missed} missed cycles")

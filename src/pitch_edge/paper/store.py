@@ -19,6 +19,9 @@ Tables:
   strategies of one loop cycle share the cycle's `decided_at`, so its distinct values are the cycle record
   (`cycle_starts`).
 - `collect_log`: one row per collector call, including the-odds-api credits remaining (budget guard).
+- `pauses` / `resumes`: append-only records that the owner stopped and restarted the loop. A pause is active
+  from its start until the first resume after it (`pause_intervals`, `active_pause`); while one is active the
+  loop and every writing `paper` command refuse to run.
 
 All timestamps are stored as naive UTC `TIMESTAMP` and returned as tz-aware UTC pandas columns.
 Every public writer requires tz-aware datetimes.
@@ -103,11 +106,33 @@ CREATE TABLE IF NOT EXISTS decide_log (
 CREATE TABLE IF NOT EXISTS pauses (
     started_at TIMESTAMP PRIMARY KEY, reason VARCHAR NOT NULL, recorded_at TIMESTAMP NOT NULL
 );
+CREATE TABLE IF NOT EXISTS resumes (
+    resumed_at TIMESTAMP PRIMARY KEY, reason VARCHAR NOT NULL, recorded_at TIMESTAMP NOT NULL
+);
 CREATE TABLE IF NOT EXISTS collect_log (
     source VARCHAR NOT NULL, scope VARCHAR, called_at TIMESTAMP NOT NULL, status VARCHAR NOT NULL,
     remaining INTEGER, used INTEGER, n_quotes INTEGER, note VARCHAR
 );
 """
+
+
+def pause_intervals(pauses: list[datetime], resumes: list[datetime]) -> list[tuple[datetime, datetime | None]]:
+    """Merge pause starts and resume times (tz-aware UTC) into paused intervals, oldest first. A pause is
+    active from its start until the first resume strictly after it; the last interval ends in None while no
+    resume has followed it. Resumes with no active pause, and pauses recorded inside an active one, add nothing."""
+    # a resume sorts before a pause at the same time
+    events = sorted([(t, 1) for t in pauses] + [(t, 0) for t in resumes])
+    out: list[tuple[datetime, datetime | None]] = []
+    start: datetime | None = None
+    for t, is_pause in events:
+        if is_pause and start is None:
+            start = t
+        elif not is_pause and start is not None and t > start:
+            out.append((start, t))
+            start = None
+    if start is not None:
+        out.append((start, None))
+    return out
 
 
 class DecisionError(RuntimeError):
@@ -680,8 +705,8 @@ class PaperStore:
         return self._df("SELECT * FROM decide_log ORDER BY decided_at, strategy_id")
 
     def record_pause(self, started_at: datetime, reason: str) -> bool:
-        """Record that the loop was stopped on purpose from `started_at` (tz-aware UTC) until its next cycle.
-        Returns False when a pause with that start is already recorded."""
+        """Record that the loop was stopped on purpose from `started_at` (tz-aware UTC). The pause stays active
+        until a later `record_resume`. Returns False when a pause with that start is already recorded."""
         if started_at.tzinfo is None:
             raise ValueError("started_at must be timezone-aware (UTC)")
         start = started_at.astimezone(UTC).replace(tzinfo=None)
@@ -692,12 +717,47 @@ class PaperStore:
         )
         return True
 
+    def record_resume(self, resumed_at: datetime, reason: str) -> bool:
+        """Record that the owner restarted the loop at `resumed_at` (tz-aware UTC), ending the pause active then.
+        Returns False when no pause is active at `resumed_at` or a resume with that time is already recorded."""
+        if resumed_at.tzinfo is None:
+            raise ValueError("resumed_at must be timezone-aware (UTC)")
+        if self.active_pause(resumed_at) is None:
+            return False
+        at = resumed_at.astimezone(UTC).replace(tzinfo=None)
+        if self.con.execute("SELECT 1 FROM resumes WHERE resumed_at = ?", [at]).fetchone():
+            return False
+        self.con.execute(
+            "INSERT INTO resumes VALUES (?, ?, ?)", [at, reason, utc_now().astimezone(UTC).replace(tzinfo=None)]
+        )
+        return True
+
     def pause_starts(self) -> list[datetime]:
         """Start of every recorded pause, oldest first (tz-aware UTC); empty for a ledger without the table."""
         if "pauses" not in self.tables():
             return []
         rows = self.con.execute("SELECT started_at FROM pauses ORDER BY started_at").fetchall()
         return [r[0].replace(tzinfo=UTC) for r in rows]
+
+    def resume_times(self) -> list[datetime]:
+        """Time of every recorded resume, oldest first (tz-aware UTC); empty for a ledger without the table."""
+        if "resumes" not in self.tables():
+            return []
+        rows = self.con.execute("SELECT resumed_at FROM resumes ORDER BY resumed_at").fetchall()
+        return [r[0].replace(tzinfo=UTC) for r in rows]
+
+    def pause_intervals(self) -> list[tuple[datetime, datetime | None]]:
+        """The loop's paused intervals, oldest first: each runs from a pause start to the first resume after it
+        (None while still active). A pause recorded while another is active extends that one, it does not start
+        a new interval."""
+        return pause_intervals(self.pause_starts(), self.resume_times())
+
+    def active_pause(self, at: datetime) -> datetime | None:
+        """Start of the pause active at `at` (tz-aware UTC), or None when the loop may run then."""
+        for start, end in self.pause_intervals():
+            if start <= at and (end is None or at < end):
+                return start
+        return None
 
     def cycle_starts(self) -> list[datetime]:
         """Time of every loop cycle that ran the strategies, oldest first (tz-aware UTC): the distinct

@@ -23,8 +23,10 @@ never pooled into one mean CLV; each (strategy, segment) has one row per benchma
 
 The loop runs one cycle per hour but the machine sleeps, so cycles are missed and market snapshots cannot be
 backfilled. `cycle_gaps` and `window_coverage` measure that from the cycle record (`PaperStore.cycle_starts`);
-the primary segment carries its `window_coverage` next to the CLV results. Gaps are reported, never filled,
-and the CLV computation does not depend on them.
+the primary segment carries its `window_coverage` next to the CLV results. Hours inside a recorded pause
+(`PaperStore.pause_intervals`, a pause to the next resume) are paused: a cycle in them does not count as
+coverage, and `window_paused` is their share of the window. Gaps are reported, never filled, and the CLV
+computation does not depend on them.
 """
 
 from __future__ import annotations
@@ -61,6 +63,7 @@ COLUMNS = [
     "roi",
     "provisional_mean_clv",
     "window_coverage",
+    "window_paused",
     "registration_cut",
 ]
 CYCLE_INTERVAL = timedelta(hours=1)
@@ -72,7 +75,7 @@ PINNACLE_BENCHMARK = "pinnacle_close"
 @dataclass(frozen=True)
 class CycleGap:
     """Two consecutive loop cycles further apart than `GAP_FACTOR` x the interval; `missed` cycles never ran.
-    `paused` is True when a recorded pause started inside the gap: the loop was stopped on purpose, so its
+    `paused` is True when the gap overlaps a recorded pause interval: the loop was stopped on purpose, so its
     cycles are paused rather than missed."""
 
     start: datetime  # the cycle before the gap
@@ -81,36 +84,71 @@ class CycleGap:
     paused: bool = False
 
 
+PauseInterval = tuple[datetime, datetime | None]
+
+
+def _overlaps(a: datetime, b: datetime, pauses: list[PauseInterval] | None) -> bool:
+    """True when [a, b) overlaps a pause interval (an interval ending in None is still active)."""
+    return any(s < b and (e is None or e > a) for s, e in pauses or [])
+
+
+def in_pause(t: datetime, pauses: list[PauseInterval] | None) -> bool:
+    """True when `t` falls inside a pause interval [start, end)."""
+    return any(s <= t and (e is None or t < e) for s, e in pauses or [])
+
+
 def cycle_gaps(
-    starts: list[datetime], interval: timedelta = CYCLE_INTERVAL, pauses: list[datetime] | None = None
+    starts: list[datetime], interval: timedelta = CYCLE_INTERVAL, pauses: list[PauseInterval] | None = None
 ) -> list[CycleGap]:
     """Gaps in a sorted list of cycle start times. Consecutive starts more than `GAP_FACTOR` x `interval`
-    apart are a gap that missed round(gap / interval) - 1 cycles; a gap holding one of `pauses` (recorded
-    pause starts) is marked paused."""
+    apart are a gap that missed round(gap / interval) - 1 cycles; a gap overlapping one of `pauses` (pause
+    intervals, see `PaperStore.pause_intervals`) is marked paused."""
     gaps = []
     for a, b in zip(starts, starts[1:], strict=False):
         if b - a > GAP_FACTOR * interval:
-            paused = any(a <= p < b for p in pauses or [])
-            gaps.append(CycleGap(a, b, round((b - a) / interval) - 1, paused))
+            gaps.append(CycleGap(a, b, round((b - a) / interval) - 1, _overlaps(a, b, pauses)))
     return gaps
 
 
-def open_pause(starts: list[datetime], pauses: list[datetime]) -> datetime | None:
-    """The latest recorded pause start after the last cycle (the loop has not run since), else None."""
-    after = [p for p in pauses if not starts or p >= starts[-1]]
-    return max(after) if after else None
+def open_pause(pauses: list[PauseInterval], now: datetime) -> datetime | None:
+    """Start of the pause interval active at `now`, else None."""
+    for s, e in pauses:
+        if s <= now and (e is None or now < e):
+            return s
+    return None
 
 
 def window_coverage(
-    starts: list[datetime], window_start: datetime, window_end: datetime, interval: timedelta = CYCLE_INTERVAL
+    starts: list[datetime],
+    window_start: datetime,
+    window_end: datetime,
+    interval: timedelta = CYCLE_INTERVAL,
+    pauses: list[PauseInterval] | None = None,
 ) -> float:
     """Share of the `interval`-long slots from `window_start` to `window_end` that contain at least one
-    cycle start. Only whole slots count; NaN when the window holds none. Cycles outside the window are ignored."""
+    cycle start outside a pause. Only whole slots count; NaN when the window holds none. Cycles outside the
+    window, and cycles inside a pause interval (the loop should not have run), are ignored."""
     n_slots = int((window_end - window_start) / interval)
     if n_slots <= 0:
         return float("nan")
-    hit = {int((t - window_start) / interval) for t in starts if window_start <= t < window_start + n_slots * interval}
+    end = window_start + n_slots * interval
+    hit = {int((t - window_start) / interval) for t in starts if window_start <= t < end and not in_pause(t, pauses)}
     return len(hit) / n_slots
+
+
+def window_paused(
+    window_start: datetime,
+    window_end: datetime,
+    pauses: list[PauseInterval] | None,
+    interval: timedelta = CYCLE_INTERVAL,
+) -> float:
+    """Share of the `interval`-long slots from `window_start` to `window_end` that overlap a pause interval.
+    NaN when the window holds no whole slot."""
+    n_slots = int((window_end - window_start) / interval)
+    if n_slots <= 0:
+        return float("nan")
+    slots = (window_start + i * interval for i in range(n_slots))
+    return sum(_overlaps(s, s + interval, pauses) for s in slots) / n_slots
 
 
 class LedgerLike(Protocol):
@@ -187,7 +225,7 @@ def summarise(
 
     `window_coverage` (primary segments only, else NaN) is the share of hours between the later of the
     evaluation window start and the ledger registration and the earlier of the window end and `now` that
-    contain a loop cycle."""
+    contain a loop cycle outside a pause; `window_paused` is the share of those hours inside a pause."""
     decisions = store.decisions()
     if decisions.empty:
         return pd.DataFrame(columns=COLUMNS)
@@ -214,8 +252,10 @@ def summarise(
 
     now = now or utc_now()
     starts = store.cycle_starts()
+    pauses = store.pause_intervals()
     cuts: dict[str, str] = {}
     coverage: dict[str, float] = {}
+    paused: dict[str, float] = {}
     segments = []
     for hyp in df["hypothesis_id"].unique():
         reg = ledger.registration(str(hyp))
@@ -229,7 +269,8 @@ def summarise(
         cuts[str(hyp)] = f"evaluation {window[0]}..{window[1]}, after ledger registration {recorded.isoformat()}"
         win_start = max(datetime.combine(window[0], time.min, tzinfo=UTC), recorded.to_pydatetime())
         win_end = min(datetime.combine(window[1], time.min, tzinfo=UTC) + timedelta(days=1), now)
-        coverage[str(hyp)] = window_coverage(starts, win_start, win_end, interval)
+        coverage[str(hyp)] = window_coverage(starts, win_start, win_end, interval, pauses)
+        paused[str(hyp)] = window_paused(win_start, win_end, pauses, interval)
         sub = df[mask]
         day = sub["decided_at"].dt.date
         primary = (day >= window[0]) & (day <= window[1]) & (sub["decided_at"] > recorded)
@@ -246,6 +287,7 @@ def summarise(
                 "benchmark": bench,
                 **_segment_row(g, n_boot, seed),
                 "window_coverage": coverage.get(str(hyp), np.nan) if seg == "primary" else np.nan,
+                "window_paused": paused.get(str(hyp), np.nan) if seg == "primary" else np.nan,
                 "registration_cut": cuts.get(str(hyp), ""),
             }
         )
@@ -278,13 +320,17 @@ def report_notes(rep: pd.DataFrame) -> list[str]:
     notes.append(
         "L5 (forward) evidence is reported with its coverage: the loop runs hourly but the machine sleeps, so "
         "some hours have no cycle and their snapshots are lost. window_coverage is the share of hours in a "
-        "primary segment's evaluation window with a cycle; gaps are never filled and CLV is computed on the "
-        "decisions that were made. `paper status` lists the gaps."
+        "primary segment's evaluation window with a cycle outside a recorded pause, and window_paused the share "
+        "inside a pause (the owner stopped the loop); gaps are never filled and CLV is computed on the decisions "
+        "that were made. `paper status` lists the gaps and pauses."
     )
     if "window_coverage" in rep.columns:
         for r in rep[rep["segment"] == "primary"].itertuples():
             if pd.notna(r.window_coverage):
-                notes.append(f"{r.strategy_id} primary: {r.window_coverage:.0%} of evaluation-window hours covered.")
+                note = f"{r.strategy_id} primary: {r.window_coverage:.0%} of evaluation-window hours covered"
+                if pd.notna(getattr(r, "window_paused", np.nan)) and r.window_paused > 0:
+                    note += f", {r.window_paused:.0%} paused"
+                notes.append(note + ".")
     cuts = sorted({c for c in rep.get("registration_cut", pd.Series(dtype=str)) if c})
     for c in cuts:
         notes.append(f"primary segment = {c}.")

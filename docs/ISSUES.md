@@ -647,11 +647,11 @@ projects; M8 traceability; S2 lake capacity; S4 decimal-odds instrument with CLV
 - Commits: none yet.
 
 ## PE-35 A reboot reloads the paused paper loop
-- Status: open (owner decision needed)
+- Status: open (fix built; macOS gate, Linux CI and push pending)
 - Priority: must (owner decision E2: the paper loop stays paused)
 - Raised by: pitch-edge (freeze-night check, 2026-11-10)
 - Evidence: the loop was paused on 2026-10-28 with `launchctl unload`, which does not persist. Its plist stays in
-  `~/Library/LaunchAgents` with `RunAtLoad`, so the reboot of 2026-11-09 18:38 UTC loaded it again. It ran ten
+  `~/Library/LaunchAgents` with `RunAtLoad`, so the reboot of 2026-11-09 18:38 UTC loaded it again. It ran nine
   hourly cycles (collect, decide, settle) from 18:47 UTC to 04:31 UTC on 11-10 and wrote 157 decisions, 213
   settlements, 8 provisional settlements and 9 flags. Every row was written by the normal code path on this branch
   (the settle includes PE-33's Polymarket rule). The ledger is append-only, so the rows stay. The agent was
@@ -669,7 +669,7 @@ projects; M8 traceability; S2 lake capacity; S4 decimal-odds instrument with CLV
 - Coverage: the owner's pause is recorded from 2026-10-28 07:48:17 UTC, and a second pause record from
   2026-11-10 04:31:30 UTC re-confirms it. The ledger cannot express the 11-09/10 run as part of that pause: a pause
   record has only a start and ends at the next cycle, and `window_coverage` counts every hour holding a cycle start
-  (`decide_log`), with no reference to pauses. So the window's ten cycles still count as covered hours.
+  (`decide_log`), with no reference to pauses. So the window's nine cycles still counted as covered hours.
 - Root cause: nothing in the loop checks the pause. A pause lives only in launchd state, so any reload trades again.
 - Acceptance (master, 2026-11-10; after the freeze):
   1. Each cycle reads the ledger's pause state at start, and while a pause is active it exits 0 and writes
@@ -678,6 +678,19 @@ projects; M8 traceability; S2 lake capacity; S4 decimal-odds instrument with CLV
      those hours as paused. With no resume since 2026-10-28, the 11-09/10 cycles fall inside the pause, with no
      special case for PE-35.
   3. Tests: a cycle during a pause writes nothing; coverage over a pause interval reads paused. Then CI and a push.
+- Progress (2026-11-10): built. The paper ledger has a `resumes` table; `PaperStore.pause_intervals` runs each
+  pause to the first resume after it, and `active_pause` says whether one is active. `paper gate` exits 10 while
+  paused; `scripts/paper_loop.sh` runs it at the start of every cycle and exits 0 on 10 (on any other failure it
+  skips the cycle). `paper collect`, `decide` and `settle` print the pause and exit 0 without fetching or writing.
+  `paper resume --at --reason` is the only way to end a pause and refuses when none is active. `cycle_gaps`,
+  `window_coverage` and the new `window_paused` read pause intervals: a cycle inside a pause is not coverage. On the
+  live ledger (read-only): `paper gate` reads paused since 2026-10-28 07:48:17 UTC; `paper status` lists 9 cycles
+  inside a pause; coverage of the four primary segments falls to 9-11% (64-67% of their hours paused). 9 new tests
+  (`tests/unit/test_paper_pause.py`), including the loop script against a stubbed CLI.
+- Test changes: `test_a_gap_holding_a_recorded_pause_is_paused_not_missed` passes its pause as an interval
+  (02:30-06:30) instead of a bare start; same gaps and assertion. `test_cli_status_shows_pauses_apart_from_missed_cycles`
+  records a resume at 06:30 after its 02:30 pause, because a pause now lasts until a resume; its assertions are
+  unchanged.
 - Open (owner): confirm or change the evidence ruling.
 - Blocked by: none. Blocks: none.
 - Commits: none yet.

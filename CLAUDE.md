@@ -87,7 +87,7 @@ uv run pitch-edge {setup|ingest|features|backtest|ablation|rag-eval|health|expor
 uv run pitch-edge {ingest-pmxt|map-pmxt|backtest-timing}   # Polymarket order-book archive + tick-timing backtest
 uv run pitch-edge lake-sync [--only …] [--full-refresh]   # mirror lakehouse tables into lake_* tables
 uv run pitch-edge research {register|status|grade|ledger|import-trials|review}   # ledger + ladder
-uv run pitch-edge paper {collect|decide|settle|report|status}   # forward paper-trading ledger
+uv run pitch-edge paper {collect|decide|settle|report|status|pause|resume|gate}   # forward paper-trading ledger
 ```
 
 Every fetch, backfill and long job must be **resumable** (checkpoint per window/chunk; re-running the same
@@ -143,9 +143,11 @@ opens only short-lived read-only connections (`_read_cached` / `_query_cached`, 
 - **Paper loop:** `scripts/paper_loop.sh` under launchd agent `local.pitch-edge.paper-loop` — hourly Polymarket,
   Kalshi and the-odds-api collection, every strategy (`control-fav-pinnacle`, `soft-vs-sharp-live`,
   `soft-vs-sharp-live-v2-{pinnacle,r6_live_model}`) and a settle on every cycle against the lake's closes.
-  **Paused by the owner since 2026-10-28** (agent unloaded, plist kept; reload only on the owner's word). L5 needs
-  ≥ 150 settled evaluation-window decisions per strategy; each strategy has under 10, and the loop covered about
-  13% of evaluation-window hours because the laptop sleeps (PE-2, PE-16).
+  **Paused by the owner since 2026-10-28**, recorded in the paper ledger (`paper pause`; the loop and the writing
+  commands do nothing until `paper resume`) and with the launchd agent disabled (`launchctl disable`, plist kept);
+  reload only on the owner's word. A reboot reloaded it once, on 2026-11-09 (PE-35): its 157 decisions carry a `void`
+  flag. L5 needs ≥ 150 settled evaluation-window decisions per strategy; each strategy has under 10, and the loop
+  covered 9-11% of evaluation-window hours, because the laptop sleeps and the loop is paused (PE-2, PE-16, PE-35).
 - **`ask` models:** `models.default_models()` (Dixon-Coles, GBDT without market odds, stochastic strength),
   fitted fresh per question; nothing persists fitted weights. Their outcome-models hypotheses are graded L1
   (R7, a registered negative), so every `ask` candidate is a model-vs-market disagreement below the floor.
