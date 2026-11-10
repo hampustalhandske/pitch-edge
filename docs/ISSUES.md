@@ -914,3 +914,24 @@ projects; M8 traceability; S2 lake capacity; S4 decimal-odds instrument with CLV
   missing, and fails on the current code.
 - Blocked by: none. Blocks: the feature-store rerun of the cleanup plan.
 - Commits: none yet.
+
+## PE-46 Row picks left by the PE-36 sweep: first-wins by caller order, review order, study code
+- Status: open
+- Priority: should (engineering rule 1; must for the study-code items before the counted reruns)
+- Raised by: pitch-edge (PE-36 sweep, cleanup B1)
+- Evidence:
+  - `data/storage.py:120` `upsert` keeps the first row per key (`drop_duplicates(keys)`), so the winner is whatever
+    order each caller passes; some callers put the preferred row first on purpose, so a value order needs a review
+    per caller.
+  - `research/gates.py:754,773` and `Ledger.reviews` read reviews `ORDER BY recorded_at`; a tie needs two reviews
+    in one microsecond from the single writer, but the chain sequence is the true order.
+  - Study code under `research/studies/*-common` (counted studies, not changed in B1): `r1-common/common.py:185`
+    and `r5-common/prices.py:59,115` (duplicate bars per asset and hour, the LK-13 pattern),
+    `r1-common/diagnostics.py:31-32` (diagnostic), `r3-common/features.py:234` (two Club Elo slugs for one team
+    on one date), `r3-common/features.py:367,378` (two manager tenures starting the same day),
+    `r4-common/linking.py:159` (posts with the same `created_utc`).
+- Acceptance: `upsert` callers state their order and the upsert uses it (or refuses a duplicate key); reviews are
+  read in chain order; each study pick gets a total order in a new study-code version before its counted rerun,
+  with the change recorded as a deviation in the study's report.
+- Blocked by: none (study items: the rerun plan). Blocks: the counted reruns of R1, R3, R4, R5.
+- Commits: none yet.

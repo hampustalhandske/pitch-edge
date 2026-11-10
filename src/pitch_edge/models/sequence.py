@@ -121,6 +121,14 @@ class SequenceLitModule(L.LightningModule):
 
 
 # ----------------------------------------------------------------------------- MatchModel
+def chronological(matches: pd.DataFrame) -> pd.DataFrame:
+    """`matches` in a total chronological order: by date, then `match_id` when present, else the two team names
+    (a team plays once per date), with a stable sort, so the train/validation cut is the same whatever order the
+    rows arrive in."""
+    keys = ["date", "match_id"] if "match_id" in matches.columns else ["date", "home_team", "away_team"]
+    return matches.sort_values(keys, kind="stable")
+
+
 class SequenceMatchModel(MatchModel):
     """Shared MatchModel wrapper; `GRUSequenceModel` / `TransformerSequenceModel` pick the encoder."""
 
@@ -215,7 +223,7 @@ class SequenceMatchModel(MatchModel):
         self._mu = np.concatenate([raw.mean(axis=0), [7.0]]).astype(np.float32)
         self._sd = np.concatenate([raw.std(axis=0) + 1e-6, [7.0]]).astype(np.float32)
 
-        train = train.sort_values("date")
+        train = chronological(train)
         n_val = max(int(len(train) * self.val_fraction), 64) if len(train) > 400 else 0
         tr, va = (train.iloc[:-n_val], train.iloc[-n_val:]) if n_val else (train, train.tail(min(64, len(train))))
         h, a, e = self._tensors(tr)

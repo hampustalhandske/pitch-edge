@@ -78,6 +78,13 @@ class Snapshot:
         return out
 
 
+def _best_quote(cands: pd.DataFrame) -> pd.Series:
+    """The quote with the highest decimal odds; equal odds go to the smallest source, then quote id, so the book a
+    decision names does not depend on row order."""
+    order = cands.sort_values(["decimal_odds", "source", "quote_id"], ascending=[False, True, True], kind="stable")
+    return order.iloc[0]
+
+
 class PaperStrategy(ABC):
     """A rule that turns a `Snapshot` into paper decisions. Never places a real order."""
 
@@ -195,7 +202,7 @@ class SoftVsSharpLive(PaperStrategy):
                 cands = soft[soft["selection"] == sel]
                 if cands.empty:
                     continue
-                top = cands.loc[cands["decimal_odds"].idxmax()]
+                top = _best_quote(cands)
                 price = float(top["decimal_odds"])
                 fair_odds = 1.0 / fair_p[sel]
                 ok = (
@@ -329,7 +336,7 @@ class SoftVsSharpLiveV2(PaperStrategy):
             cands = soft[soft["selection"] == sel]
             if cands.empty:
                 continue
-            top = cands.loc[cands["decimal_odds"].idxmax()]
+            top = _best_quote(cands)
             price = float(top["decimal_odds"])
             ok = (
                 price > (1.0 + self.margin) / p_fair[k]

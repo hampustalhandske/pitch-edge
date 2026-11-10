@@ -862,3 +862,38 @@ def test_country_venues_keep_the_smallest_venue_name_per_club(tmp_path, reverse)
 
     got = VenueGeocoder(cache_dir=tmp_path, http=FakeHttp()).fetch_country_venues("England")  # type: ignore[arg-type]
     assert got.set_index("club")["venue"].to_dict() == {"Arsenal": "Emirates Stadium", "Chelsea": "Stamford Bridge"}
+
+
+# --------------------------------------------------------------------------- sequence split and best quote
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+def test_sequence_chronological_order_breaks_a_date_tie_by_match_id(reverse):
+    from pitch_edge.models.sequence import chronological
+
+    rows = pd.DataFrame(
+        {
+            "date": pd.to_datetime(["2026-01-02", "2026-01-01", "2026-01-02", "2026-01-02"]),
+            "match_id": ["m9", "m1", "m3", "m5"],
+            "home_team": ["A", "B", "C", "D"],
+            "away_team": ["E", "F", "G", "H"],
+        }
+    )
+    rows = rows.iloc[::-1] if reverse else rows
+    assert chronological(rows)["match_id"].tolist() == ["m1", "m3", "m5", "m9"]
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+def test_best_quote_breaks_an_odds_tie_by_source_then_quote_id(reverse):
+    from pitch_edge.paper.strategies import _best_quote
+
+    cands = pd.DataFrame(
+        {
+            "source": ["odds_api:williamhill", "odds_api:betvictor", "odds_api:betvictor", "odds_api:unibet"],
+            "quote_id": ["q4", "q7", "q2", "q1"],
+            "decimal_odds": [2.10, 2.10, 2.10, 2.05],
+        }
+    )
+    cands = cands.iloc[::-1] if reverse else cands
+    top = _best_quote(cands)
+    assert (top["source"], top["quote_id"]) == ("odds_api:betvictor", "q2")
