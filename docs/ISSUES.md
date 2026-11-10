@@ -641,6 +641,10 @@ projects; M8 traceability; S2 lake capacity; S4 decimal-odds instrument with CLV
   - `fd_matches` (1 key, none in today's view): USA 2026-09-24 Seattle Sounders v Real Salt Lake, two Betfair
     Exchange closes in the writes of 09-28, 10-01 and 10-02, replaced by a single row on 10-03. The study pulls
     and the mirror (first fd sync 2026-11-05) all read after 10-03; the mirror holds one row for the key.
+- Lake (2026-11-10, R1): `tm_injuries` may get a key change (its collisions still to be examined); the lake names it
+  in its consumers.md and tells pitch-edge before it lands, so the mirror's `MirrorSpec` keys may change with it.
+  `fd_matches` and `club_alias` keep their keys and only get the tie-break; the other tables pitch-edge reads are
+  unchanged.
 - Fix: after LK-13 lands, re-sync `lake_tm_injuries`. Any future read pinned at a past T uses the lake's log form
   (all rows of the key's newest write at or before T).
 - Blocked by: LK-13. Blocks: none.
@@ -846,6 +850,10 @@ projects; M8 traceability; S2 lake capacity; S4 decimal-odds instrument with CLV
   PE-31).
 - Acceptance: every lake read used for a result names (build, T) and reads the lake's pinned form; the pull writes
   both into its snapshot; a test pins a mocked lake to two builds and gets each one's rows.
+- Pin wire form (lake, 2026-11-10): the pin is in the SQL text, `scraped_at <= T` with T a TIMESTAMPTZ literal or a
+  `?` parameter in ISO 8601 with an offset or Z; the version is the `X-Lakehouse-Version` response header. LK-109's
+  build-pinned read keeps that form; contract v2 documents it with golden cases. A pinned read with total picks and
+  orders is answered identically on a re-send (consumers.md "Retries" on the lake's branch).
 - Blocked by: LK-109 (addressable builds) and LK-13. Blocks: counted reruns that re-pull.
 - Commits: none yet.
 
@@ -869,5 +877,10 @@ projects; M8 traceability; S2 lake capacity; S4 decimal-odds instrument with CLV
 - Master (2026-11-10): design approved. The client also refuses while the lake's own freeze or hold is active, read
   from a field the lake serves in contract v2 (asked of the lake: today the freeze is a file in the lake's data folder,
   not served by the API); that part lands in B2 with LK-119, and the local `control freeze` stays as an extra switch.
-- Blocked by: none for the local switch; the lake-served freeze field (LK-119) for the B2 part. Blocks: none.
+- Lake (LK-126, R1 / contract v2): `/v1/health` will serve, with no token and no query slot and also during a freeze,
+  `{"freeze": {"writes": {active, reason, since}, "reads": {active, reason, since, allowed}}, "holds": [{name,
+  reason, since}]}`. A client refuses when `reads.active` and it is not `allowed`, and fails closed when the field
+  is missing; the write freeze is the lake's own and does not stop reads. The API also answers non-allowed clients
+  with HTTP 423 during a read freeze, so the client must not retry a 423. Final shape to be confirmed by the lake.
+- Blocked by: none for the local switch; LK-126 for the B2 part. Blocks: none.
 - Commits: none yet.
