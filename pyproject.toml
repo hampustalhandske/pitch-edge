@@ -72,7 +72,7 @@ requires = ["uv_build>=0.11.19,<0.12.0"]
 build-backend = "uv_build"
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = ["tests", "research/studies"]
 markers = [
     "unit: fast, isolated unit tests",
     "integration: slower tests exercising multiple components (network is always mocked)",

@@ -1,0 +1,20 @@
+# Tests allowed to skip on a full run (tests/suite_census.py). One entry per line: <node id> | <reason>.
+# A listed test may run instead (the skips depend on the machine); an unlisted skip or an entry naming no test
+# fails the full run.
+
+# Need files that a clean checkout does not have (data/ is git-ignored)
+tests/unit/test_paper_v2.py::test_coefficients_file_hash_is_the_registered_one | needs the frozen R6 coefficients in data/research/r6/ (PE-32)
+tests/unit/test_paper_v2.py::test_golden_p_fair_with_the_registered_coefficients | needs the frozen R6 coefficients in data/research/r6/ (PE-32)
+tests/unit/test_research_ledger.py::test_migration_on_a_copy_of_the_live_ledger | needs the live research ledger in data/research/
+
+# Need the private edgelab checkout (PE-39)
+tests/unit/test_edgelab_export.py::test_edgelab_schema_validator_accepts_export | needs EDGELAB_DIR with its venv
+tests/unit/test_edgelab_submission.py::test_edgelab_check_accepts_the_submission | needs EDGELAB_DIR with its venv
+
+# Optional packages (importorskip)
+tests/unit/test_edgelab_export.py::test_scaffold_files | skips if PyYAML is not installed
+tests/unit/test_research_stats.py::test_bh_matches_statsmodels_when_available | skips if statsmodels is not installed
+
+# macOS only: scripts/ci/macos_ci.sh needs BSD /usr/bin/time and arch -arm64 (skipped on the Linux CI runner)
+tests/unit/test_ci_scripts.py::test_macos_gate_reports_a_planted_failing_pytest_step | needs macOS (arch -arm64, BSD /usr/bin/time)
+tests/unit/test_ci_scripts.py::test_macos_gate_passes_when_every_step_exits_zero | needs macOS (arch -arm64, BSD /usr/bin/time)

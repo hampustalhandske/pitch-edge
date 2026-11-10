@@ -1,0 +1,87 @@
+# Module-level mutable containers in src/pitch_edge (vendor/ excluded), checked by
+# tests/unit/test_module_state_census.py. One entry per line: <path relative to src/pitch_edge>::<name> | <reason>.
+# A new entry needs a reason a fresh reader can check; a cache or registry says what it is keyed by and who writes it.
+
+# Process caches and registries (written at run time)
+dashboard/web.py::_ASK_CACHE | process cache: the dashboard's warehouse handle and `ask` graph, built once on first question and kept for the life of the server
+research/summary.py::_RESEARCH_CACHE | process cache of the evidence summary keyed by ledger path, reused only while the ledger file's (mtime, size) is unchanged; guarded by _STATUS_LOCK
+research/summary.py::_PAPER_CACHE | process cache of the paper status keyed by (ledger path, paper DB path), reused only while both files' (mtime, size) are unchanged; guarded by _STATUS_LOCK
+paper/strategies.py::_REGISTRY | strategy id -> factory of the built-in paper strategies; never mutated, available_strategies() returns a copy
+data/storage.py::TABLE_KEYS | table -> primary-key columns; lake/mirror.py adds the lake_* mirror tables at import, never mutated after import
+research/devig.py::_FUNCS | de-vig method name -> function dispatch table, never mutated
+research/devig.py::PARAM_NAMES | constant lookup table (method -> fitted parameter name), never mutated
+
+# Constant lookup tables and column lists (never mutated)
+ablation.py::FEATURE_GROUPS | constant lookup table, never mutated
+agents/qa_data.py::ASK_MODEL_HYPOTHESES | constant lookup table (model -> its R7 bet-rule hypothesis), never mutated
+backtest/engine.py::SIDE | constant lookup table, never mutated
+backtest/engine.py::DEFAULT_STRATEGIES | constant list of staking strategies, never mutated
+dashboard/theme.py::SERIES | constant colour tokens, never mutated
+dashboard/theme.py::OUTCOME | constant colour tokens, never mutated
+dashboard/theme.py::STATUS | constant colour tokens, never mutated
+dashboard/theme.py::SEQ_BLUE | constant colour scale, never mutated
+dashboard/theme.py::DIVERGING | constant colour scale, never mutated
+dashboard/theme.py::INK | constant colour tokens, never mutated
+data/alt/api_football.py::LEAGUE_IDS | constant lookup table, never mutated
+data/alt/news.py::FEEDS | constant list of feed URLs, never mutated
+data/alt/opensky.py::STATE_COLUMNS | constant column list, never mutated
+data/alt/pmxt_match_map.py::_DRAW_WORDS | constant word set, never mutated
+data/alt/referee_announcements.py::ANNOUNCEMENT_SOURCES | constant list of sources, never mutated
+data/alt/referee_announcements.py::_REF_STOP | constant word set, never mutated
+data/alt/venues.py::COUNTRY_QIDS | constant lookup table, never mutated
+data/alt/venues.py::BUNDLED_VENUES | constant bundled venue table, never mutated
+data/alt/weather.py::HOURLY_VARS | constant variable list, never mutated
+data/alt/wikipedia_attention.py::TITLE_OVERRIDES | constant lookup table, never mutated
+data/fd_vocab.py::LEAGUE_CODES | constant lookup table, never mutated
+data/fd_vocab.py::EXTRA_DIVISION_COUNTRIES | constant lookup table, never mutated
+data/fd_vocab.py::EXTRA_LEAGUE_FILES | constant lookup table, never mutated
+data/ingest.py::MATCH_CORE_COLUMNS | constant column list, never mutated
+data/ingest.py::DEFAULT_STATSBOMB_COMPETITIONS | constant list, never mutated
+data/ingest.py::WIKI_LEAGUES | constant lookup table, never mutated
+data/quality.py::DUPLICATE_COLUMNS | constant lookup table, never mutated
+data/sources/espn_soccer_data.py::BASE_DATA_FILES | constant file list, never mutated
+data/sources/espn_soccer_data.py::GLOB_DATA_DIRS | constant directory list, never mutated
+data/sources/espn_soccer_data.py::ESPN_LEAGUE_NAME_TO_CODE | constant lookup table, never mutated
+data/sources/openfootball.py::LEAGUES | constant lookup table, never mutated
+data/sources/thesportsdb.py::SWEDISH_LEAGUES | constant lookup table, never mutated
+data/sources/transfermarkt_open.py::TABLES | constant lookup table, never mutated
+data/teams.py::_STRIP_TOKENS | constant token set, never mutated
+data/teams.py::ALIASES | constant lookup table, never mutated
+edgelab/export.py::MARKET_TYPE_CODES | constant lookup table, never mutated
+features/build.py::TEAM_STATS | constant column list, never mutated
+features/build.py::BASE_FEATURES | constant feature list, never mutated
+features/build.py::MARKET_FEATURES | constant feature list, never mutated
+features/context.py::ROTATION_FEATURES | constant feature list, never mutated
+features/context.py::CONTEXT_COLUMNS | constant column list, never mutated
+features/context.py::NEWS_FEATURES | constant feature list, never mutated
+features/live_lineups.py::LIVE_LINEUP_FEATURES | constant feature list, never mutated
+features/squad_value.py::SQUAD_VALUE_FEATURES | constant feature list, never mutated
+lake/mirror.py::MIRRORS | mirror name -> MirrorSpec, built once at import, never mutated
+lake/spine.py::_RENAME | constant column rename map, never mutated
+models/sentiment.py::SENTIMENT_FEATURES | constant feature list, never mutated
+models/sequence.py::STEP_FEATURES | constant feature list, never mutated
+odds/providers.py::_BOOKMAKER_NAMES | constant lookup table, never mutated
+paper/collectors.py::DEFAULT_ODDS_API_LEAGUES | constant lookup table, never mutated
+paper/collectors.py::SHARP_BOOKMAKERS | constant bookmaker list, never mutated
+paper/collectors.py::EXCHANGE_BOOKMAKERS | constant bookmaker list, never mutated
+paper/collectors.py::DEFAULT_KALSHI_SERIES | constant series list, never mutated
+paper/fixtures.py::LEAGUE_CODES | constant lookup table, never mutated
+paper/fixtures.py::FD_DIVISIONS | constant lookup table, never mutated
+paper/fixtures.py::ODDSPAPI_DIVISIONS | constant lookup table, never mutated
+paper/fixtures.py::PAPER_ALIASES | constant lookup table, never mutated
+paper/fixtures.py::ODDSPAPI_ALIASES | constant lookup table, never mutated
+paper/report.py::COLUMNS | constant column list, never mutated
+paper/settle.py::_FD_RESULT | constant lookup table, never mutated
+paper/settle.py::_OUTCOME_CODES | constant lookup table, never mutated
+paper/store.py::_EVENT_ID_COLUMNS | constant column list, never mutated
+pipeline.py::DEFAULT_BACKTEST_LEAGUES | constant league list, never mutated
+pipeline.py::DEVELOPING_MARKET_CODES | constant league list, never mutated
+rag/fixture_context.py::_CONTEXT_DOC_TYPES | constant doc-type list, never mutated
+research/gates.py::CRITERIA | the evidence ladder's criterion names per rung, never mutated
+research/importer.py::METRIC_ALIASES | constant lookup table, never mutated
+research/importer.py::R1_COLUMNS | constant column list, never mutated
+research/importer.py::R2_COLUMNS | constant column list, never mutated
+research/ledger.py::_COLUMNS | constant column definitions per ledger table, never mutated
+research/ledger.py::_TIME_COLUMN | constant lookup table, never mutated
+research/ledger_format.py::_SQL_TYPES | constant lookup table, never mutated
+research/ledger_format.py::_VECTOR_ROWS | the fixed ledger-format vectors; readers get copies, never mutated

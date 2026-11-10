@@ -169,3 +169,19 @@ sleep doesn't stall them, and never run two warehouse-writing stages at once (Du
 - `uv run pitch-edge lake-sync [--only …] [--full-refresh] [--no-spine] [--skip-if-busy]` — mirror lakehouse tables
   into `lake_*` tables; checkpointed per window, so re-running the same command resumes an unfinished sync. Syncing
   `fd_matches` also rebuilds the football-data spine (`--no-spine` skips that).
+
+## Local CI gates
+
+`scripts/ci/macos_ci.sh <sha>` and `scripts/ci/linux_ci.sh <sha>` run the steps of `.github/workflows/ci.yml` (uv
+python install, uv sync, ruff, mypy, pytest) on a clean checkout of one commit: macOS in a throwaway worktree
+`.worktrees/ci-<sha7>` with no project environment (`env -i`, peak RSS per step), Linux in a `uv` Docker container
+that clones the repo's `.git` read-only (it starts Docker Desktop and quits it on exit; `KEEP_DOCKER=1` leaves it
+running, `scripts/ci/linux_ci.sh --quit-docker` quits it). Run them from the repo root with a committed sha, e.g.
+`scripts/ci/macos_ci.sh $(git rev-parse HEAD)`; anything that is not a commit is refused with exit 2. Each step logs
+`=== RESULT rc=<n>` and the run ends with `=== GATE PASS` (exit 0) only when every step exits 0, otherwise
+`=== GATE FAIL (<failed steps>)` (exit 1). Logs: `data/logs/ci-macos-<sha7>.log`, `data/logs/ci-linux-<sha7>.log`.
+`tests/unit/test_ci_scripts.py` checks both argument guards and plants a failing pytest step in the macOS gate.
+
+The pytest step is a full run (no paths given), so the suite censuses in `tests/suite_census.py` apply: a skip not
+listed in `tests/expected_skips.txt` fails it, and so does a ladder criterion in `research/gates.py` that no test
+reaches as `pass` or as `fail`/`not-evaluated`.

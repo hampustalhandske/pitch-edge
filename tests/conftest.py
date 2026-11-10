@@ -18,6 +18,14 @@ from pitch_edge.data.storage import Warehouse
 pytest_plugins = ["nicegui.testing.user_plugin"]
 
 
+def pytest_configure(config: pytest.Config) -> None:
+    """Register the suite censuses (tests/suite_census.py): ladder-criteria coverage and the pinned skip set."""
+    from suite_census import PLUGIN_NAME, SuiteCensus
+
+    if not config.pluginmanager.has_plugin(PLUGIN_NAME):
+        config.pluginmanager.register(SuiteCensus(config), PLUGIN_NAME)
+
+
 @pytest.fixture(scope="session")
 def anyio_backend() -> str:
     return "asyncio"

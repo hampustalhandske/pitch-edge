@@ -1,11 +1,15 @@
-"""`soft-vs-sharp-live-v2`: the frozen R6 live fair-value model (golden test against the coefficients file),
-the coefficient-hash guard, the 20-76 h first-response decision time, and the two arms on one response."""
+"""`soft-vs-sharp-live-v2`: the R6 live fair-value model (golden test against a synthetic coefficients file),
+the coefficient-hash guard, the 20-76 h first-response decision time, and the two arms on one response.
+
+Every model, guard and decision test runs on `SYNTHETIC_COEFFICIENTS`, written to `tmp_path` and loaded with its
+own sha256, so they run on a clean checkout. Only `test_coefficients_file_hash_is_the_registered_one` reads the
+frozen file in `data/research/r6/` (git-ignored) and is skipped where it is absent."""
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
-import shutil
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -35,6 +39,44 @@ BOOKS = {
 }
 
 
+def _outcome(intercept, dev_vc, dev_bf):
+    return {
+        "intercept": intercept,
+        "g_avg": 0.05,
+        "dev_WH": 0.04,
+        "dev_VC": dev_vc,
+        "dev_1XB": -0.05,
+        "dev_BF": dev_bf,
+        "miss_WH": 0.012,
+        "miss_VC": -0.008,
+        "miss_1XB": 0.005,
+        "miss_BF": -0.004,
+    }
+
+
+# Same layout as the frozen file; values chosen so the informative books (VC, BF) move the home probability and
+# the hand-built responses below keep the decisions the tests describe.
+SYNTHETIC_COEFFICIENTS = {
+    "books": {"WH": "williamhill", "VC": "betvictor", "1XB": "onexbet", "BF": "betfair_sb_uk"},
+    "dev_clip": 0.5,
+    "outcomes": {
+        "home": _outcome(0.004, 0.45, 0.40),
+        "draw": _outcome(-0.006, 0.10, 0.08),
+        "away": _outcome(0.002, 0.02, 0.02),
+    },
+}
+# `fair_value(PIN, BOOKS)` under SYNTHETIC_COEFFICIENTS, pinned to 7 decimals.
+PINNED_P_FAIR = [0.4577726, 0.2830118, 0.2592157]
+
+
+@pytest.fixture
+def coef(tmp_path) -> tuple[Path, str]:
+    """The synthetic coefficients file in `tmp_path` and its sha256."""
+    path = tmp_path / "v2_live_coefficients.json"
+    path.write_text(json.dumps(SYNTHETIC_COEFFICIENTS, indent=2))
+    return path, hashlib.sha256(path.read_bytes()).hexdigest()
+
+
 def _logit(p):
     return math.log(p / (1 - p))
 
@@ -60,52 +102,69 @@ def _expected_p_fair(pin, books, coef):
     return [x / sum(q) for x in q]
 
 
-# ---------------------------------------------------------------- the frozen model
+# ---------------------------------------------------------------- the frozen file
 @needs_coef
 def test_coefficients_file_hash_is_the_registered_one():
-    import hashlib
-
     assert hashlib.sha256(COEF.read_bytes()).hexdigest() == COEFFICIENTS_SHA256
 
 
 @needs_coef
-def test_a_modified_coefficients_file_is_refused(tmp_path):
-    bad = tmp_path / "coef.json"
-    data = json.loads(COEF.read_text())
+def test_golden_p_fair_with_the_registered_coefficients():
+    """The live strategy's own coefficients on the hand-built response, pinned so a change to the frozen file's
+    model or to `fair_value` is caught where the file exists."""
+    out = R6LiveModel.load(COEF).fair_value(PIN, BOOKS)
+    assert out.p_fair == pytest.approx(_expected_p_fair(PIN, BOOKS, json.loads(COEF.read_text())), abs=1e-12)
+    assert out.p_fair == pytest.approx([0.4624651, 0.2808461, 0.2566888], abs=1e-6)
+
+
+# ---------------------------------------------------------------- the hash guard
+def test_a_modified_coefficients_file_is_refused(coef, tmp_path):
+    path, sha = coef
+    bad = tmp_path / "bad.json"
+    data = json.loads(path.read_text())
     data["outcomes"]["home"]["dev_VC"] += 0.01
     bad.write_text(json.dumps(data, indent=2))
     with pytest.raises(CoefficientHashError):
-        R6LiveModel.load(bad)
-    shutil.copy(COEF, tmp_path / "ok.json")
-    assert R6LiveModel.load(tmp_path / "ok.json").books == {
-        "WH": "williamhill",
-        "VC": "betvictor",
-        "1XB": "onexbet",
-        "BF": "betfair_sb_uk",
-    }
+        R6LiveModel.load(bad, expected_sha256=sha)
+    model = R6LiveModel.load(path, expected_sha256=sha)
+    assert model.sha256 == sha
+    assert model.books == {"WH": "williamhill", "VC": "betvictor", "1XB": "onexbet", "BF": "betfair_sb_uk"}
 
 
-@needs_coef
-def test_golden_p_fair_on_a_hand_built_response():
-    model = R6LiveModel.load(COEF)
+def test_the_guard_defaults_to_the_registered_hash(coef, store):
+    """Without an explicit hash, the model and both arms accept only the registered file."""
+    path, _ = coef
+    with pytest.raises(CoefficientHashError, match=COEFFICIENTS_SHA256):
+        R6LiveModel.load(path)
+    store.add_quotes(_response(KO - timedelta(hours=40), BOOKS))
+    snap = Snapshot.from_store(store, as_of=KO - timedelta(hours=40) + timedelta(minutes=5), code_version="sha")
+    for arm in SoftVsSharpLiveV2.ARMS:
+        with pytest.raises(CoefficientHashError):
+            SoftVsSharpLiveV2(arm, coefficients_path=path).decide(snap)
+
+
+# ---------------------------------------------------------------- the model
+def test_golden_p_fair_on_a_hand_built_response(coef):
+    path, sha = coef
+    model = R6LiveModel.load(path, expected_sha256=sha)
     out = model.fair_value(PIN, BOOKS)
-    expected = _expected_p_fair(PIN, BOOKS, json.loads(COEF.read_text()))
+    expected = _expected_p_fair(PIN, BOOKS, SYNTHETIC_COEFFICIENTS)
     assert out.p_fair == pytest.approx(expected, abs=1e-12)
     assert sum(out.p_fair) == pytest.approx(1.0)
     # pinned numbers, so a silent change in either implementation is caught
-    assert out.p_fair == pytest.approx([0.4624651, 0.2808461, 0.2566888], abs=1e-6)
+    assert out.p_fair == pytest.approx(PINNED_P_FAIR, abs=1e-6)
     assert out.miss == {"WH": 0, "VC": 0, "1XB": 0, "BF": 1}
     assert out.dev["BF"] == [0.0, 0.0, 0.0]
     assert out.dev["VC"][0] < 0 < out.dev["VC"][2]  # betvictor longer on home (2.20 vs 2.10), shorter on away
 
 
-@needs_coef
-def test_deviation_beyond_the_clip_is_clipped_and_the_fit_encoding_is_kept_as_a_diagnostic():
-    model = R6LiveModel.load(COEF)
+def test_deviation_beyond_the_clip_is_clipped_and_the_fit_encoding_is_kept_as_a_diagnostic(coef):
+    path, sha = coef
+    model = R6LiveModel.load(path, expected_sha256=sha)
     books = {**BOOKS, "betvictor": (1.40, 4.50, 7.50)}  # far from Pinnacle: |dev_home| > 0.5
     out = model.fair_value(PIN, books)
     assert out.dev["VC"][0] == 0.5 and out.clipped["VC"] is True
-    assert out.p_fair == pytest.approx(_expected_p_fair(PIN, books, json.loads(COEF.read_text())), abs=1e-12)
+    assert out.p_fair == pytest.approx(_expected_p_fair(PIN, books, SYNTHETIC_COEFFICIENTS), abs=1e-12)
     assert out.p_fair_fit_encoding != pytest.approx(out.p_fair)  # fit treated |dev| > 0.5 as missing
 
 
@@ -139,14 +198,14 @@ def store(tmp_path):
     s.close()
 
 
-def _arms():
-    return SoftVsSharpLiveV2("pinnacle", coefficients_path=COEF), SoftVsSharpLiveV2(
-        "r6_live_model", coefficients_path=COEF
+def _arms(coef):
+    path, sha = coef
+    return tuple(
+        SoftVsSharpLiveV2(arm, coefficients_path=path, coefficients_sha256=sha) for arm in SoftVsSharpLiveV2.ARMS
     )
 
 
-@needs_coef
-def test_both_arms_decide_on_the_first_response_20_to_76h_before_kickoff(store):
+def test_both_arms_decide_on_the_first_response_20_to_76h_before_kickoff(store, coef):
     p_pin = devig([list(PIN)], "power").probs[0]
     juicy = {**BOOKS, "williamhill": (round(1.05 / p_pin[0], 2), 3.30, 3.80)}  # > 1.02 / p_fair under both arms
     store.add_quotes(_response(KO - timedelta(hours=80), juicy))  # too early: outside the window
@@ -154,22 +213,21 @@ def test_both_arms_decide_on_the_first_response_20_to_76h_before_kickoff(store):
     store.add_quotes(_response(first, BOOKS))  # first in-window response: nothing qualifies
     later = KO - timedelta(hours=30)
     store.add_quotes(_response(later, juicy))  # later in-window response must not be used
-    pin_arm, model_arm = _arms()
+    pin_arm, model_arm = _arms(coef)
     snap = Snapshot.from_store(store, as_of=later + timedelta(minutes=5), code_version="sha")
     assert pin_arm.decide(snap) == [] and model_arm.decide(snap) == []
 
 
-@needs_coef
-def test_arms_record_fair_value_book_deviations_and_whether_the_other_arm_bet(store):
+def test_arms_record_fair_value_book_deviations_and_whether_the_other_arm_bet(store, coef):
     p_pin = devig([list(PIN)], "power").probs[0]
     price = round(1.05 / p_pin[0], 2)
     books = {**BOOKS, "williamhill": (price, 3.30, 3.80)}
     captured = KO - timedelta(hours=50)
     store.add_quotes(_response(captured, books))
-    pin_arm, model_arm = _arms()
+    pin_arm, model_arm = _arms(coef)
     snap = Snapshot.from_store(store, as_of=captured + timedelta(minutes=10), code_version="sha")
     [dp] = pin_arm.decide(snap)
-    model_fair = R6LiveModel.load(COEF).fair_value(PIN, books).p_fair
+    model_fair = R6LiveModel.load(coef[0], expected_sha256=coef[1]).fair_value(PIN, books).p_fair
     md = model_arm.decide(snap)
     assert dp.strategy_id == "soft-vs-sharp-live-v2-pinnacle"
     assert dp.hypothesis_id == "bookmaker-line-structure-live-soft-vs-sharp-v2"
@@ -179,41 +237,37 @@ def test_arms_record_fair_value_book_deviations_and_whether_the_other_arm_bet(st
     assert dp.params["response_captured_at"] == captured.isoformat()
     assert dp.params["hours_before_kickoff"] == pytest.approx(50.0)
     assert set(dp.params["model"]["dev"]) == {"WH", "VC", "1XB", "BF"} and dp.params["model"]["miss"]["BF"] == 1
-    assert dp.params["coefficients_sha256"] == COEFFICIENTS_SHA256
+    assert dp.params["coefficients_sha256"] == coef[1]
     if md:
         assert md[0].params["arm"] == "r6_live_model" and md[0].params["other_arm_bets"] is True
         assert md[0].params["p_fair"] == pytest.approx(model_fair)
 
 
-@needs_coef
-def test_rule_caps_at_ten_percent_over_pinnacle_and_ignores_exchanges(store):
+def test_rule_caps_at_ten_percent_over_pinnacle_and_ignores_exchanges(store, coef):
     captured = KO - timedelta(hours=40)
     books = {**BOOKS, "williamhill": (PIN[0] * 1.11, 3.3, 3.8), "betfair_ex_uk": (2.6, 3.6, 4.0)}
     store.add_quotes(_response(captured, books))
-    pin_arm, _ = _arms()
+    pin_arm, _ = _arms(coef)
     snap = Snapshot.from_store(store, as_of=captured + timedelta(minutes=10), code_version="sha")
     assert pin_arm.decide(snap) == []
 
 
-@needs_coef
-def test_a_stale_first_response_is_a_missed_opportunity(store):
+def test_a_stale_first_response_is_a_missed_opportunity(store, coef):
     p_pin = devig([list(PIN)], "power").probs[0]
     captured = KO - timedelta(hours=50)
     store.add_quotes(_response(captured, {**BOOKS, "williamhill": (round(1.05 / p_pin[0], 2), 3.3, 3.8)}))
-    pin_arm, _ = _arms()
+    pin_arm, _ = _arms(coef)
     snap = Snapshot.from_store(store, as_of=captured + timedelta(hours=2), code_version="sha")
     assert pin_arm.decide(snap) == []
 
 
-@needs_coef
-def test_a_bad_coefficients_hash_stops_both_arms_without_stopping_other_strategies(store, tmp_path):
-    bad = tmp_path / "coef.json"
-    bad.write_text(COEF.read_text().replace("0.227", "0.228"))
+def test_a_bad_coefficients_hash_stops_both_arms_without_stopping_other_strategies(store, coef, tmp_path):
+    path, sha = coef
+    bad = tmp_path / "bad.json"
+    bad.write_text(path.read_text().replace("0.45", "0.46"))
+    assert hashlib.sha256(bad.read_bytes()).hexdigest() != sha
     store.add_quotes(_response(KO - timedelta(hours=40), BOOKS))
-    arms = [
-        SoftVsSharpLiveV2("pinnacle", coefficients_path=bad),
-        SoftVsSharpLiveV2("r6_live_model", coefficients_path=bad),
-    ]
+    arms = [SoftVsSharpLiveV2(arm, coefficients_path=bad, coefficients_sha256=sha) for arm in SoftVsSharpLiveV2.ARMS]
     added = run_decide(store, arms, now=KO - timedelta(hours=40) + timedelta(minutes=5), code_version="sha")
     assert added == {"soft-vs-sharp-live-v2-pinnacle": 0, "soft-vs-sharp-live-v2-r6_live_model": 0}
     assert store.decide_log()["error"].str.contains("CoefficientHashError").all()
@@ -224,11 +278,10 @@ def test_both_arms_are_registered_builtins_and_v1_is_unchanged():
     assert {"soft-vs-sharp-live", "soft-vs-sharp-live-v2-pinnacle", "soft-vs-sharp-live-v2-r6_live_model"} <= set(reg)
 
 
-@needs_coef
-def test_informative_book_deviations_move_the_model_arm_to_a_different_bet(store):
+def test_informative_book_deviations_move_the_model_arm_to_a_different_bet(store, coef):
     # betvictor and betfair_sb_uk quote the home side longer than Pinnacle. Under de-vigged Pinnacle the best
     # home price (betvictor 2.30, an informative book) is +6.4%; the model follows the informative books,
-    # lowers p_home (0.4627 -> 0.4437) and raises p_away, so its largest edge is the away side at bet365 (+4.0%).
+    # lowers p_home (0.4627 -> 0.4415) and raises p_away, so its largest edge is the away side at bet365 (+4.0%).
     books = {
         "betvictor": (2.30, 3.20, 3.30),
         "betfair_sb_uk": (2.28, 3.25, 3.30),
@@ -239,7 +292,7 @@ def test_informative_book_deviations_move_the_model_arm_to_a_different_bet(store
     }
     captured = KO - timedelta(hours=30)
     store.add_quotes(_response(captured, books))
-    pin_arm, model_arm = _arms()
+    pin_arm, model_arm = _arms(coef)
     snap = Snapshot.from_store(store, as_of=captured + timedelta(minutes=10), code_version="sha")
     [dp] = pin_arm.decide(snap)
     [dm] = model_arm.decide(snap)

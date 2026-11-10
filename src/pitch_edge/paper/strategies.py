@@ -25,7 +25,7 @@ from datetime import datetime, timedelta
 import pandas as pd
 
 from pitch_edge.paper.pricing import power_devig_odds
-from pitch_edge.paper.r6_model import NON_SOFT_BOOKS, R6LiveModel
+from pitch_edge.paper.r6_model import COEFFICIENTS_SHA256, NON_SOFT_BOOKS, R6LiveModel
 from pitch_edge.paper.store import SELECTIONS, Decision, DecisionError, PaperStore
 
 logger = logging.getLogger(__name__)
@@ -265,6 +265,10 @@ class SoftVsSharpLiveV2(PaperStrategy):
     not safe labels (one season of 1XB history; WH's sign is unstable), so a bet the model arm keeps or drops
     because of those books is not evidence about those books; betvictor carries most of R6's gain and has no
     football-data history after 2023/24.
+
+    `coefficients_path` (default: `r6_model.default_coefficients_path()`) and `coefficients_sha256` (default:
+    the registered `COEFFICIENTS_SHA256`) say which coefficients file the model arm loads and the sha256 it
+    must have; `decide` raises `CoefficientHashError` for any other file.
     """
 
     hypothesis_id = "bookmaker-line-structure-live-soft-vs-sharp-v2"
@@ -281,12 +285,14 @@ class SoftVsSharpLiveV2(PaperStrategy):
         max_hours_before: float = 76.0,
         max_response_age_h: float = 1.0,
         stake: float = 1.0,
+        coefficients_sha256: str = COEFFICIENTS_SHA256,
     ):
         if arm not in self.ARMS:
             raise ValueError(f"arm must be one of {self.ARMS}, got {arm!r}")
         self.arm = arm
         self.strategy_id = f"soft-vs-sharp-live-v2-{arm}"
         self.coefficients_path = coefficients_path
+        self.coefficients_sha256 = coefficients_sha256
         self.margin = margin
         self.max_over_sharp = max_over_sharp
         self.min_hours_before = min_hours_before
@@ -297,7 +303,7 @@ class SoftVsSharpLiveV2(PaperStrategy):
 
     def _load_model(self) -> R6LiveModel:
         if self._model is None:
-            self._model = R6LiveModel.load(self.coefficients_path)  # type: ignore[arg-type]
+            self._model = R6LiveModel.load(self.coefficients_path, self.coefficients_sha256)  # type: ignore[arg-type]
         return self._model
 
     def _first_responses(self, snapshot: Snapshot) -> dict[str, pd.DataFrame]:
