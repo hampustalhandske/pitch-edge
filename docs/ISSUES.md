@@ -728,7 +728,9 @@ projects; M8 traceability; S2 lake capacity; S4 decimal-odds instrument with CLV
   `_own_snapshot_close`'s exchange branch (`sort_values("captured_at")` then the last row). A repo-wide sweep for
   the remaining pick patterns goes with them.
 - Acceptance: every listed pick has a total order (all key columns, then a stable id) or an explicit refusal on a
-  tie; one test per pick inserts tied rows in two orders and requires the same pick, and fails on the code
+  tie; and (master, 2026-11-10) a census test scans src and the study code for row-pick sites (SQL arg_max/first/
+  row_number/DISTINCT ON/ORDER BY…LIMIT; pandas drop_duplicates/groupby first/idxmax/sort on non-unique keys), each
+  allowlisted with its total-order key or a reason, so a new site fails CI; a planted untied pick fails it; one test per pick inserts tied rows in two orders and requires the same pick, and fails on the code
   without the tie-break (negative control).
 - Lake (2026-11-10): from R1, `/v1/tables` gives per-table `keys` and `tie_order`, and the current row is the first
   under `ORDER BY scraped_at DESC, <tie_order ASC NULLS LAST>`. B2: where the mirror deduplicates a batch itself, use
