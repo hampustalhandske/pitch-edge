@@ -623,7 +623,7 @@ projects; M8 traceability; S2 lake capacity; S4 decimal-odds instrument with CLV
   that the Polymarket decision gets no flag at all. Its point, that the OddsPapi rule never flags a Polymarket
   decision, is kept. It now expects the Polymarket reason that the decision above introduces.
 - Blocked by: none. Blocks: none.
-- Commits: `7537dad`, this one.
+- Commits: `7537dad`, `14f0f5d` (the strategy tests run on a synthetic coefficients file in CI).
 
 ## PE-34 Lake tables whose deduplicated view picks arbitrarily between rows (LK-13)
 - Status: backlog (lake fix LK-13 is due in week 1 after the freeze; no pitch-edge change before it)
@@ -700,7 +700,7 @@ projects; M8 traceability; S2 lake capacity; S4 decimal-odds instrument with CLV
 - Commits: none yet.
 
 ## PE-36 Row-picking queries without a total order
-- Status: open
+- Status: open (built in B1; macOS gate, Linux CI and push pending)
 - Priority: must (engineering rule 1; found by the 2026-11-10 cleanup audit)
 - Raised by: pitch-edge (cleanup audit)
 - Evidence: each of these picks one row per group by an order that can tie, so the pick can change between runs
@@ -736,10 +736,10 @@ projects; M8 traceability; S2 lake capacity; S4 decimal-odds instrument with CLV
   under `ORDER BY scraped_at DESC, <tie_order ASC NULLS LAST>`. B2: where the mirror deduplicates a batch itself, use
   the lake's `tie_order` from the vendored contract, so the mirror keeps the same row as the lake's view.
 - Blocked by: none. Blocks: the reruns of the cleanup plan (paper settle, mirror re-sync, feature store).
-- Commits: none yet.
+- Commits: 2b0d908, ec74a75, dab8ae2, 4508c46.
 
 ## PE-37 No pipeline is tested for bit-identical output across processes or after a kill
-- Status: open
+- Status: open (built in B1; macOS gate, Linux CI and push pending)
 - Priority: must (engineering rules 1 and 2)
 - Raised by: pitch-edge (cleanup audit)
 - Evidence: no test runs a result pipeline twice in two processes and compares the output. The nearest ones are
@@ -759,10 +759,10 @@ projects; M8 traceability; S2 lake capacity; S4 decimal-odds instrument with CLV
   file and the backtest keeps no checkpoint). Each comparison detects its planted defect. The paper report
   followed the uuid decision ids (its `mean_clv` changed in the last bit with them); decisions are now read and
   chained in (decided_at, strategy, fixture) order. Two gaps stay as strict xfails: PE-47 and PE-48.
-- Commits: none yet.
+- Commits: 70a33f0, 21e7217.
 
 ## PE-38 Module-level mutable state without a census
-- Status: open
+- Status: open (built in B1; macOS gate, Linux CI and push pending)
 - Priority: should (engineering rule 2)
 - Raised by: pitch-edge (cleanup audit)
 - Evidence: `research/summary.py:543-544` (`_RESEARCH_CACHE`, `_PAPER_CACHE`, keyed by file mtime and size),
@@ -771,7 +771,7 @@ projects; M8 traceability; S2 lake capacity; S4 decimal-odds instrument with CLV
 - Acceptance: a census test lists every module-level mutable object in `src/` and fails on one that is not on an
   allowlist with a reason; the test fails when a new `dict` global is planted.
 - Blocked by: none. Blocks: none.
-- Commits: none yet.
+- Commits: 14f0f5d.
 
 ## PE-39 Cross-project contracts are checked only when the other repo is present
 - Status: open
@@ -801,10 +801,10 @@ projects; M8 traceability; S2 lake capacity; S4 decimal-odds instrument with CLV
   `write_submission` to v2.
 - Blocked by: edgelab's EL-75 schemas and the lake's contract v2 (LK-119) with its describe/tables schema. Blocks: any
   counted edgelab run of a pitch-edge strategy.
-- Commits: none yet.
+- Commits: 11538d3 (the format contract; the v2 envelope is B2).
 
 ## PE-40 Silent fallbacks in result paths and the CI trigger
-- Status: open
+- Status: open (built in B1; macOS gate, Linux CI and push pending)
 - Priority: should (engineering rule 4)
 - Raised by: pitch-edge (cleanup audit)
 - Evidence:
@@ -822,10 +822,10 @@ projects; M8 traceability; S2 lake capacity; S4 decimal-odds instrument with CLV
   fallbacks are counted in the card; CI runs on every pushed branch, and the gate scripts are tracked. Each refusal
   has a test that plants the condition.
 - Blocked by: none. Blocks: none.
-- Commits: none yet.
+- Commits: fce7024, 14f0f5d.
 
 ## PE-41 Gates and suites have no coverage census
-- Status: open
+- Status: open (built in B1; macOS gate, Linux CI and push pending)
 - Priority: must (engineering rule 5)
 - Raised by: pitch-edge (cleanup audit)
 - Evidence:
@@ -840,10 +840,10 @@ projects; M8 traceability; S2 lake capacity; S4 decimal-odds instrument with CLV
   not-evaluated by some test; the study tests run in CI; CI fails when the skip set differs from a listed one;
   each gate script is shown to report a planted failure.
 - Blocked by: none. Blocks: none.
-- Commits: none yet.
+- Commits: 14f0f5d.
 
 ## PE-42 The lake client retries only HTTP 503
-- Status: open
+- Status: open (built in B1; macOS gate, Linux CI and push pending)
 - Priority: should (engineering rule 6)
 - Raised by: pitch-edge (cleanup audit)
 - Evidence: `lake/client.py:112-122` re-sends only on 503; a refused connection, a read timeout, a 502 or a
@@ -859,7 +859,7 @@ projects; M8 traceability; S2 lake capacity; S4 decimal-odds instrument with CLV
   never does (pinned by its tests on lake/after-freeze 8f4d7f7, stated in contract v2), so the client now refuses a
   body without it as a cut stream.
 - Blocked by: none. Blocks: none.
-- Commits: fce7024, d59a857.
+- Commits: fce7024, d59a857, bdf3a41, 871b3cc.
 
 ## PE-43 Lake reads cannot be pinned to (build, T)
 - Status: open
@@ -909,10 +909,10 @@ projects; M8 traceability; S2 lake capacity; S4 decimal-odds instrument with CLV
   or the mirror. B2: check `/v1/health` before the first query and refuse when `reads.active` and not `allowed`;
   fail closed on a missing block once contract v2 is vendored.
 - Blocked by: none for the local switch; the R1 release and contract v2 for the health check. Blocks: none.
-- Commits: none yet.
+- Commits: fce7024, d59a857, 871b3cc (B1 part).
 
 ## PE-45 Squad-value missing share is NaN when nobody is missing
-- Status: open
+- Status: open (built in B1; macOS gate, Linux CI and push pending)
 - Priority: should (feature correctness; found while building PE-36)
 - Raised by: pitch-edge (cleanup B1)
 - Evidence: in `features/squad_value.py` the missing value is a SQL sum over the usual XI's missing players, which
@@ -920,7 +920,7 @@ projects; M8 traceability; S2 lake capacity; S4 decimal-odds instrument with CLV
 - Acceptance: a side with no missing usual starter gets 0; a test covers no-one missing, one missing and all
   missing, and fails on the current code.
 - Blocked by: none. Blocks: the feature-store rerun of the cleanup plan.
-- Commits: none yet.
+- Commits: ec74a75.
 
 ## PE-46 Row picks left by the PE-36 sweep: first-wins by caller order, review order, study code
 - Status: open
