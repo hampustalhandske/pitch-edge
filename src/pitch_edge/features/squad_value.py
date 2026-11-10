@@ -12,9 +12,10 @@ signals from the same open Transfermarkt extract used by `features/context.py`:
   quality, not just how many minutes the squad has played.
 * **Missing-star value** (`sv_home_missing_pct`, `sv_away_missing_pct`, `sv_missing_pct_diff`) — for each
   side, the "usual XI" is the eleven players with the most total minutes for that club in the trailing
-  365 days before kickoff; `missing_pct` is the value-weighted share of that usual XI who are absent from
-  *today's* confirmed lineup (neither starting nor on the bench) — a direct proxy for injuries/
-  suspensions/bans the aggregate spine cannot see at all, independent of rotation/fatigue.
+  365 days before kickoff (equal minutes: smaller player id first); `missing_pct` is the value-weighted
+  share of that usual XI who are absent from *today's* confirmed lineup (neither starting nor on the
+  bench) — a direct proxy for injuries/suspensions/bans the aggregate spine cannot see at all,
+  independent of rotation/fatigue.
 
 Both features are strictly pre-match: they use the *confirmed* lineup Transfermarkt recorded for that
 fixture (announced pre-kickoff, same timing a bookmaker's closing price reflects) and valuations dated
@@ -130,7 +131,7 @@ def squad_value_context(wh: Warehouse, tm_context: pd.DataFrame) -> pd.DataFrame
                 ),
                 {side}_ranked AS (
                     SELECT match_id, player_id, mins,
-                           row_number() OVER (PARTITION BY match_id ORDER BY mins DESC) AS rk
+                           row_number() OVER (PARTITION BY match_id ORDER BY mins DESC, player_id) AS rk
                     FROM {side}_minutes
                 ),
                 {side}_usual AS (

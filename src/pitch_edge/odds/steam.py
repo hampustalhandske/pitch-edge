@@ -83,11 +83,13 @@ def detect_steam(
     """history: match_id, bookmaker, side, price, snapshot_ts (>= 2 snapshots per book).
 
     Steam = sharp book's no-vig probability for a side moved by >= move_threshold
-    between its first and last snapshot while a soft book moved < lag_threshold.
+    between its first and last snapshot while a soft book moved < lag_threshold. Snapshots of one
+    (match, book, side) at the same time are ordered by price, so the lowest is first and the highest last.
     """
     if history.empty:
         return []
-    history = history.sort_values("snapshot_ts")
+    # a total, stable order: snapshots tied on time resolve by price, whatever order the rows arrived in
+    history = history.sort_values(["match_id", "bookmaker", "side", "snapshot_ts", "price"], kind="stable")
     first = _no_vig_table(history.groupby(["match_id", "bookmaker", "side"], as_index=False).first())
     last = _no_vig_table(history.groupby(["match_id", "bookmaker", "side"], as_index=False).last())
     if first.empty or last.empty:

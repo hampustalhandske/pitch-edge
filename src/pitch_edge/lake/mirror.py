@@ -328,6 +328,17 @@ def _checkpoint_sql(
     )
 
 
+def _dedupe_order(spec: MirrorSpec, columns: list[str]) -> str:
+    """The ` ORDER BY ...` clause (with a leading space) that ranks a batch's rows within one key: latest
+    `scraped_at` first (NULLs last) when the batch has it, then every other non-key column in `columns`
+    order, ascending with NULLs last. Empty when the batch holds only key columns (the rows of a key are
+    then identical)."""
+    terms = ['"scraped_at" DESC NULLS LAST'] if "scraped_at" in columns else []
+    quoted = ['"' + c.replace('"', '""') + '"' for c in columns if c != "scraped_at" and c not in spec.keys]
+    terms += [f"{c} ASC NULLS LAST" for c in quoted]
+    return f" ORDER BY {', '.join(terms)}" if terms else ""
+
+
 def _store(
     wh: Warehouse,
     spec: MirrorSpec,
@@ -342,11 +353,16 @@ def _store(
 
     In a single transaction: stored rows whose window column lies in `[window[0], window[1])` (every
     row if `purge_all`, or for an unwindowed mirror) are deleted, rows sharing a key with the incoming
-    batch are deleted, the batch (latest `scraped_at` per key, NULLs last) is inserted with `synced_at`,
-    and, when `run_id` is given, the window is checkpointed in `lake_sync_state` with `lake_version`, the
-    lake build that served it — so a checkpoint exists
-    exactly when the window's data was committed. Any exception rolls the transaction back and leaves the
-    table unchanged. `data` of None means the lake returned no rows, which still clears the window."""
+    batch are deleted, the batch (one row per key, see below) is inserted with `synced_at`, and, when
+    `run_id` is given, the window is checkpointed in `lake_sync_state` with `lake_version`, the lake build
+    that served it — so a checkpoint exists exactly when the window's data was committed. Any exception
+    rolls the transaction back and leaves the table unchanged. `data` of None means the lake returned no
+    rows, which still clears the window.
+
+    The row kept per key is the first under a total order: latest `scraped_at` first (NULLs last) when the
+    batch has that column, then every other non-key column in the batch's column order, ascending with
+    NULLs last. Two different rows under one key and one `scraped_at` therefore always resolve to the same
+    row whatever order the lake sent them in; only exactly identical rows remain interchangeable."""
     conn = wh._conn  # noqa: SLF001 - the warehouse exposes no raw execute
     keys = ", ".join(f'"{k}"' for k in spec.keys)
     ts = synced_at.strftime("%Y-%m-%d %H:%M:%S")
@@ -356,11 +372,10 @@ def _store(
         if data is not None:
             conn.register("lake_incoming", data)
             registered = True
-            order = "scraped_at DESC NULLS LAST" if "scraped_at" in data.column_names else keys
             conn.execute("DROP TABLE IF EXISTS lake_stage")
             conn.execute(
                 f"CREATE TEMP TABLE lake_stage AS SELECT *, TIMESTAMP '{ts}' AS synced_at FROM lake_incoming "
-                f"QUALIFY row_number() OVER (PARTITION BY {keys} ORDER BY {order}) = 1"
+                f"QUALIFY row_number() OVER (PARTITION BY {keys}{_dedupe_order(spec, data.column_names)}) = 1"
             )
         conn.execute("BEGIN TRANSACTION")
         began = True

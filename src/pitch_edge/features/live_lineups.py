@@ -74,7 +74,8 @@ def resolve_fixture_ids(
 
 
 def _usual_xi_values(wh: Warehouse, club_id: int, asof_date, lookback_days: int = 365) -> pd.DataFrame:
-    """Trailing-`lookback_days` minutes leaders (top 11) for a club, with their latest known value."""
+    """Trailing-`lookback_days` minutes leaders (top 11; equal minutes: smaller player id first) for a club, with
+    their latest known value."""
     if not (wh.table_exists("tm_appearances") and wh.table_exists("tm_player_valuations")):
         return pd.DataFrame(columns=["player_id", "player_name", "value"])
     return wh.query(
@@ -87,7 +88,7 @@ def _usual_xi_values(wh: Warehouse, club_id: int, asof_date, lookback_days: int 
             GROUP BY 1
         ),
         ranked AS (
-            SELECT player_id, mins, row_number() OVER (ORDER BY mins DESC) AS rk FROM app
+            SELECT player_id, mins, row_number() OVER (ORDER BY mins DESC, player_id) AS rk FROM app
         ),
         val AS (
             SELECT CAST(player_id AS BIGINT) AS player_id, market_value_in_eur, date

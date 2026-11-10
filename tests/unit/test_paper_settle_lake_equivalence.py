@@ -77,17 +77,21 @@ class PerDecisionLakeCloseSource:
             return {}
         marks = ", ".join("?" for _ in asset_ids)
         df = self.lake.sql(
-            f"SELECT asset_id, arg_max(close, hour_start) AS close, "
-            f"CAST(max(hour_start) + INTERVAL 1 HOUR AS VARCHAR) AS ends_at FROM pm_soccer_bars_1h "
-            f"WHERE asset_id IN ({marks}) AND hour_start >= CAST(? AS TIMESTAMPTZ) "
-            f"AND hour_start + INTERVAL 1 HOUR <= CAST(? AS TIMESTAMPTZ) GROUP BY asset_id",
+            f"SELECT DISTINCT asset_id, close, CAST(hour_start + INTERVAL 1 HOUR AS VARCHAR) AS ends_at "
+            f"FROM pm_soccer_bars_1h WHERE asset_id IN ({marks}) AND close IS NOT NULL "
+            f"AND hour_start >= CAST(? AS TIMESTAMPTZ) AND hour_start + INTERVAL 1 HOUR <= CAST(? AS TIMESTAMPTZ) "
+            f"QUALIFY hour_start = max(hour_start) OVER (PARTITION BY asset_id) ORDER BY asset_id, close",
             [*asset_ids, (before - timedelta(days=14)).isoformat(), before.isoformat()],
         )
-        return {
-            str(r.asset_id): PmBar(float(r.close), pd.Timestamp(r.ends_at).tz_convert("UTC").to_pydatetime())
-            for r in df.itertuples()
-            if pd.notna(r.close)
-        }
+        df = df[df["close"].notna()]
+        bars: dict[str, PmBar] = {}
+        for asset_id, g in df.groupby(df["asset_id"].astype(str), sort=True):
+            ends_at = pd.Timestamp(g["ends_at"].iloc[0]).tz_convert("UTC").to_pydatetime()
+            closes = g["close"].astype(float).unique()
+            bars[str(asset_id)] = (
+                PmBar(float(closes[0]), ends_at) if len(closes) == 1 else PmBar(math.nan, ends_at, conflict=True)
+            )
+        return bars
 
 
 # --------------------------------------------------------------------------- the fake lake

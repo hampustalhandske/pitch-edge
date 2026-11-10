@@ -87,7 +87,8 @@ class TransfermarktOpenSource:
             con.close()
 
     def substitution_profile(self, min_games: int = 20) -> pd.DataFrame:
-        """Per club: average first-substitution minute and subs per game — a tempo/fatigue proxy."""
+        """Per club: average first-substitution minute and subs per game — a tempo/fatigue proxy. A club listed
+        under several names is shown by the alphabetically smallest."""
         self.download()
         con = duckdb.connect(str(self.db_path), read_only=True)
         try:
@@ -96,7 +97,7 @@ class TransfermarktOpenSource:
                 WITH subs AS (
                   SELECT game_id, club_id, club_name, min(minute) AS first_sub_minute, count(*) AS n_subs
                   FROM game_events WHERE type = 'Substitutions' GROUP BY 1,2,3)
-                SELECT club_id, any_value(club_name) AS club_name, count(*) AS games,
+                SELECT club_id, min(club_name) AS club_name, count(*) AS games,
                        avg(first_sub_minute) AS avg_first_sub_minute, avg(n_subs) AS avg_subs
                 FROM subs GROUP BY 1 HAVING count(*) >= ? ORDER BY avg_first_sub_minute
                 """,

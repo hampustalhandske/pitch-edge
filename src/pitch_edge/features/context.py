@@ -57,7 +57,10 @@ def club_id_map(wh: Warehouse, teams: list[str]) -> dict[str, int]:
 
 
 def transfermarkt_context(wh: Warehouse, matches: pd.DataFrame) -> pd.DataFrame:
-    """One row per match_id with ROTATION_FEATURES + tm_referee; empty frame if the tables are absent."""
+    """One row per match_id with ROTATION_FEATURES + tm_referee; empty frame if the tables are absent.
+
+    When several Transfermarkt games share the match's date and clubs, `tm_referee` and `tm_game_id` come from
+    the one with the smallest game id."""
     if matches.empty or not (wh.table_exists("tm_games") and wh.table_exists("tm_appearances")):
         return pd.DataFrame(columns=["match_id", *CONTEXT_COLUMNS])
     teams = sorted(set(matches["home_team"]) | set(matches["away_team"]))
@@ -131,10 +134,10 @@ def transfermarkt_context(wh: Warehouse, matches: pd.DataFrame) -> pd.DataFrame:
             f"""
             WITH {", ".join(side_sql)},
             ref AS (
-                SELECT m.match_id, any_value(g.referee) AS tm_referee, any_value(g.game_id) AS tm_game_id
+                SELECT m.match_id, g.referee AS tm_referee, g.game_id AS tm_game_id
                 FROM ctx_matches m JOIN ctx_games g
                   ON g.home_club_id = m.home_club_id AND g.away_club_id = m.away_club_id AND g.d = m.d
-                GROUP BY 1
+                QUALIFY row_number() OVER (PARTITION BY m.match_id ORDER BY g.game_id, g.referee NULLS LAST) = 1
             )
             SELECT m.match_id,
                    hm.rot_home_minutes_7d, am.rot_away_minutes_7d,

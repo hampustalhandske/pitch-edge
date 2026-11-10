@@ -458,21 +458,23 @@ class PaperStore:
         return self._df("SELECT * FROM fixtures ORDER BY kickoff_at, fixture_key")
 
     def latest_quotes(self, as_of: datetime, lookback: timedelta = DEFAULT_QUOTE_LOOKBACK) -> pd.DataFrame:
-        """Latest quote per (source, fixture, selection) captured in (`as_of` - `lookback`, `as_of`], for
-        fixtures that have not kicked off by `as_of`."""
+        """Latest quote per (source, fixture, market, selection) captured in (`as_of` - `lookback`, `as_of`], for
+        fixtures that have not kicked off by `as_of`. When two events of one source map to one fixture and were
+        captured at the same time, the smallest `source_event_id` wins, then the smallest `quote_id`."""
         t = _naive_utc(as_of)
         return self._df(
             "SELECT * FROM quotes WHERE captured_at <= ? AND captured_at > ? AND kickoff_at > ? "
             "QUALIFY row_number() OVER (PARTITION BY source, fixture_key, market, selection "
-            "ORDER BY captured_at DESC) = 1 ORDER BY fixture_key, source, selection",
+            "ORDER BY captured_at DESC, source_event_id, quote_id) = 1 ORDER BY fixture_key, source, selection",
             [t, t - lookback, t],
         )
 
     def known_kickoffs(self, source: str) -> dict[str, datetime]:
-        """Most recently recorded kickoff (tz-aware UTC) per source event id for `source`."""
+        """Most recently recorded kickoff (tz-aware UTC) per source event id for `source`: the kickoff of the
+        latest capture, and the latest of its kickoffs when one capture lists more than one."""
         rows = self.con.execute(
-            "SELECT source_event_id, arg_max(kickoff_at, captured_at) FROM quotes WHERE source = ? "
-            "GROUP BY source_event_id",
+            "SELECT source_event_id, kickoff_at FROM quotes WHERE source = ? "
+            "QUALIFY row_number() OVER (PARTITION BY source_event_id ORDER BY captured_at DESC, kickoff_at DESC) = 1",
             [source],
         ).fetchall()
         return {str(eid): ko.replace(tzinfo=UTC) for eid, ko in rows}

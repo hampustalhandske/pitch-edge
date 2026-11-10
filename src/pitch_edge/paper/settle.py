@@ -9,11 +9,12 @@ Closing source, in order of preference:
    different benchmark from the Betfair close and is reported separately.
 2. Polymarket decisions: the last hourly bar known before kickoff (`hour_start + 1h <= kickoff_at`) for
    each of the fixture's three Yes tokens in the lake's `pm_soccer_bars_1h`, power-normalised when all
-   three are present. A bar that ended more than `PM_MAX_BAR_AGE` before kickoff is stale and is not a close.
-   A Polymarket decision with no valid close (no token, no bar, only a stale bar, an implausible book) gets a
-   `no_benchmark` flag with the reason once `grace` has passed, and no fallback price is written for it: our
-   own snapshot is not the market close. It is still asked for until `final_horizon`, and a valid bar arriving
-   by then settles it. The Betfair close is still recorded alongside as `sharp_fair_close_odds`.
+   three are present. A bar that ended more than `PM_MAX_BAR_AGE` before kickoff is stale and is not a close,
+   and neither is a token whose newest hour holds two bars with different closes.
+   A Polymarket decision with no valid close (no token, no bar, only a stale bar, two different bars at the
+   newest hour, an implausible book) gets a `no_benchmark` flag with the reason once `grace` has passed, and
+   no fallback price is written for it: our own snapshot is not the market close. It is still asked for until
+   `final_horizon`, and a valid bar arriving by then settles it. The Betfair close is still recorded alongside as `sharp_fair_close_odds`.
 3. Fallback for bookmaker / exchange decisions, only once `grace` has passed since kickoff without (1): our own last quote snapshot
    captured after the decision and before kickoff (Pinnacle, then Betfair UK/EU, then Smarkets, then the
    decision's venue), labelled `own_snapshot:<source>@<captured_at>`, or `none` when no such snapshot
@@ -28,7 +29,8 @@ decision waits until both a lake close and a result exist (leagues with no resul
 for the close only and settle with `result` and `pnl` NULL); after it, whatever is known is written (a
 missing result leaves `result` and `pnl` NULL). Settlements are written once and never changed. An OddsPapi-
 benchmarked bookmaker decision that has no valid Pinnacle close once `grace` has passed gets a `no_benchmark`
-flag whose reason says why (no fixture, ambiguous fixture, missing/inactive/stale close, implausible book sum).
+flag whose reason says why (no fixture, ambiguous fixture, missing/inactive/stale close, two different Pinnacle
+rows at the latest observed_at, implausible book sum).
 """
 
 from __future__ import annotations
@@ -82,8 +84,9 @@ _OUTCOME_CODES = {"home": 0, "draw": 1, "away": 2}
 @dataclass(frozen=True)
 class PinnacleClose:
     """The OddsPapi Pinnacle 1X2 close of one fixture: decimal odds (home, draw, away), or `reason` saying why
-    there is none (no fixture matched, an outcome missing or inactive, the last row too old). `retry` marks a
-    missing fixture, which is not yet a verdict that no benchmark exists."""
+    there is none (no fixture matched, an outcome missing or inactive, two rows at the latest observed_at that
+    differ in price or active, the last row too old). `retry` marks a missing fixture, which is not yet a
+    verdict that no benchmark exists."""
 
     odds: tuple[float, float, float] | None
     reason: str | None = None
@@ -92,10 +95,14 @@ class PinnacleClose:
 
 @dataclass(frozen=True)
 class PmBar:
-    """A token's newest complete hourly bar before a cut-off: its close price and when the bar ended."""
+    """A token's newest complete hourly bar before a cut-off: its close price and when the bar ended.
+
+    `conflict` is True when the lake holds two bars with different closes for that hour; `close` is then NaN
+    and the bar is not a close."""
 
     close: float
     ends_at: datetime
+    conflict: bool = False
 
 
 class CloseSource(Protocol):
@@ -174,19 +181,23 @@ class LakeCloseSource:
         return FdClose(betfair_close=betfair, result=result)  # type: ignore[arg-type]
 
     def _oddspapi_window(self, division: str, day: date) -> pd.DataFrame:
-        """OddsPapi fixtures of `division` kicking off from the day before `day` to the day after it, one row per
-        fixture and outcome with the latest Pinnacle 1X2 row (price, active, observed_at) at or before kickoff."""
+        """OddsPapi fixtures of `division` kicking off from the day before `day` to the day after it, with the
+        distinct Pinnacle 1X2 (price, active) rows at the latest observed_at at or before kickoff per fixture and
+        outcome: one row per outcome when that latest row is unique, more when rows at that time disagree, and a
+        single row with a NULL outcome for a fixture without any. Rows are ordered by fixture, outcome, price and
+        active."""
         return self._sql_once(
             ("oddspapi", division, day),
             "WITH fx AS (SELECT fixture_id, home_team, away_team, kickoff_utc FROM oddspapi_fixtures "
             "WHERE division = ? AND kickoff_utc >= CAST(? AS TIMESTAMPTZ) AND kickoff_utc < CAST(? AS TIMESTAMPTZ)), "
-            "cl AS (SELECT o.fixture_id, o.outcome, arg_max(o.price, o.observed_at) AS price, "
-            "arg_max(o.active, o.observed_at) AS active, max(o.observed_at) AS observed_at "
+            "cl AS (SELECT DISTINCT o.fixture_id, o.outcome, o.price, o.active, o.observed_at "
             "FROM oddspapi_odds o JOIN fx ON o.fixture_id = fx.fixture_id "
             "WHERE o.bookmaker = 'pinnacle' AND o.market = '1x2' AND o.observed_at <= fx.kickoff_utc "
-            "AND o.outcome IN ('home', 'draw', 'away') GROUP BY o.fixture_id, o.outcome) "
+            "AND o.outcome IN ('home', 'draw', 'away') "
+            "QUALIFY o.observed_at = max(o.observed_at) OVER (PARTITION BY o.fixture_id, o.outcome)) "
             "SELECT fx.fixture_id, fx.home_team, fx.away_team, fx.kickoff_utc, cl.outcome, cl.price, cl.active, "
-            "cl.observed_at FROM fx LEFT JOIN cl ON cl.fixture_id = fx.fixture_id",
+            "cl.observed_at FROM fx LEFT JOIN cl ON cl.fixture_id = fx.fixture_id "
+            "ORDER BY fx.fixture_id, cl.outcome, cl.price, cl.active",
             [division, (day - timedelta(days=1)).isoformat(), (day + timedelta(days=2)).isoformat()],
         )
 
@@ -196,8 +207,10 @@ class LakeCloseSource:
         The fixture is the one OddsPapi fixture of the competition kicking off within
         `ODDSPAPI_KICKOFF_TOLERANCE` of `kickoff_at` whose clubs pass `fixture_score` (canonical team keys);
         none or several passing means no close. The close is the latest `pinnacle` `1x2` row per outcome with
-        `observed_at <= kickoff_utc`; it is valid only when all three outcomes exist with price > 1 and
-        `active`, and the latest of the three rows is at most `ODDSPAPI_MAX_CLOSE_AGE` before kickoff.
+        `observed_at <= kickoff_utc`; price, active and observed_at all come from that one row, and two rows at
+        the latest observed_at that differ in price or active refuse the close. It is valid only when all three
+        outcomes exist with price > 1 and `active`, and the latest of the three rows is at most
+        `ODDSPAPI_MAX_CLOSE_AGE` before kickoff.
         One lake query per (competition, kickoff date).
         """
         division = ODDSPAPI_DIVISIONS.get(league)
@@ -224,9 +237,15 @@ class LakeCloseSource:
             return PinnacleClose(None, f"{len(passing)} OddsPapi {division} fixtures match {home} v {away}")
         rows = df[(df["fixture_id"].astype(str) == passing[0]) & df["outcome"].notna()]
         kickoff = fixtures[fixtures["fixture_id"].astype(str) == passing[0]]["kickoff_utc"].iloc[0].to_pydatetime()
-        by_outcome = {str(r.outcome): r for r in rows.itertuples()}
-        if not by_outcome:
+        if rows.empty:
             return PinnacleClose(None, "OddsPapi lists the fixture but holds no Pinnacle 1x2 rows for it", retry=True)
+        per_outcome = rows["outcome"].astype(str).value_counts()
+        tied = [o for o in _OUTCOME_CODES if per_outcome.get(o, 0) > 1]
+        if tied:
+            return PinnacleClose(
+                None, f"two Pinnacle rows at the latest observed_at differ in price or active for {'/'.join(tied)}"
+            )
+        by_outcome = {str(r.outcome): r for r in rows.itertuples()}
         missing = [o for o in _OUTCOME_CODES if o not in by_outcome or pd.isna(by_outcome[o].price)]
         if missing:
             return PinnacleClose(None, f"Pinnacle 1x2 close before kickoff lacks {'/'.join(missing)}")
@@ -244,24 +263,29 @@ class LakeCloseSource:
         return PinnacleClose(tuple(float(by_outcome[o].price) for o in _OUTCOME_CODES))  # type: ignore[arg-type]
 
     def pm_last_bars(self, asset_ids: list[str], before: datetime) -> dict[str, PmBar]:
-        """The last hourly bar per token that was complete (hour_start + 1h) by `before`, looking back 14 days:
-        its close and its end time. Tokens without such a bar are absent."""
+        """The last hourly bar with a close per token that was complete (hour_start + 1h) by `before`, looking
+        back 14 days: its close and its end time. Tokens without such a bar are absent. A token whose newest
+        hour holds bars with different closes gets a `PmBar` with `conflict` set and a NaN close."""
         if not asset_ids:
             return {}
         marks = ", ".join("?" for _ in asset_ids)
         df = self._sql_once(
             ("pm", tuple(sorted(asset_ids)), before),
-            f"SELECT asset_id, arg_max(close, hour_start) AS close, "
-            f"CAST(max(hour_start) + INTERVAL 1 HOUR AS VARCHAR) AS ends_at FROM pm_soccer_bars_1h "
-            f"WHERE asset_id IN ({marks}) AND hour_start >= CAST(? AS TIMESTAMPTZ) "
-            f"AND hour_start + INTERVAL 1 HOUR <= CAST(? AS TIMESTAMPTZ) GROUP BY asset_id",
+            f"SELECT DISTINCT asset_id, close, CAST(hour_start + INTERVAL 1 HOUR AS VARCHAR) AS ends_at "
+            f"FROM pm_soccer_bars_1h WHERE asset_id IN ({marks}) AND close IS NOT NULL "
+            f"AND hour_start >= CAST(? AS TIMESTAMPTZ) AND hour_start + INTERVAL 1 HOUR <= CAST(? AS TIMESTAMPTZ) "
+            f"QUALIFY hour_start = max(hour_start) OVER (PARTITION BY asset_id) ORDER BY asset_id, close",
             [*asset_ids, (before - timedelta(days=14)).isoformat(), before.isoformat()],
         )
-        return {
-            str(r.asset_id): PmBar(float(r.close), pd.Timestamp(r.ends_at).tz_convert("UTC").to_pydatetime())
-            for r in df.itertuples()
-            if pd.notna(r.close)
-        }
+        df = df[df["close"].notna()]
+        bars: dict[str, PmBar] = {}
+        for asset_id, g in df.groupby(df["asset_id"].astype(str), sort=True):
+            ends_at = pd.Timestamp(g["ends_at"].iloc[0]).tz_convert("UTC").to_pydatetime()
+            closes = g["close"].astype(float).unique()
+            bars[str(asset_id)] = (
+                PmBar(float(closes[0]), ends_at) if len(closes) == 1 else PmBar(math.nan, ends_at, conflict=True)
+            )
+        return bars
 
 
 @dataclass(frozen=True)
@@ -326,18 +350,31 @@ def _pm_bar_close(
 ) -> tuple[_Close | None, str | None]:
     """The Polymarket close of `selection` from the fixture's Yes-token bars, and the reason it was refused.
 
-    Exactly one of the two is None. Bars that ended more than `PM_MAX_BAR_AGE` before kickoff are dropped: a
-    stale bar on the selection's own token refuses the close, a stale bar on another token only drops the
-    three-way normalisation."""
+    Exactly one of the two is None. Bars that ended more than `PM_MAX_BAR_AGE` before kickoff, and bars in
+    `conflict` (two different closes at the newest hour), are dropped: on the selection's own token either
+    refuses the close, on another token it only drops the three-way normalisation. The token of a selection is
+    the instrument of its latest Polymarket quote, the largest instrument id among quotes captured at that same
+    time."""
     quotes = store.quotes_for_fixture(fixture, before=kickoff)
     pm = quotes[(quotes["source"] == "polymarket") & quotes["instrument_id"].notna()]
     if pm.empty or selection not in set(pm["selection"]):
         return None, f"no Polymarket token recorded for {selection}"
-    tokens = pm.sort_values("captured_at").groupby("selection")["instrument_id"].last().to_dict()
+    tokens = (
+        pm.sort_values(["captured_at", "instrument_id"], kind="stable")
+        .groupby("selection")["instrument_id"]
+        .last()
+        .to_dict()
+    )
     bars = source.pm_last_bars(sorted(tokens.values()), kickoff)
     own = bars.get(tokens[selection])
     if own is None:
         return None, f"no Polymarket {selection} bar in the 14 days before kickoff"
+    if own.conflict:
+        return (
+            None,
+            f"two Polymarket {selection} bars at the newest hour (ending {own.ends_at.isoformat()}) "
+            "have different closes",
+        )
     if kickoff - own.ends_at > PM_MAX_BAR_AGE:
         age_h = (kickoff - own.ends_at).total_seconds() / 3600
         limit_h = PM_MAX_BAR_AGE.total_seconds() / 3600
@@ -346,7 +383,7 @@ def _pm_bar_close(
             f"Polymarket close is stale: newest {selection} bar ended {age_h:.1f} h before kickoff (limit {limit_h:.0f} h)",
         )
     prices = {
-        s: bars[t].close if t in bars and kickoff - bars[t].ends_at <= PM_MAX_BAR_AGE else None
+        s: bars[t].close if t in bars and not bars[t].conflict and kickoff - bars[t].ends_at <= PM_MAX_BAR_AGE else None
         for s, t in tokens.items()
     }
     p = prices.get(selection)
