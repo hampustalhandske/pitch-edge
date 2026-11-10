@@ -754,6 +754,11 @@ projects; M8 traceability; S2 lake capacity; S4 decimal-odds instrument with CLV
   and a test kills it with SIGKILL mid-run, resumes, and requires the same output as an uninterrupted run. Each
   test is shown to fail on a planted defect (an unseeded draw, a skipped checkpoint).
 - Blocked by: PE-36 (the ties would make the test flaky). Blocks: the reruns of the cleanup plan.
+- Progress: `tests/determinism/` covers all five pipelines (two processes with different `PYTHONHASHSEED`; SIGKILL
+  and resume for research, paper and lake, which are the ones with checkpoints; the edgelab export rewrites every
+  file and the backtest keeps no checkpoint). Each comparison detects its planted defect. The paper report
+  followed the uuid decision ids (its `mean_clv` changed in the last bit with them); decisions are now read and
+  chained in (decided_at, strategy, fixture) order. Two gaps stay as strict xfails: PE-47 and PE-48.
 - Commits: none yet.
 
 ## PE-38 Module-level mutable state without a census
@@ -940,4 +945,33 @@ projects; M8 traceability; S2 lake capacity; S4 decimal-odds instrument with CLV
   read in chain order; each study pick gets a total order in a new study-code version before its counted rerun,
   with the change recorded as a deviation in the study's report.
 - Blocked by: none (study items: the rerun plan). Blocks: the counted reruns of R1, R3, R4, R5, and any rerun of R6.
+- Commits: none yet.
+
+## PE-47 A kill inside `run_decide` leaves the cycle's `decide_log` row missing
+- Status: open
+- Priority: should (the L5 coverage count reads `decide_log`)
+- Raised by: pitch-edge (PE-37 kill-resume test)
+- Evidence: `paper/strategies.py` `run_decide` commits each decision on its own (`store.append_decision`) and
+  writes the strategy's `decide_log` row only after the loop (`store.record_decide_run`). A kill in between keeps
+  the decisions but loses the row, so the killed cycle is absent from `cycle_starts` and coverage undercounts; a
+  re-run at the same time logs only its own new decisions (3 of 6 in the test).
+  `tests/determinism/test_determinism_paper.py::test_kill_inside_decide_leaves_the_whole_ledger_as_uninterrupted`
+  pins it as a strict xfail.
+- Acceptance: the decisions of one strategy run and its `decide_log` row are written together or not at all (or the
+  row is written at the start and completed after), and the xfail passes without its marker.
+- Blocked by: none. Blocks: L5 coverage numbers for any cycle that was interrupted.
+- Commits: none yet.
+
+## PE-48 `pipeline_runs` loses the rows of a killed call
+- Status: open
+- Priority: later (health log only; no result depends on it)
+- Raised by: pitch-edge (PE-37 kill-resume test)
+- Evidence: `data/ingest.py` `_run` writes one `pipeline_runs` row after the wrapped call returns, with the rows
+  that call wrote. A killed lake-sync or spine call logs nothing and the resume logs only its remainder (42 of 126
+  mirror rows, 84 of 126 spine matches in the test), so `pitch-edge health` understates what a run wrote.
+  `tests/determinism/test_determinism_lake.py::test_kill_and_resume_leaves_the_health_log_as_uninterrupted` pins
+  it as a strict xfail.
+- Acceptance: a run is logged when it starts and completed when it ends, and an interrupted run is visible as
+  such; the xfail passes without its marker.
+- Blocked by: none. Blocks: none.
 - Commits: none yet.

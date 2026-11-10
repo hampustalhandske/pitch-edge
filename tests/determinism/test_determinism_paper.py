@@ -8,8 +8,9 @@ Driver: `drivers/paper.py` (inputs, schedule, output and the named volatile fiel
   table but `decide_log`.
 - Negative controls: an unseeded report bootstrap differs between two runs, and a resume whose step checkpoint
   was written before the step ran (so the interrupted settle is skipped) differs from the uninterrupted run.
-- Known production nondeterminism, each an `xfail(strict=True)` that flips once fixed: the report follows the
-  order of the decision ids (uuid4 in production), and a kill inside `run_decide` leaves `decide_log` short.
+- A run whose decision ids sort in a different order (production ids are uuid4) produces the same output.
+- Known production gap, an `xfail(strict=True)` that flips once fixed: a kill inside `run_decide` leaves
+  `decide_log` short.
 """
 
 from __future__ import annotations
@@ -53,15 +54,6 @@ def test_two_processes_write_identical_output(jobs):
     assert '"verified": true' in text and "lake:fd_matches.betfair_ex_close" in text
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "PaperStore.decisions() (src/pitch_edge/paper/store.py:560) orders rows of one decided_at by decision_id, "
-        "a uuid4 in production, and report.summarise sums clv_log in that row order (src/pitch_edge/paper/"
-        "report.py:205 mean_clv; :194 feeds the bootstrap in the same order), so mean_clv changes in its last bit "
-        "with the ids (here -0.024363950077665786 vs -0.02436395007766579)"
-    ),
-)
 def test_report_does_not_depend_on_decision_id_order(jobs):
     assert_identical(final(jobs["a"]), final(jobs["salted-ids"]))
 
@@ -84,7 +76,7 @@ def test_kill_after_a_settlement_leaves_the_whole_ledger_as_uninterrupted(jobs):
 @pytest.mark.xfail(
     strict=True,
     reason=(
-        "run_decide (src/pitch_edge/paper/strategies.py:480 append_decision, :486 record_decide_run) commits each "
+        "run_decide (PE-47; src/pitch_edge/paper/strategies.py append_decision, record_decide_run) commits each "
         "decision on its own and the strategy's decide_log row after them: a kill in between leaves decisions "
         "without their decide_log row, and the re-run cycle logs n_new_decisions for its own run only (3 of 6)"
     ),

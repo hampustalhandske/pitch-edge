@@ -72,7 +72,7 @@ def test_kill_and_resume_matches_the_uninterrupted_run(jobs, job):
 @pytest.mark.xfail(
     strict=True,
     reason=(
-        "data/ingest.py:90-94 `_run` logs one pipeline_runs row after the call returns, with the rows written by "
+        "PE-48: data/ingest.py `_run` logs one pipeline_runs row after the call returns, with the rows written by "
         "that call (lake/mirror.py:476 sync_mirror, lake/spine.py:280 build_fd_spine count only this call's windows): "
         "a killed call logs nothing and the resuming call logs its remainder (42 of 126 mirror rows, 84 of 126 "
         "spine matches)"

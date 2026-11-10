@@ -226,6 +226,11 @@ def _with_utc(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+# The order decisions are read and chained in: a total order on content, since `append_decision` allows one
+# decision per (strategy, fixture); decision_id is a uuid and only breaks ties that cannot occur.
+_DECISION_ORDER = "decided_at, strategy_id, fixture_key, decision_id"
+
+
 def _chain_hash(prev_hash: str, record: dict[str, Any]) -> str:
     return hashlib.sha256((prev_hash + json.dumps(record, sort_keys=True)).encode()).hexdigest()
 
@@ -307,7 +312,7 @@ class PaperStore:
     def _export_chain(self) -> int:
         """Append every decision not yet in the JSONL chain, oldest first. Returns lines written."""
         ids, prev = self._chain_state()
-        cur = self.con.execute("SELECT * FROM decisions ORDER BY decided_at, decision_id")
+        cur = self.con.execute(f"SELECT * FROM decisions ORDER BY {_DECISION_ORDER}")
         cols = [c[0] for c in cur.description]
         written = 0
         with self.chain_path.open("a") as fh:
@@ -557,7 +562,9 @@ class PaperStore:
         self._export_chain()
 
     def decisions(self) -> pd.DataFrame:
-        return self._df("SELECT * FROM decisions ORDER BY decided_at, decision_id")
+        """Every decision, in decision time and then (strategy, fixture) order, so a report built from them does
+        not depend on the random decision ids."""
+        return self._df(f"SELECT * FROM decisions ORDER BY {_DECISION_ORDER}")
 
     def decided_fixtures(self, strategy_id: str) -> set[str]:
         rows = self.con.execute("SELECT DISTINCT fixture_key FROM decisions WHERE strategy_id = ?", [strategy_id])
