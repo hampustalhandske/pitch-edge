@@ -843,8 +843,11 @@ projects; M8 traceability; S2 lake capacity; S4 decimal-odds instrument with CLV
 - Acceptance (master ruling 2026-11-10): HTTP 503 and a refused or reset connection are retried with bounded,
   logged backoff totalling about 6.5 minutes, so a lake restart is a quiet retry; a partial stream is never yielded as a
   result, and mocked tests cover each case, with a negative control (a non-transient 4xx is not retried).
+- Progress (B1): built in fce7024 and d59a857 (client retry budget, version check, mirror alignment). Left: an Arrow
+  stream cut exactly at a message boundary with a clean HTTP end is not detectable by the client; asked the lake
+  (2026-11-10) whether /v1/sql always writes the IPC end-of-stream marker, for contract v2 (B2).
 - Blocked by: none. Blocks: none.
-- Commits: none yet.
+- Commits: fce7024, d59a857.
 
 ## PE-43 Lake reads cannot be pinned to (build, T)
 - Status: open
