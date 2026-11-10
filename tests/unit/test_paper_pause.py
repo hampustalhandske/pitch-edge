@@ -4,13 +4,13 @@ coverage counts the paused hours as paused."""
 from __future__ import annotations
 
 import os
-import shutil
 import stat
 import subprocess
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
+from test_controls import make_scheduled_tree
 from test_paper_report import FakeLedger, _add, registry  # noqa: F401
 from typer.testing import CliRunner
 
@@ -22,7 +22,6 @@ pytestmark = pytest.mark.unit
 
 H = timedelta(hours=1)
 T0 = datetime(2026, 10, 21, 0, 0, tzinfo=UTC)
-REPO = Path(__file__).resolve().parents[2]
 
 
 def _hours(*offsets: float) -> list[datetime]:
@@ -117,14 +116,20 @@ def _fake_uv(bin_dir: Path, calls: Path, gate_rc: int) -> None:
 
 
 def _run_loop(tmp_path: Path, gate_rc: int, timeout: float = 20) -> tuple[subprocess.CompletedProcess, str, str]:
+    """Run a copy of the loop script in a clean git repository whose HEAD is the pinned sha, so its start-of-run
+    guard (tested in test_controls.py) lets it through, with its data directory at `<repo>/data`."""
     root = tmp_path / "repo"
-    (root / "scripts").mkdir(parents=True)
-    shutil.copy(REPO / "scripts" / "paper_loop.sh", root / "scripts" / "paper_loop.sh")
+    make_scheduled_tree(root, ["paper_loop.sh"])
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     calls = tmp_path / "calls.txt"
     _fake_uv(bin_dir, calls, gate_rc)
-    env = {**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}", "PAPER_LOOP_INTERVAL_S": "3600"}
+    env = {
+        **os.environ,
+        "PATH": f"{bin_dir}:{os.environ['PATH']}",
+        "PAPER_LOOP_INTERVAL_S": "3600",
+        "PITCH_EDGE_DATA_DIR": str(root / "data"),
+    }
     proc = subprocess.run(
         ["bash", str(root / "scripts" / "paper_loop.sh")], env=env, capture_output=True, text=True, timeout=timeout
     )

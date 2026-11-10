@@ -2,10 +2,54 @@
 
 On an Apple-silicon Mac whose shell runs under Rosetta, prefix `uv` commands with `arch -arm64`.
 
+## Scheduled jobs run a pinned commit
+
+The launchd agents below never run the working checkout. They run `scripts/paper_loop.sh` and
+`scripts/lake_sync_fd.sh` from the detached worktree `.worktrees/scheduled`, at a sha the owner names:
+
+```bash
+# 1. stop the agents first (a running loop keeps executing the worktree's files as they change)
+launchctl bootout gui/$(id -u)/local.pitch-edge.paper-loop
+launchctl bootout gui/$(id -u)/local.pitch-edge.lake-sync-fd
+# 2. pin: create or move .worktrees/scheduled to <sha>, `uv sync --extra dev --locked` there, record the pin
+scripts/scheduled_pin.sh <sha>
+# 3. install the plists (see each job below) and bootstrap them again
+```
+
+`scheduled_pin.sh` refuses (exit 2) anything that is not a commit and (exit 3) a `.worktrees/scheduled` that is
+dirty or not a worktree of this repository. When the checkout or `uv sync` fails, or leaves the worktree changed,
+it records nothing (exit 1). On success it appends `<utc time> <full sha>` to `data/control/scheduled_pin.log`.
+
+The plists set `PITCH_EDGE_DATA_DIR=<repo>/data` and `PITCH_EDGE_ENV_FILE=<repo>/.env`, so the pinned worktree
+writes the main checkout's warehouse, ledgers and logs and reads its `.env` (both variables default to `data` and
+`.env` in the tree the script runs from).
+
+**Guard** (`scripts/scheduled_guard.sh`, run once at the start of both scripts): the script logs a
+`refusing to start: …` line and exits 0 (so launchd's KeepAlive does not respawn the paper loop) when
+
+- `git status --porcelain` in its tree fails or prints anything (modified, staged or untracked files);
+- its HEAD is not the last sha in `<data dir>/control/scheduled_pin.log`, or that log has no sha.
+
+## Lake freeze
+
+A lake freeze (the lake's owner is rebuilding or migrating it) is recorded in code, in the append-only log
+`data/control/lake_freeze.jsonl`. While it is active, `Lake()` refuses with `LakeFrozenError` (so no sync, settle
+or study pull reads the lake), `pitch-edge lake-sync` prints `skipped: lake freeze since … (reason)` and exits 0
+without contacting the lake, and `pitch-edge control gate` exits 10. A freeze lasts from its start until the first
+thaw after it. A freeze log that cannot be read or parsed counts as frozen (gate exit 10, `Lake()` refuses) until it
+is repaired by hand.
+
+```bash
+arch -arm64 uv run pitch-edge control freeze --reason "lake rebuild LK-111" [--at 2026-11-10T09:11:00Z]
+arch -arm64 uv run pitch-edge control status        # frozen since when and why, or "lake not frozen"
+arch -arm64 uv run pitch-edge control gate          # exit 0 not frozen, 10 frozen (for scripts)
+arch -arm64 uv run pitch-edge control thaw --reason "rebuild done" [--at …]   # refused when nothing is frozen
+```
+
 ## Forward paper-trading loop (always on)
 
 `scripts/paper_loop.sh` runs the paper ledger (`pitch-edge paper …`, own DB `data/paper/paper.duckdb`, separate
-from the warehouse). Paper only: every HTTP call is a public, read-only market-data GET and no code path places
+from the warehouse), from the pinned worktree after the guard above. Paper only: every HTTP call is a public, read-only market-data GET and no code path places
 an order.
 
 - **Every hour:** `paper collect --sources polymarket,kalshi` (public books), `paper collect --sources odds_api`
@@ -37,7 +81,7 @@ absolute paths, so the template has `__REPO_DIR__` / `__HOME__` placeholders tha
 this checkout; re-run it if the repo moves.
 
 ```bash
-# install / start
+# install / start (after scripts/scheduled_pin.sh <sha>; the agent runs .worktrees/scheduled/scripts/paper_loop.sh)
 sed -e "s|__REPO_DIR__|$PWD|g" -e "s|__HOME__|$HOME|g" \
   scripts/launchd/local.pitch-edge.paper-loop.plist.example > ~/Library/LaunchAgents/local.pitch-edge.paper-loop.plist
 launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/local.pitch-edge.paper-loop.plist
@@ -57,13 +101,16 @@ arch -arm64 uv run pitch-edge paper resume --at <now, ISO 8601 UTC> --reason "ow
 launchctl bootout gui/$(id -u)/local.pitch-edge.paper-loop
 ```
 
-Without launchd (e.g. for a one-off session): `nohup caffeinate -i scripts/paper_loop.sh >/dev/null 2>&1 &`,
-stopped with `kill $(cat data/paper/paper_loop.pid)`. The interval can be overridden with
+Without launchd (e.g. for a one-off session): `PITCH_EDGE_DATA_DIR=$PWD/data PITCH_EDGE_ENV_FILE=$PWD/.env nohup
+caffeinate -i .worktrees/scheduled/scripts/paper_loop.sh >/dev/null 2>&1 &`, stopped with
+`kill $(cat data/paper/paper_loop.pid)`. The interval can be overridden with
 `PAPER_LOOP_INTERVAL_S` (default 3600).
 
 ## Football-data mirror and spine (twice daily)
 
-`scripts/lake_sync_fd.sh` runs `pitch-edge lake-sync --only fd_matches --skip-if-busy`: it mirrors the lake's
+`scripts/lake_sync_fd.sh` runs, after the guard above, `pitch-edge control gate` (while the lake is frozen it logs
+`skipped: lake frozen` and exits 0; if the gate itself fails it exits 1 without syncing) and then
+`pitch-edge lake-sync --only fd_matches --skip-if-busy`: it mirrors the lake's
 `fd_matches` into `lake_fd_matches` (pulled in yearly windows, each committed with its checkpoint) and then rebuilds
 the warehouse spine's football-data `matches` and `odds` rows from the mirror. The spine rebuild is incremental: a
 calendar-year window is redone only when its mirror rows changed (fingerprint kept in `lake_sync_state`).
@@ -85,7 +132,7 @@ last sync.
   of the mirror, when the mirror was last synced more than 48 h ago, or when the spine is behind the mirror.
 
 ```bash
-# install / start (the owner does this; nothing here loads it)
+# install / start (the owner does this; nothing here loads it). Pin first: scripts/scheduled_pin.sh <sha>
 sed -e "s|__REPO_DIR__|$PWD|g" -e "s|__HOME__|$HOME|g" \
   scripts/launchd/local.pitch-edge.lake-sync-fd.plist.example > ~/Library/LaunchAgents/local.pitch-edge.lake-sync-fd.plist
 launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/local.pitch-edge.lake-sync-fd.plist
@@ -102,7 +149,8 @@ launchctl kickstart gui/$(id -u)/local.pitch-edge.lake-sync-fd
 launchctl bootout gui/$(id -u)/local.pitch-edge.lake-sync-fd
 ```
 
-Without launchd: `scripts/lake_sync_fd.sh`. The first run on a warehouse with no mirror pulls the whole table
+Without launchd: `.worktrees/scheduled/scripts/lake_sync_fd.sh` with `PITCH_EDGE_DATA_DIR=$PWD/data` and
+`PITCH_EDGE_ENV_FILE=$PWD/.env` (run from a checkout that is not the pinned sha, it refuses). The first run on a warehouse with no mirror pulls the whole table
 (about 230k rows, 23 yearly windows) and builds every spine window.
 
 ## Warehouse summary

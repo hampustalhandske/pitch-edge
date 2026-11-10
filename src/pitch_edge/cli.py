@@ -396,9 +396,17 @@ def lake_sync(
 ) -> None:
     """Mirror lakehouse tables into the warehouse as lake_* tables (idempotent; needs LAKEHOUSE_API_* in .env).
 
-    Syncing `fd_matches` also rebuilds the warehouse spine's football-data rows from the mirror."""
+    Syncing `fd_matches` also rebuilds the warehouse spine's football-data rows from the mirror. While a lake
+    freeze is recorded (`pitch-edge control freeze`) it prints "skipped: lake freeze since ..." and exits 0 without
+    contacting the lake."""
     import os
 
+    from pitch_edge.control_cli import freeze_notice
+
+    notice = freeze_notice()
+    if notice is not None:
+        typer.echo(f"{datetime.now(UTC):%Y-%m-%dT%H:%M:%SZ} skipped: {notice}")  # one unwrapped log line
+        raise typer.Exit(0)
     if not os.environ.get("LAKEHOUSE_API_TOKEN"):
         rprint("[red]LAKEHOUSE_API_TOKEN is not set (put LAKEHOUSE_API_URL / LAKEHOUSE_API_TOKEN in .env)[/red]")
         raise typer.Exit(2)
@@ -498,6 +506,11 @@ app.add_typer(research_app, name="research")
 from pitch_edge.paper.cli import paper_app  # noqa: E402
 
 app.add_typer(paper_app, name="paper")
+
+# `pitch-edge control {freeze,thaw,status,gate}` — see control_cli.py.
+from pitch_edge.control_cli import control_app  # noqa: E402
+
+app.add_typer(control_app, name="control")
 
 
 if __name__ == "__main__":  # pragma: no cover

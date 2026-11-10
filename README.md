@@ -55,6 +55,7 @@ uv run pitch-edge lake-sync [--only fd_matches] [--full-refresh]   # mirror lake
 uv run pitch-edge research status                                  # every hypothesis, its trials and rung
 uv run pitch-edge research grade <hypothesis-id>                   # the ladder, gate by gate
 uv run pitch-edge paper status | report                            # forward paper ledger
+uv run pitch-edge control status | freeze | thaw | gate            # lake freeze: while active nothing reads the lake
 uv run pitch-edge backtest | ablation | rag-eval | health | export
 uv run pitch-edge ingest-pmxt <start> <end> && uv run pitch-edge map-pmxt   # Polymarket order-book archive
 uv run pitch-edge backtest-timing                                  # entry-timing backtest on Polymarket ticks

@@ -88,6 +88,7 @@ uv run pitch-edge {ingest-pmxt|map-pmxt|backtest-timing}   # Polymarket order-bo
 uv run pitch-edge lake-sync [--only …] [--full-refresh]   # mirror lakehouse tables into lake_* tables
 uv run pitch-edge research {register|status|grade|ledger|import-trials|review}   # ledger + ladder
 uv run pitch-edge paper {collect|decide|settle|report|status|pause|resume|gate}   # forward paper-trading ledger
+uv run pitch-edge control {freeze|thaw|status|gate}  # lake freeze: while active nothing in pitch-edge reads the lake
 ```
 
 Every fetch, backfill and long job must be **resumable** (checkpoint per window/chunk; re-running the same

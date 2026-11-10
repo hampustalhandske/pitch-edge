@@ -15,9 +15,12 @@ from pathlib import Path
 USER_AGENT = "pitch-edge-research/0.2 (+https://github.com/hampustalhandske/pitch-edge; research, non-commercial)"
 
 
-def load_dotenv(path: str | Path = ".env") -> int:
-    """Minimal .env loader (KEY=VALUE lines, # comments); never overrides variables already set."""
-    p = Path(path)
+def load_dotenv(path: str | Path | None = None) -> int:
+    """Minimal .env loader (KEY=VALUE lines, # comments); never overrides variables already set.
+
+    `path` defaults to `$PITCH_EDGE_ENV_FILE`, else `.env` in the working directory (scheduled jobs run from a
+    pinned worktree and point this at the main checkout's `.env`). Returns the number of variables set."""
+    p = Path(path if path is not None else os.environ.get("PITCH_EDGE_ENV_FILE", ".env"))
     if not p.exists():
         return 0
     loaded = 0

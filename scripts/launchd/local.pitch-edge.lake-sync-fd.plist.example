@@ -6,11 +6,17 @@
   <key>ProgramArguments</key>
   <array>
     <string>/usr/bin/caffeinate</string><string>-i</string>
-    <string>/bin/bash</string><string>__REPO_DIR__/scripts/lake_sync_fd.sh</string>
+    <string>/bin/bash</string><string>__REPO_DIR__/.worktrees/scheduled/scripts/lake_sync_fd.sh</string>
   </array>
-  <key>WorkingDirectory</key><string>__REPO_DIR__</string>
+  <!-- Runs the committed code pinned in .worktrees/scheduled (scripts/scheduled_pin.sh <sha>); data and .env stay in
+       the main checkout. -->
+  <key>WorkingDirectory</key><string>__REPO_DIR__/.worktrees/scheduled</string>
   <key>EnvironmentVariables</key>
-  <dict><key>PATH</key><string>__HOME__/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string></dict>
+  <dict>
+    <key>PATH</key><string>__HOME__/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <key>PITCH_EDGE_DATA_DIR</key><string>__REPO_DIR__/data</string>
+    <key>PITCH_EDGE_ENV_FILE</key><string>__REPO_DIR__/.env</string>
+  </dict>
   <!-- The lake fetches football-data daily at about 11:00 UTC. StartCalendarInterval is LOCAL time: 14:00 is 12:00 UTC
        in Europe/Stockholm summer time (13:00 UTC in winter). The second start retries a run that found the warehouse busy.
        Move both hours if the Mac is in another zone; keep the first at or after 12:00 UTC. A start missed while the Mac
