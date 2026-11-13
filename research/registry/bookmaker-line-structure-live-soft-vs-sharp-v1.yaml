@@ -1,0 +1,36 @@
+id: bookmaker-line-structure-live-soft-vs-sharp-v1
+family: bookmaker-line-structure
+registered_at: 2026-10-20T21:30:00Z
+author: orchestrator
+question: >
+  When a named soft bookmaker's live 1X2 price exceeds the fair odds implied by the power-de-vigged sharp
+  quote captured in the same API response by more than 2%, does backing it beat the de-vigged Betfair
+  Exchange close? Forward-only: the historical version (R2-Q3) cannot show whether quoted prices were
+  actually available, and the audit explored single books inside the historical evaluation window.
+hypothesis:
+  h1: mean CLV (log taken odds over power-de-vigged Betfair Exchange closing fair odds) > 0
+  h0: mean CLV <= 0
+  direction: positive
+  disconfirming: 95% match-day block-bootstrap CI of mean CLV includes 0 after >= 150 settled decisions, or the
+    opportunity frequency falls below one qualifying fixture per week across the collected leagues
+decision_time: the-odds-api snapshot capture time (decided_at), strictly before kickoff
+universe: >
+  Fixtures in the P1 collector's league list (default EPL, La Liga, Serie A, Bundesliga, Ligue 1, UCL,
+  Eredivisie); soft books = every non-exchange, non-Pinnacle bookmaker in the uk and eu regions of the same
+  response.
+window:
+  exploratory: [2026-10-20, 2026-10-20]
+  evaluation: [2026-10-21, 2027-06-30]
+benchmark: power-de-vigged Betfair Exchange close from lake fd_matches; fallback the last pre-kickoff sharp
+  snapshot we collected, labelled as such
+primary_metric: clv_log
+secondary_metrics: [roi, opportunity_frequency, clv_by_book]
+costs: none beyond the quoted decimal odds (bookmaker margin is in the price); stake limits are not modelled and
+  are the main reason a positive result may still be unattainable
+grid:
+  edge_threshold: [0.02]
+min_n: 150
+literature_ceiling: >
+  Historical upper bound with max odds was +2.1% CLV (R2-Q3, signed as a quoted-price fact only); single named
+  books ran +0.5% to +2.6% with data-quality problems. A forward CLV above +3% is a data-error suspect (price
+  sanity rules: <= the max quote in the same response and <= 1.10 x the sharp price).

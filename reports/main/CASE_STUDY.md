@@ -1,5 +1,7 @@
 # Walk-forward backtest — main
 
+> **Stale.** This run used an older model roster (gru_sequence, transformer_sequence, gbdt_mkt, dixon_coles, gbdt) than today's `models.available_models()`, so it is not a result for the current models. It is kept as a record. Its conclusion, that every model in it loses to the market, still stands for those models.
+
 Walk-forward, no shuffling. Bets priced at early Pinnacle odds (`PS`), CLV measured vs Pinnacle closing (`PSC`), edge threshold 3%, retrain every 90 days.
 
 ## Model vs market (all divisions combined)

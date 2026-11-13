@@ -47,6 +47,12 @@ class DixonColesModel:
     home_advantage_: float = 0.0
     rho_: float = 0.0
     fitted_: bool = False
+    # Score matrices this instance returned from a fallback instead of the Dixon-Coles matrix (see
+    # `predict_score_matrix`), and fits whose optimiser returned non-finite parameters so the starting parameters
+    # were kept (see `fit`); counted over the instance's lifetime and reported by `fallback_counts()`.
+    independent_poisson_fallbacks_: int = 0
+    uniform_fallbacks_: int = 0
+    start_parameter_fallbacks_: int = 0
 
     def fit(self, matches: pd.DataFrame) -> DixonColesModel:
         """matches needs columns: home_team, away_team, home_goals, away_goals, date."""
@@ -107,7 +113,11 @@ class DixonColesModel:
 
         bounds = [(-3.0, 3.0)] * (2 * n) + [(-1.0, 1.0), (-0.3, 0.3)]
         result = minimize(neg_log_likelihood, x0, method="L-BFGS-B", bounds=bounds)
-        params = result.x if np.all(np.isfinite(result.x)) else x0
+        if np.all(np.isfinite(result.x)):
+            params = result.x
+        else:
+            params = x0
+            self.start_parameter_fallbacks_ += 1
         attack = params[:n]
         defence = params[n : 2 * n]
         attack -= attack.mean()  # identifiability normalization
@@ -131,7 +141,12 @@ class DixonColesModel:
         return float(lam_h), float(lam_a)
 
     def predict_score_matrix(self, home_team: str, away_team: str) -> np.ndarray:
-        """Return a (max_goals+1) x (max_goals+1) probability matrix P[i,j] = P(home=i, away=j)."""
+        """Return a (max_goals+1) x (max_goals+1) probability matrix P[i,j] = P(home=i, away=j).
+
+        When the tau-corrected matrix does not have a finite positive total (diverged fit, extreme lambdas) it
+        returns the independent-Poisson matrix instead, and when that is degenerate too a uniform matrix; each
+        fallback adds one to `independent_poisson_fallbacks_` or `uniform_fallbacks_`.
+        """
         lam_h, lam_a = self._expected_goals(home_team, away_team)
         goals = np.arange(self.max_goals + 1)
         ph = poisson.pmf(goals, lam_h)
@@ -149,7 +164,19 @@ class DixonColesModel:
             if not np.isfinite(total) or total <= 0:
                 matrix = np.full_like(matrix, 1.0 / matrix.size)
                 total = 1.0
+                self.uniform_fallbacks_ += 1
+            else:
+                self.independent_poisson_fallbacks_ += 1
         return matrix / total
+
+    def fallback_counts(self) -> dict[str, int]:
+        """How many times this instance fell back: score matrices from `independent_poisson` or `uniform`, and
+        fits that kept the `start_parameters` because the optimiser returned non-finite values."""
+        return {
+            "independent_poisson": self.independent_poisson_fallbacks_,
+            "uniform": self.uniform_fallbacks_,
+            "start_parameters": self.start_parameter_fallbacks_,
+        }
 
     def predict_outcome_probabilities(self, home_team: str, away_team: str) -> dict[str, float]:
         matrix = self.predict_score_matrix(home_team, away_team)

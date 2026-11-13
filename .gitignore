@@ -15,4 +15,30 @@ logs/
 PROMPT_ELITE.md
 temp/
 .claude/settings.local.json
+.claude/settings.json
 
+
+# Machine-specific config: commit the .example templates, keep the real files local
+.mcp.json
+scripts/launchd/*.plist
+
+# Internal working notes and prompts
+PROMPT*.md
+prompt*.md
+research/HANDOFF.md
+research/PLAN.md
+research/LOG.md
+research/scouting/
+research/**/DRAFT-*
+
+# Data and derived outputs (studies and audits regenerate them)
+*.parquet
+*.csv
+!src/pitch_edge/vendor/**/*.csv
+research/**/out/
+
+# Agent tooling that documents the owner's private lakehouse and edgelab repos
+.claude/skills/lakehouse/
+.claude/skills/edgelab-review/
+.claude/agents/lakehouse-engineer.md
+.claude/agents/edgelab-liaison.md

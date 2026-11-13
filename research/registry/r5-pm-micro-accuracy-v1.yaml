@@ -1,0 +1,34 @@
+id: r5-pm-micro-accuracy-v1
+family: polymarket-efficiency
+registered_at: 2026-10-20T21:40:00Z
+author: quant-researcher
+question: >
+  Priced at the order-book MID, is Polymarket's 1X2 forecast less accurate than the de-vigged Betfair
+  Exchange close (log-loss in bits on the result), at kickoff-1h and kickoff-24h? R1 (last trades) found
+  a null at T-1h (+0.0029 bits) and +0.0108 bits at T-24h that vanished for fresh trades.
+hypothesis:
+  h1: mean per-match LL(PM mid) - LL(Betfair close) in bits > 0 (PM worse)
+  h0: no difference
+  direction: positive
+  disconfirming: 95% match-day block-bootstrap CI includes 0 or is negative
+decision_time: kickoff - h, h in grid; book state as r5-pm-micro-flb-v1
+universe: >
+  As r5-pm-micro-flb-v1 (R1 universe, kickoff 2026-04-09 -> 2026-09-29, three usable books: two-sided,
+  spread <= 0.05, age <= 24h, raw mid sum in [0.9, 1.1]; valid Betfair close; football-data result present).
+window:
+  exploratory: [2023-09-01, 2026-04-08]
+  evaluation:  [2026-04-09, 2026-09-29]
+benchmark: Betfair Exchange close, power de-vigged, booksum <= 1.05
+primary_metric: delta_logloss_bits_mid_minus_bf_close
+secondary_metrics:
+  - delta_logloss_bits_lasttrade_minus_bf_close_same_matches
+  - paired_mid_minus_lasttrade_logloss_bits
+costs: none (forecast accuracy)
+grid:
+  hours_before_kickoff: [1, 24]
+min_n: 300
+literature_ceiling: PM vs sharp close differences above 0.10 bits would be a data-error suspect
+notes: >
+  Results are football-data FTR (hindsight, used only as the target). PM mids power-normalised as R1. The
+  last-trade secondary uses R1's rule (last trade <= 24h old, raw sum in [0.9, 1.1]) restricted to the same
+  matches. Expected n ~ 200-300 matches (below the 300 floor). 5,000 match-day draws, seed 20261020.

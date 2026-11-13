@@ -42,7 +42,8 @@ CONTEXT_COLUMNS = [*ROTATION_FEATURES, "tm_referee", "tm_game_id"]
 
 
 def club_id_map(wh: Warehouse, teams: list[str]) -> dict[str, int]:
-    """Spine team name -> Transfermarkt club_id (resolver over club names; latest-season club wins ties)."""
+    """Spine team name -> Transfermarkt club_id (resolver over club names). When several clubs resolve to one
+    team, the one with the latest `last_season` wins, then the smallest club_id."""
     if not wh.table_exists("tm_clubs"):
         return {}
     clubs = wh.query("SELECT club_id, name, last_season FROM tm_clubs")
@@ -52,12 +53,18 @@ def club_id_map(wh: Warehouse, teams: list[str]) -> dict[str, int]:
     clubs["canonical"] = clubs["name"].map(lambda n: resolver.resolve(str(n)))
     clubs = clubs.dropna(subset=["canonical"])
     clubs["last_season"] = pd.to_numeric(clubs["last_season"], errors="coerce").fillna(0)
-    clubs = clubs.sort_values("last_season", ascending=False).drop_duplicates("canonical")
+    clubs["club_num"] = pd.to_numeric(clubs["club_id"], errors="coerce")
+    clubs = clubs.sort_values(
+        ["last_season", "club_num", "name"], ascending=[False, True, True], kind="stable"
+    ).drop_duplicates("canonical")
     return {str(c): int(i) for c, i in zip(clubs["canonical"], clubs["club_id"], strict=True)}
 
 
 def transfermarkt_context(wh: Warehouse, matches: pd.DataFrame) -> pd.DataFrame:
-    """One row per match_id with ROTATION_FEATURES + tm_referee; empty frame if the tables are absent."""
+    """One row per match_id with ROTATION_FEATURES + tm_referee; empty frame if the tables are absent.
+
+    When several Transfermarkt games share the match's date and clubs, `tm_referee` and `tm_game_id` come from
+    the one with the smallest game id."""
     if matches.empty or not (wh.table_exists("tm_games") and wh.table_exists("tm_appearances")):
         return pd.DataFrame(columns=["match_id", *CONTEXT_COLUMNS])
     teams = sorted(set(matches["home_team"]) | set(matches["away_team"]))
@@ -131,10 +138,10 @@ def transfermarkt_context(wh: Warehouse, matches: pd.DataFrame) -> pd.DataFrame:
             f"""
             WITH {", ".join(side_sql)},
             ref AS (
-                SELECT m.match_id, any_value(g.referee) AS tm_referee, any_value(g.game_id) AS tm_game_id
+                SELECT m.match_id, g.referee AS tm_referee, g.game_id AS tm_game_id
                 FROM ctx_matches m JOIN ctx_games g
                   ON g.home_club_id = m.home_club_id AND g.away_club_id = m.away_club_id AND g.d = m.d
-                GROUP BY 1
+                QUALIFY row_number() OVER (PARTITION BY m.match_id ORDER BY g.game_id, g.referee NULLS LAST) = 1
             )
             SELECT m.match_id,
                    hm.rot_home_minutes_7d, am.rot_away_minutes_7d,
@@ -164,7 +171,13 @@ def transfermarkt_context(wh: Warehouse, matches: pd.DataFrame) -> pd.DataFrame:
     return out[["match_id", *CONTEXT_COLUMNS]]
 
 
-NEWS_FEATURES = ["news_sent_home", "news_sent_away", "news_sent_diff", "news_injury_items_home", "news_injury_items_away"]
+NEWS_FEATURES = [
+    "news_sent_home",
+    "news_sent_away",
+    "news_sent_diff",
+    "news_injury_items_home",
+    "news_injury_items_away",
+]
 
 
 def news_context(wh: Warehouse, matches: pd.DataFrame, window_days: int = 7) -> pd.DataFrame:

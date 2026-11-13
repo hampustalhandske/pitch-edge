@@ -1,0 +1,57 @@
+id: bookmaker-line-structure-close-calibration-v1
+family: bookmaker-line-structure
+registered_at: 2026-10-20T18:00:00Z
+author: quant-researcher
+study_dir: research/studies/r2-q1-close-calibration
+kind: calibration (descriptive market-structure study, not a betting strategy)
+question: >
+  Is the de-vigged Pinnacle closing 1X2 price calibrated, or does it carry a favourite-longshot bias and/or a
+  draw bias, per division (BH across divisions)? Same for the de-vigged Betfair Exchange close (2024-08+).
+  Which de-vig method (multiplicative, power, Shin) gives the best-calibrated probabilities out of sample?
+hypothesis:
+  h1_flb: >
+    Calibration slope b of the OLS fit y = a + b*p over home and away outcome rows (p = de-vigged close
+    probability, y = outcome indicator) differs from 1; b > 1 means favourites are under-priced and longshots
+    over-priced (favourite-longshot bias).
+  h1_draw: mean(y_draw - p_draw) differs from 0 (draw bias).
+  h1_devig: the de-vig method with the lowest exploratory-window mean log loss also has lower log loss than
+    each of the other two methods in the evaluation window (paired difference CI excludes 0).
+  h0: b = 1, draw bias = 0, no difference in log loss between de-vig methods.
+  direction: two-sided   # FLB is expected positive (b > 1) but reverse FLB is documented in some leagues
+  disconfirming: >
+    95% CI of (b - 1) and of the draw bias include 0 after BH across divisions; for de-vig, the paired
+    log-loss CIs include 0, or the exploratory winner loses in the evaluation window.
+decision_time: >
+  not a decision rule. Closing odds are hindsight relative to any earlier decision; here they are the object
+  being measured and outcomes are the target.
+point_in_time:
+  inputs: pinnacle_*_close, betfair_ex_*_close (the object under test), ft_result (target)
+  note: no feature is used; there is nothing to leak. Results are hindsight and used only as targets.
+universe: >
+  fd_matches, all divisions (main and extra leagues), rows with all three Pinnacle closing 1X2 odds and a
+  full-time result; separately rows with all three Betfair Exchange closing 1X2 odds and a result.
+data_snapshot: data/research/r2/fd.parquet (lake fd_matches pulled 2026-10-20T17:56:52Z, 2012-01-01..2026-10-19)
+window:
+  exploratory: [2012-07-01, 2019-06-30]   # seasons 2012/13-2018/19; Pinnacle closing odds start 2012/13
+  evaluation:  [2019-07-01, 2025-06-30]   # seasons 2019/20-2024/25; 72.5k matches, 2,034 match-days
+  post_segment_betfair: [2024-08-01, 2026-10-19]  # Betfair Exchange close, evaluation only (no pre-period exists)
+  window_justification: >
+    Split at the 2019/20 season, where football-data.co.uk's column regime changes (Betbrain max/avg replaced by
+    market Max/Avg; closing odds for all books begin). Counts: 82.7k exploratory, 72.5k evaluation matches.
+benchmark: realised outcomes (this study grades the benchmark itself)
+de_vig_methods: [multiplicative, power, shin]
+primary_metric: calibration_slope_minus_1 (OLS, home+away rows), draw_bias, paired mean log-loss difference
+secondary_metrics: [logistic recalibration slope (point estimate only), ECE over 10 equal-width bins, per-bin reliability table]
+uncertainty: block bootstrap by match-day, 2,000 resamples, percentile 95% CI; p-values from the normal approximation with bootstrap SE
+costs: none (no bet is placed)
+grid:   # every combination is one trial
+  benchmark: [pinnacle_close, betfair_ex_close]
+  devig: [multiplicative, power, shin]          # pooled over all divisions
+  per_division_tests: [flb_slope, draw_bias]    # power de-vig only; divisions with n < 300 pooled into OTHER
+  devig_pairwise: [power-vs-multiplicative, shin-vs-multiplicative, shin-vs-power]
+multiple_testing: BH q=0.10 across divisions within each test, and across every trial in the family ledger
+stability: per chronological third of the evaluation window (two seasons each) and per division
+min_n: 300 matches per division-level test
+literature_ceiling: >
+  FLB in sharp closing lines is small, about 1-3% of implied probability at the extremes; larger in soft books
+  and lower divisions. A slope far from 1 in a top division is a data-error suspect.

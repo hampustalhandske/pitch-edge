@@ -153,10 +153,11 @@ def build_rag_index(wh: Warehouse, index: VectorIndex | None = None, max_matches
         preds = preds[preds["run_id"] == latest]
         feats = wh.read("features")
         for model_name, grp in preds.groupby("model_name"):
-            index.add(prediction_documents(grp.sort_values("date").tail(1500), str(model_name), feats))
+            newest = grp.sort_values(["date", "match_id"], kind="stable").tail(1500)
+            index.add(prediction_documents(newest, str(model_name), feats))
     news = wh.read("news_items")
     if not news.empty:
-        index.add(news_documents(news.sort_values("published_at").tail(2000)))
+        index.add(news_documents(news.sort_values(["published_at", "item_id"], kind="stable").tail(2000)))
     if wh.table_exists("statsbomb_events") and wh.table_exists("statsbomb_matches"):
         ev = wh.read("statsbomb_events")
         sbm = wh.read("statsbomb_matches")
@@ -169,7 +170,7 @@ def build_rag_index(wh: Warehouse, index: VectorIndex | None = None, max_matches
                    homeTeamScore, awayTeamScore, homeTeamId, awayTeamId
             FROM espn_fixtures_mapped
             WHERE matched_match_id IS NOT NULL AND statusId = 28
-            ORDER BY date DESC LIMIT ?
+            ORDER BY date DESC, eventId LIMIT ?
             """,
             [max_matches],
         )
@@ -225,7 +226,8 @@ def upcoming_fixture_frame(wh: Warehouse, features: pd.DataFrame, leagues: list[
     fx["home_team"] = fx["home_team"].map(lambda n: resolver.resolve(str(n)) or n)
     fx["away_team"] = fx["away_team"].map(lambda n: resolver.resolve(str(n)) or n)
     fx = fx[fx["home_team"].isin(teams) & fx["away_team"].isin(teams)]
-    fx = fx[pd.to_datetime(fx["date"]) >= pd.Timestamp.now().normalize()].sort_values("date").head(60)
+    fx = fx[pd.to_datetime(fx["date"]) >= pd.Timestamp.now().normalize()]
+    fx = fx.sort_values(["date", "home_team", "away_team"], kind="stable").head(60)
     if fx.empty:
         return fx
     # latest pre-match snapshot per team = features of their most recent match, carried forward
@@ -307,8 +309,6 @@ def synthetic_quotes_from_elo(fixtures: pd.DataFrame, margin: float = 1.05) -> l
 # --------------------------------------------------------------------- full run
 def full_refresh(
     settings: Settings | None = None,
-    leagues: list[str] | None = None,
-    seasons: list[int] | None = None,
     include_statsbomb: bool = True,
     statsbomb_max_matches: int | None = 40,
     backtest_min_date: str = "2015-07-01",
@@ -316,6 +316,7 @@ def full_refresh(
 ) -> dict:
     """Ingest everything, build features, run all backtests, rebuild the RAG index. Returns a summary dict."""
     from pitch_edge.data.ingest import ingest_everything
+    from pitch_edge.data.quality import find_duplicate_fixtures
 
     settings = settings or get_settings()
     settings.ensure_dirs()
@@ -323,24 +324,17 @@ def full_refresh(
     with Warehouse(settings.db_path) as wh:
         summary["ingest"] = ingest_everything(
             wh,
-            leagues=leagues,
-            seasons=seasons,
             include_statsbomb=include_statsbomb,
             include_weather=not fast,
             statsbomb_max_matches=statsbomb_max_matches,
         )
+        summary["duplicate_fixtures"] = len(find_duplicate_fixtures(wh))
         features = load_feature_frame(wh, min_date=backtest_min_date)
         summary["feature_rows"] = int(len(features))
         if not features.empty:
             persist_features(wh, features)
-            models = default_models()
-            if fast:
-                models = [m for m in models if m.name != "gru_sequence"]
-            results = run_backtests(features, models, WalkForwardConfig(), wh=wh, label="main")
+            results = run_backtests(features, default_models(), WalkForwardConfig(), wh=wh, label="main")
             summary["backtest"] = results_table(results).to_dict(orient="records")
             summary["calibration"] = calibration_table(results).to_dict(orient="records")
         summary["rag_docs"] = build_rag_index(wh).count()
-        from pitch_edge.artifacts import build_all_artifacts
-
-        summary["artifacts"] = build_all_artifacts(wh, features if not features.empty else None)
     return summary

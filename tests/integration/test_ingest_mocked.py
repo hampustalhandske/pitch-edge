@@ -1,18 +1,20 @@
-"""Ingestion orchestrator against mocked endpoints: health logging, isolation of failures, Elo attach."""
+"""Ingestion orchestrator against mocked endpoints: health logging, isolation of failures."""
 
 from __future__ import annotations
+
+from datetime import date
 
 import pytest
 import responses
 
 from pitch_edge.data.ingest import (
+    build_football_data_spine,
     ingest_club_elo,
-    ingest_club_football_match_data,
-    ingest_football_data,
     ingest_news,
     ingest_openfootball,
     ingest_statsbomb,
 )
+from pitch_edge.lake.mirror import MIRRORS, sync_mirror
 
 pytestmark = pytest.mark.integration
 
@@ -20,47 +22,9 @@ FD = "https://www.football-data.co.uk"
 
 
 @responses.activate
-def test_football_data_ingest_logs_health_and_isolates_failures(
-    warehouse, football_data_csv_bytes, extra_league_csv_bytes
-):
-    responses.add(responses.GET, f"{FD}/mmz4281/2324/E0.csv", body=football_data_csv_bytes)
-    responses.add(responses.GET, f"{FD}/mmz4281/2324/D1.csv", status=404)
-    responses.add(responses.GET, f"{FD}/new/SWE.csv", body=extra_league_csv_bytes)
-    responses.add(responses.GET, f"{FD}/new/ARG.csv", status=500)  # counts toward the host circuit breaker
-    for stem in ("AUT", "BRA", "CHN", "DNK", "FIN", "IRL", "JPN", "MEX", "NOR", "POL", "ROU", "RUS", "SWZ", "USA"):
-        responses.add(responses.GET, f"{FD}/new/{stem}.csv", status=404)  # 404s do not trip the breaker
-    counts = ingest_football_data(warehouse, leagues=["E0", "D1"], seasons=[2023])
-    assert counts["E0"] == 4 and counts["D1"] == 0 and counts["SWE"] == 2
-    h = warehouse.health().set_index("source")
-    assert h.loc["football_data_co_uk:E0", "last_status"] == "ok"
-    assert h.loc["football_data_co_uk:new/ARG", "last_status"] == "error"
-    assert warehouse.count("matches") == 6
-
-
-@responses.activate
-def test_cfmd_attaches_elo_to_existing_spine_rows(warehouse, football_data_csv_bytes):
-    responses.add(responses.GET, f"{FD}/mmz4281/2324/E0.csv", body=football_data_csv_bytes)
-    ingest_football_data(warehouse, leagues=["E0"], seasons=[2023], extra_leagues=False)
-    cfmd = (
-        "Division,MatchDate,MatchTime,HomeTeam,AwayTeam,HomeElo,AwayElo,Form3Home,Form5Home,Form3Away,Form5Away,FTHome,FTAway,FTResult\n"
-        "E0,2023-08-12,,Arsenal,Man United,1900.5,1850.2,0,2.0,0,1.5,2,1,H\n"
-        "SP1,2023-08-12,,Barcelona,Getafe,1950.0,1650.0,0,0,0,0,0,0,D\n"
-    )
-    responses.add(
-        responses.GET,
-        "https://raw.githubusercontent.com/xgabora/Club-Football-Match-Data-2000-2025/main/data/Matches.csv",
-        body=cfmd,
-    )
-    inserted = ingest_club_football_match_data(warehouse)
-    assert inserted == 1  # Barcelona row is new; Arsenal row already in spine
-    row = warehouse.read("matches", "home_team = 'Arsenal'").iloc[0]
-    assert row["home_elo"] == 1900.5 and row["away_form5"] == 1.5
-
-
-@responses.activate
-def test_club_elo_ratings_resolved_to_canonical_names(warehouse, football_data_csv_bytes):
-    responses.add(responses.GET, f"{FD}/mmz4281/2324/E0.csv", body=football_data_csv_bytes)
-    ingest_football_data(warehouse, leagues=["E0"], seasons=[2023], extra_leagues=False)
+def test_club_elo_ratings_resolved_to_canonical_names(warehouse, fd_lake):
+    sync_mirror(warehouse, fd_lake, MIRRORS["fd_matches"], since="2023-01-01", until=date(2023, 12, 31))
+    build_football_data_spine(warehouse)
     responses.add(
         responses.GET,
         "http://api.clubelo.com/2024-01-01",

@@ -38,7 +38,6 @@ class TheSportsDBSource:
             logger.info("TheSportsDB %s unavailable: %s", url.rsplit("/", 1)[-1], exc)
             return {}
 
-
     def season_events(self, league_id: int, season: str) -> pd.DataFrame:
         payload = self._json(f"{BASE_URL}/eventsseason.php", params={"id": league_id, "s": season})
         rows = []

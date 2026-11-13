@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+from datetime import UTC, datetime
 
 import pandas as pd
 import typer
@@ -31,22 +32,17 @@ def _setup(verbose: bool = typer.Option(False, "--verbose", "-v")) -> None:
 
 @app.command()
 def ingest(
-    leagues: str = typer.Option("", help="Comma-separated football-data.co.uk codes (default: all)"),
-    seasons: str = typer.Option("", help="Comma-separated season start years (default: 2005-2025)"),
     no_statsbomb: bool = typer.Option(False, help="Skip StatsBomb event data"),
     no_weather: bool = typer.Option(False, help="Skip Wikidata venues + Open-Meteo weather"),
     statsbomb_max: int = typer.Option(40, help="Max matches with events per StatsBomb competition"),
 ) -> None:
-    """Pull every free source into the local warehouse (idempotent, cached)."""
+    """Pull every free source into the local warehouse (idempotent, cached); football-data comes from the
+    `lake_fd_matches` mirror, kept current by `pitch-edge lake-sync --only fd_matches`."""
     from pitch_edge.data.ingest import ingest_everything
 
-    lg = [s.strip() for s in leagues.split(",") if s.strip()] or None
-    yrs = [int(s) for s in seasons.split(",") if s.strip()] or None
     with _wh() as wh:
         report = ingest_everything(
             wh,
-            lg,
-            yrs,
             include_statsbomb=not no_statsbomb,
             include_weather=not no_weather,
             statsbomb_max_matches=statsbomb_max,
@@ -78,7 +74,9 @@ def ingest_pmxt(
             return
         report = ingest_pmxt_orderbook_range(wh, pd.Timestamp(start).to_pydatetime(), pd.Timestamp(end).to_pydatetime())
         fetched = {h: n for h, n in report.items() if n}
-        rprint(f"backfilled {len(fetched)}/{len(report)} hours with new rows; pmxt_orderbook total: {wh.count('pmxt_orderbook'):,}")
+        rprint(
+            f"backfilled {len(fetched)}/{len(report)} hours with new rows; pmxt_orderbook total: {wh.count('pmxt_orderbook'):,}"
+        )
 
 
 @app.command("map-pmxt")
@@ -149,7 +147,9 @@ def backtest_timing(
     from pitch_edge.backtest.tick_timing import TickTimingConfig, run_tick_timing_backtest
 
     with _wh() as wh:
-        result = run_tick_timing_backtest(wh, TickTimingConfig(edge_threshold=edge_threshold, retrain_every_days=retrain_days))
+        result = run_tick_timing_backtest(
+            wh, TickTimingConfig(edge_threshold=edge_threshold, retrain_every_days=retrain_days)
+        )
         if result["summary"].empty:
             rprint("[red]no bets placed — check pmxt_match_map/pmxt_orderbook coverage[/red]")
             raise typer.Exit(1)
@@ -199,6 +199,8 @@ def ask(
     rprint(f"[dim]as of {cutoff.date()}[/dim]\n")
     if state.message:
         rprint(state.message)
+        for line in state.data_notes:
+            rprint(f"[yellow]{line}[/yellow]")
         return
     if state.answer is None:
         rprint("[yellow]no answer produced[/yellow]")
@@ -206,6 +208,8 @@ def ask(
     rprint(f"[bold]{state.answer.overview}[/bold] [dim](backend={state.answer.backend})[/dim]\n")
     for note in state.answer.notes:
         rprint(f"  [dim]{note.match_id} {note.home_team} vs {note.away_team}:[/dim] {note.take}")
+    for line in state.data_notes:
+        rprint(f"[yellow]{line}[/yellow]")
     if not state.answer.citations_grounded:
         rprint(f"\n[yellow]ungrounded numbers flagged: {state.answer.ungrounded_numbers}[/yellow]")
 
@@ -305,7 +309,6 @@ def setup(
             if summary["anthropic_active"]
             else " · explainer runs on the offline template"
         )
-        + (" · GCP mirror configured" if summary["gcp_configured"] else "")
     )
     if written:
         rprint(f"wrote {len(written)} value(s) to {env_file} (owner-only permissions; values are never printed)")
@@ -324,15 +327,6 @@ def setup(
 
 
 @app.command()
-def artifacts() -> None:
-    """Build dashboard artifacts: team strengths, feature importance, data universe."""
-    from pitch_edge.artifacts import build_all_artifacts
-
-    with _wh() as wh:
-        rprint(build_all_artifacts(wh))
-
-
-@app.command()
 def export(out_dir: str = "") -> None:
     """Export every warehouse table to Parquet (the GCS/BigQuery hand-off format)."""
     with _wh() as wh:
@@ -342,13 +336,22 @@ def export(out_dir: str = "") -> None:
 
 @app.command()
 def health() -> None:
-    """Data pipeline health per source."""
+    """Data pipeline health per source, football-data lag behind the lake, and fixtures stored twice under
+    different spellings."""
+    from pitch_edge.data.quality import find_duplicate_fixtures
+
     with _wh() as wh:
         _print_df(wh.health(), "Pipeline health")
+        _print_football_data_lag(wh)
+        dupes = find_duplicate_fixtures(wh)
+        if dupes.empty:
+            rprint("[bold]duplicate fixtures:[/bold] none")
+        else:
+            _print_df(dupes.head(50), f"Duplicate fixtures ({len(dupes)} pairs, first 50)")
 
 
 @app.command()
-def refresh(fast: bool = typer.Option(False, help="skip weather + GRU for a quicker run")) -> None:
+def refresh(fast: bool = typer.Option(False, help="skip the weather ingest for a quicker run")) -> None:
     """Ingest -> features -> backtests -> RAG index in one go."""
     from pitch_edge.pipeline import full_refresh
 
@@ -375,6 +378,116 @@ def schedule() -> None:  # pragma: no cover
     run_forever()
 
 
+@app.command("lake-sync")
+def lake_sync(
+    only: list[str] = typer.Option(None, "--only", help="Mirror name(s) to sync (repeatable; default: all)"),  # noqa: B008
+    since: str = typer.Option("", help="Re-pull windows from this date (YYYY-MM-DD); default: each mirror's start"),
+    full_refresh: bool = typer.Option(
+        False, "--full-refresh", help="Empty each selected mirror first, then re-pull it"
+    ),
+    spine: bool = typer.Option(
+        True, "--spine/--no-spine", help="After syncing fd_matches, rebuild the football-data matches/odds rows"
+    ),
+    skip_if_busy: bool = typer.Option(
+        False,
+        "--skip-if-busy",
+        help="Exit 0 with 'skipped: warehouse busy' when another process holds the warehouse (for schedulers)",
+    ),
+) -> None:
+    """Mirror lakehouse tables into the warehouse as lake_* tables (idempotent; needs LAKEHOUSE_API_* in .env).
+
+    Syncing `fd_matches` also rebuilds the warehouse spine's football-data rows from the mirror. While a lake
+    freeze is recorded (`pitch-edge control freeze`) it prints "skipped: lake freeze since ..." and exits 0 without
+    contacting the lake."""
+    import os
+
+    from pitch_edge.control_cli import freeze_notice
+
+    notice = freeze_notice()
+    if notice is not None:
+        typer.echo(f"{datetime.now(UTC):%Y-%m-%dT%H:%M:%SZ} skipped: {notice}")  # one unwrapped log line
+        raise typer.Exit(0)
+    if not os.environ.get("LAKEHOUSE_API_TOKEN"):
+        rprint("[red]LAKEHOUSE_API_TOKEN is not set (put LAKEHOUSE_API_URL / LAKEHOUSE_API_TOKEN in .env)[/red]")
+        raise typer.Exit(2)
+
+    from pitch_edge.data.ingest import build_football_data_spine
+    from pitch_edge.lake.client import Lake
+    from pitch_edge.lake.mirror import MIRRORS, run_lake_sync
+
+    wh = _open_warehouse(skip_if_busy)
+    try:
+        with Lake() as lake:
+            result = run_lake_sync(
+                wh, lake, only=list(only or []) or None, since=since or None, full_refresh=full_refresh
+            )
+        for name, rows in result.items():
+            table = MIRRORS[name].table
+            rprint(f"{table}: {'FAILED' if rows is None else f'{rows:,} rows written'} ({wh.count(table):,} stored)")
+        if spine and result.get("fd_matches") is not None:
+            rprint(f"football-data spine: {build_football_data_spine(wh):,} matches written")
+    finally:
+        wh.close()
+    if any(v is None for v in result.values()):
+        raise typer.Exit(1)
+
+
+def _open_warehouse(skip_if_busy: bool) -> Warehouse:
+    """Open the warehouse; with `skip_if_busy`, a lock held by another process prints a timestamped
+    "skipped: warehouse busy" line and exits 0 (the next schedule retries). Any other error propagates."""
+    import duckdb
+
+    try:
+        return _wh()
+    except duckdb.IOException as exc:
+        if skip_if_busy and "lock" in str(exc).lower():
+            stamp = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+            rprint(f"{stamp} skipped: warehouse busy ({get_settings().db_path} is locked by another process)")
+            raise typer.Exit(0) from exc
+        raise
+
+
+def _print_football_data_lag(wh: Warehouse) -> None:
+    """Print the football-data lag table and warnings (see `pitch_edge.lake.freshness`). The lake column is
+    left empty, with a note, when the lake cannot be queried."""
+    import os
+
+    from pitch_edge.lake.freshness import MAX_LAG_DAYS, MAX_SYNC_AGE_HOURS, football_data_lag, lake_newest_dates
+
+    leagues = _backtest_leagues()
+    lake_newest = None
+    note = ""
+    if os.environ.get("LAKEHOUSE_API_TOKEN"):
+        try:
+            from pitch_edge.lake.client import Lake
+
+            with Lake() as lake:
+                lake_newest = lake_newest_dates(lake, leagues)
+        except Exception as exc:  # noqa: BLE001 - health must still print without the lake
+            note = f" (lake not queried: {type(exc).__name__})"
+    else:
+        note = " (lake not queried: LAKEHOUSE_API_TOKEN is not set)"
+    lag = football_data_lag(wh, lake_newest, leagues)
+    _print_df(lag.table, "Football-data lag (newest completed match per backtest league)")
+    rprint(
+        f"[bold]football-data mirror last sync:[/bold] {lag.last_sync or 'never'}  "
+        f"[bold]spine last build:[/bold] {lag.last_spine_build or 'never'}{note}"
+    )
+    if lag.warnings:
+        for w in lag.warnings:
+            rprint(f"[yellow]WARN football-data lag:[/yellow] {w}")
+    else:
+        rprint(
+            f"[bold]football-data lag:[/bold] ok (limits: lake gap {MAX_LAG_DAYS} d, sync age {MAX_SYNC_AGE_HOURS} h)"
+        )
+
+
+def _backtest_leagues() -> list[str]:
+    from pitch_edge.pipeline import DEFAULT_BACKTEST_LEAGUES
+
+    return list(DEFAULT_BACKTEST_LEAGUES)
+
+
 def _print_df(df: pd.DataFrame, title: str) -> None:
     t = Table(title=title)
     for c in df.columns:
@@ -382,6 +495,22 @@ def _print_df(df: pd.DataFrame, title: str) -> None:
     for row in df.itertuples(index=False):
         t.add_row(*[str(v) for v in row])
     rprint(t)
+
+
+# `pitch-edge research {register,status,grade,ledger}` — see research/cli.py.
+from pitch_edge.research.cli import research_app  # noqa: E402
+
+app.add_typer(research_app, name="research")
+
+# `pitch-edge paper {collect,decide,settle,report,status}` — see paper/cli.py.
+from pitch_edge.paper.cli import paper_app  # noqa: E402
+
+app.add_typer(paper_app, name="paper")
+
+# `pitch-edge control {freeze,thaw,status,gate}` — see control_cli.py.
+from pitch_edge.control_cli import control_app  # noqa: E402
+
+app.add_typer(control_app, name="control")
 
 
 if __name__ == "__main__":  # pragma: no cover

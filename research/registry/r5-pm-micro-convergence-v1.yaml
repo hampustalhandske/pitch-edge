@@ -1,0 +1,43 @@
+id: r5-pm-micro-convergence-v1
+family: polymarket-efficiency
+registered_at: 2026-10-20T21:40:00Z
+author: quant-researcher
+question: >
+  R1 (r1-pm-convergence-v1) found that the Polymarket-minus-sharp-open gap at kickoff-T predicts PM's
+  move to kickoff with slopes -0.41/-0.15/-0.09 (T = 24/6/2h) on last trades, equal to the slope bid-ask
+  bounce alone implies. Measured on order-book MIDS (no bounce), is the slope still negative?
+hypothesis:
+  h1: OLS slope of move = mid(last book before kickoff) - mid(T) on gap = mid(T) - q_open is < 0
+  h0: slope = 0
+  direction: negative
+  disconfirming: >
+    95% CI of the slope includes 0 or is positive (then R1's slope is attributed to bounce, as R1's
+    diagnostic suggested)
+decision_time: >
+  kickoff - T; the football-data open is used only if open_known_at <= kickoff - T (r1-common rule: latest
+  Tue/Fri 18:00 London before kickoff)
+universe: >
+  R1 universe with kickoff 2026-04-09 -> 2026-09-29; per (match, outcome) row: book at T usable (two-sided,
+  spread <= 0.05, age <= 6h); last book before kickoff usable (two-sided, spread <= 0.05, age <= 3h);
+  sharp open = Pinnacle open de-vigged where present else Betfair Exchange open (booksum <= 1.05), as R1.
+  Unnormalised Yes mids per outcome (as R1 used per-outcome last trades).
+window:
+  exploratory: [2023-09-01, 2026-04-08]
+  evaluation:  [2026-04-09, 2026-09-29]
+benchmark: sharp open (Pinnacle open de-vigged where present, else Betfair Exchange open)
+primary_metric: ols_slope_move_on_gap_mid
+secondary_metrics:
+  - ols_slope_move_on_gap_lasttrade_same_rows
+  - sharp_open_to_close_slope_on_gap_mid
+costs: none (price-dynamics measurement)
+grid:
+  hours_before_kickoff: [24, 6, 2]
+min_n: 300
+literature_ceiling: >
+  Full convergence is -1; R1's bounce-implied slopes were -0.41/-0.17/-0.15. At mids the bounce term is
+  absent, so any remaining negative slope is information flow (or book noise), not trade-price bounce.
+notes: >
+  The slope is scored through run_trial as the mean of per-row influence values (mean equals the OLS slope
+  exactly; their block bootstrap is the linearised bootstrap of the slope). The exact block-bootstrap slope
+  CI is reported beside it. Rows = outcomes (three per match), blocks = match-days, 5,000 draws, seed
+  20261020. Last-trade secondary uses R1's rule (trade at T <= 6h old, last trade <= 3h old) on the same rows.

@@ -1,0 +1,70 @@
+id: soft-open-vs-betfair-gbm-close-v1
+family: soft-open-vs-betfair
+registered_at: 2026-10-28T07:56:45Z
+author: quant-researcher
+study_dir: research/studies/soft-open-vs-betfair-gbm-close
+question: >
+  Can a gradient-boosted model of the de-vigged sharp close, built from soft-book opens only (no Pinnacle or Betfair
+  input), find best soft open prices above the predicted fair close by more than theta that have positive CLV against
+  the de-vigged Betfair Exchange close?
+hypothesis:
+  h1: mean clv_log > 0 for the frozen model and the selected theta, scored once on the evaluation window.
+  h0: mean clv_log <= 0.
+  direction: positive
+  disconfirming: >
+    95% match-day block-bootstrap CI of mean clv_log includes 0 or is below it; or the sign is negative in 2 of 3
+    chronological thirds; or, with any one division removed, the CI includes 0.
+decision_time: >
+  The football-data.co.uk pre-closing snapshot (1-3 days before kickoff); every feature is an *_open column of
+  that snapshot.
+point_in_time:
+  features: [avg_*_open, max_*_open, bet365_*_open and their de-vigged logits, spreads (max minus avg, bet365 minus avg), booksum overrounds, era flag (before / from 2019-07-01)]
+  forbidden_as_features: [any pinnacle_* column, any betfair_ex_* column, any *_close column, ft_* results]
+  assertion: code builds the feature matrix from the whitelist above and asserts no forbidden column is present
+universe: fd_matches main-league divisions with the soft opens, a result-free target (Pinnacle close on train) and, on test, the Betfair close
+data_snapshot: lake fd_matches pull taken when the study script runs; the build id is recorded in the ledger row
+window:
+  exploratory: [2012-07-01, 2024-06-30]   # train: walk-forward folds and theta selection here only
+  evaluation:  [2025-07-01, 2026-10-19]   # test: frozen model, selected theta, scored once
+  evaluation_exclusion: [2026-04-17, 2026-05-04]   # football-data has no Betfair close there (PE-26); matches dropped
+  gap_note: 2024-07-01 to 2025-06-30 is in neither window
+model:
+  type: per-outcome HistGradientBoostingRegressor on the logit of the de-vigged (power) Pinnacle close probability
+  hyperparameters: max_iter=150, learning_rate=0.03, max_leaf_nodes=7, min_samples_leaf=1000, l2_regularization=10, no early stopping, random_state=20261028
+  fixed: yes; no hyperparameter is tuned or varied (the cross-book-gbm-v1 "tiny" setting)
+  fit: walk-forward by season for the train folds (expanding window, each season predicted by a model fitted on earlier seasons only); the final model for the test is fitted once on all train-window rows and frozen; it is not refitted during the test window
+  target_benchmark_note: the train target is the Pinnacle close; the test benchmark is the Betfair close (Pinnacle close ends 2025-09)
+strategy:
+  rule: >
+    q_hat = the predicted close logits mapped to probabilities and renormalised to sum 1. edge_o =
+    log(max_o_open * q_hat[o]). Take the outcome with the largest edge; bet 1 unit at max_o_open if edge > theta. At
+    most one bet per match.
+  data_quality_rule: >
+    A quote with max_o_open / avg_o_open > 1.5 is a data error and the outcome is not eligible (no sharp book is
+    available in the feature set, so the soft average is the comparison).
+selection:
+  where: exploratory window only, out-of-fold walk-forward predictions; benchmark the de-vigged Pinnacle close; nothing from the evaluation window is read
+  candidates: {theta: [0.01, 0.02, 0.03]}
+  criterion: highest total (sum over bets) out-of-fold clv_log against the de-vigged Pinnacle close, over all train folds
+  eligibility: at least 1000 out-of-fold bets
+  tie_break: lower theta
+  fallback: if no candidate has 1000 bets, theta = 0.02
+  scoring: the selected theta is scored once on the evaluation window through run_trial with config {}; the others are never scored there
+  record: candidate train results go to research/studies/soft-open-vs-betfair-gbm-close/trials.csv (exploratory, not ledger trials)
+benchmark: de-vigged (power) Betfair Exchange close for the test; Pinnacle close for the train target and selection
+primary_metric: clv_log = log(odds_taken * p_close_devig[o]), mean per bet
+metric_kind: return
+secondary_metrics: [roi (flat stakes, never primary), n_bets, log-loss edge in bits of q_hat against the Betfair close (descriptive)]
+costs: the soft book margin is inside the taken price; no commission
+grid: {}   # one counted test
+min_n: 300
+literature_ceiling: >
+  R6 predicts the close from open prices to within a few 1e-5 bits; per-bet CLV above +2% against a sharp close is a
+  leakage or data-error suspect. The model sees no sharp price, so any CLV is the soft books' own stale quotes.
+uncertainty: block bootstrap by match-day, 2,000 resamples, percentile 95% CI
+stability: chronological thirds, per division, leave-one-division-out
+notes: >
+  Expected test bets from the proposal: about 1,500-2,500 at theta = 0.02 (an estimate from R2-Q3's 25% bet rate, not
+  counted). Max and average odds changed source in 2019/20, hence the era flag. A positive result here is largely the
+  mechanical max-odds effect (R2-Q3 audit placebo) unless it exceeds a max-odds-minus-soft-average placebo, which
+  the report must show. Test window reused by other rules (see H1 notes).

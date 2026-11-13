@@ -18,9 +18,11 @@ def referee_features(matches: pd.DataFrame, min_prior_matches: int = 5) -> pd.Da
     if not needed.issubset(matches.columns):
         return pd.DataFrame({"match_id": matches["match_id"]})
     df = matches.dropna(subset=["referee"]).sort_values("date").copy()
-    df["cards"] = df[["home_yellows", "away_yellows"]].sum(axis=1) + df.get("home_reds", 0).fillna(0) + df.get(
-        "away_reds", 0
-    ).fillna(0)
+    df["cards"] = (
+        df[["home_yellows", "away_yellows"]].sum(axis=1)
+        + df.get("home_reds", 0).fillna(0)
+        + df.get("away_reds", 0).fillna(0)
+    )
     fouls_total = df["home_fouls"] + df["away_fouls"]
     df["away_foul_share"] = np.where(fouls_total > 0, df["away_fouls"] / fouls_total, np.nan)
     df["home_card_share"] = np.where(

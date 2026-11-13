@@ -1,0 +1,64 @@
+id: bookmaker-line-structure-stale-soft-open-v1
+family: bookmaker-line-structure
+registered_at: 2026-10-20T18:00:00Z
+author: quant-researcher
+study_dir: research/studies/r2-q3-stale-soft-open
+question: >
+  How often does a soft price at the football-data.co.uk pre-closing snapshot (max_*_open, or bet365_*_open)
+  exceed the fair odds implied by the de-vigged Pinnacle price at that same snapshot, and how often does it then
+  also beat the de-vigged Pinnacle close? What is the CLV of "bet the best open price when it beats
+  Pinnacle-open fair odds by more than theta"?
+hypothesis:
+  h1: mean CLV > 0 for the paper strategy below.
+  h0: mean CLV <= 0.
+  direction: positive
+  disconfirming: >
+    95% CI of mean CLV includes 0 or is below it; or sign flips in 2 of 3 chronological thirds; or the effect is
+    carried by a single division.
+decision_time: >
+  The football-data.co.uk pre-closing snapshot (Friday afternoon for weekend games, Tuesday afternoon for
+  midweek games; notes.txt, fetched 2026-10-20). The fair reference must also be from that snapshot, so the
+  decision-time fair odds are 1 / p_pin_open (power de-vig) - never the close.
+point_in_time:
+  features: [pinnacle_*_open, max_*_open, bet365_*_open]
+  forbidden_as_features: [any *_close column, ft_* results]
+  assertion: code builds the decision from a whitelist of *_open columns and asserts no *_close column is read
+universe: fd_matches main-league divisions with pinnacle_*_open, pinnacle_*_close, the price source and a result
+data_snapshot: data/research/r2/fd.parquet (lake fd_matches pulled 2026-10-20T17:56:52Z)
+window:
+  exploratory: [2012-07-01, 2019-06-30]   # 52.2k eligible matches (max = Betbrain max)
+  evaluation:  [2019-07-01, 2025-06-30]   # 45.5k eligible matches (max = market Max)
+  post_segment: [2025-07-01, 2026-10-19]  # separate: fair reference = Betfair Exchange open (power), benchmark = Betfair Exchange close (power)
+strategy:
+  rule: >
+    edge_o = log(price_s[o] * p_pin_open[o]) for o in {H, D, A}; take the outcome with the largest edge; bet
+    1 unit at price_s[o] if edge_o > theta. At most one bet per match.
+  price_taken: max_*_open or bet365_*_open
+  upper_bound_warning: >
+    max_*_open is the best price across many books at one instant. It is an upper bound on what is achievable:
+    soft books limit or close winning accounts, stakes at the max price are small, the max can be a stale or
+    erroneous quote, and the pre-2019/20 Betbrain max may include books a bettor could not use.
+benchmark: Pinnacle close de-vigged by power; post segment Betfair Exchange close de-vigged by power
+primary_metric: clv_log = log(odds_taken * p_close_devig[o]), mean per bet
+secondary_metrics: [roi (flat stakes, never primary), share of matches with any edge > theta, share of those whose price also beats the de-vigged close]
+costs: the soft book margin is inside the taken price; no commission
+grid:
+  price_source: [max_open, bet365_open]
+  theta: [0.00, 0.02, 0.05]
+sensitivities_counted_as_trials:
+  - max_open, theta=0.02, no data-error cap
+  - max_open, theta=0.02, cap 1.25
+  - post segment (Betfair reference/benchmark): price_source x theta as above (6 trials)
+data_quality_rule: >
+  A quote with price_s[o] / pinnacle_o_open > 1.5 is treated as a data error and that outcome is not eligible.
+  Registered before any outcome or close was examined, after seeing that some max-odds rows imply an overround
+  as low as 0.55.
+uncertainty: block bootstrap by match-day, 2,000 resamples, percentile 95% CI; one-sided p from bootstrap SE
+stability: chronological thirds of the evaluation window, per division, leave-one-division-out
+graded_with: BH q=0.10 over the family ledger; PSR/DSR with ledger trial count; PBO via CSCV (16 blocks) over the grid
+min_n: 300
+literature_ceiling: >
+  Kaunitz, Zhong & Kreiner (2017, "Beating the bookies with their own numbers") report positive returns from
+  betting max odds against a consensus-implied fair price, with accounts then restricted. Positive CLV for
+  max-odds is plausible here and is not by itself an achievable edge; for bet365 a few tenths of a percent at
+  most; above +2% per bet on a single real book is a leakage/data suspect.

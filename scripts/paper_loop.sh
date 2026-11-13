@@ -1,0 +1,91 @@
+#!/usr/bin/env bash
+# Forward paper-trading loop (paper only: read-only market data, never places an order).
+#
+# Runs under launchd (scripts/launchd/local.pitch-edge.paper-loop.plist: starts at login, restarts after a
+# crash or reboot) from the pinned worktree `.worktrees/scheduled` (scripts/scheduled_pin.sh). Closing the lid pauses
+# it; on wake an overdue cycle starts within a minute. Manual run:
+#   nohup scripts/paper_loop.sh >/dev/null 2>&1 &
+# Guard (scripts/scheduled_guard.sh), once at start: when this tree has uncommitted changes or its HEAD is not the
+# last sha in the pin log, the loop logs the refusal and exits 0 (a clean exit, so launchd does not respawn it).
+# Data directory (logs, pidfile, pin log; the paper ledger by default): $PITCH_EDGE_DATA_DIR, default `data` in this
+# tree. The .env is read from $PITCH_EDGE_ENV_FILE (default `.env` in this tree).
+#
+# Every hour: collect Polymarket + Kalshi books, collect the-odds-api (every book in regions uk,eu, 2 credits
+# per league; the collector calls each league at most once per 23.5 h, never while credits remaining < 60,
+# and trims the league list so the projected monthly spend stays <= 450), then run every strategy.
+# Every hour, after that: settle finished decisions against the lake's closing prices, so a decision settles
+# in the first cycle after the lake has its close. A cycle that starts more than 1.5 x the interval after the
+# previous one (the Mac slept) is logged as "missed N cycles since <ts>".
+# Pause: at the start of every cycle `paper gate` reads the ledger; while it records an active pause (`paper pause`,
+# ended only by `paper resume`) the loop logs it and exits 0, so launchd (restart on crash only) does not respawn it
+# and a reload or reboot cannot trade. If the gate itself fails (e.g. the ledger is locked), the cycle is skipped.
+# Log: <data dir>/logs/paper_loop.log. Stop: kill the PID in <data dir>/paper/paper_loop.pid (the trap removes the
+# pidfile; a second copy refuses to start while that pid is alive).
+set -u
+cd "$(dirname "$0")/.." || exit 1
+
+INTERVAL_S="${PAPER_LOOP_INTERVAL_S:-3600}"
+DATA_DIR="${PITCH_EDGE_DATA_DIR:-data}"
+LOG="$DATA_DIR/logs/paper_loop.log"
+PIDFILE="$DATA_DIR/paper/paper_loop.pid"
+PIN_LOG="$DATA_DIR/control/scheduled_pin.log"
+mkdir -p "$DATA_DIR/logs" "$DATA_DIR/paper"
+log() { echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) $*" >>"$LOG"; }
+
+# Only committed code at the pinned sha runs; a refusal is a clean exit, so launchd's KeepAlive does not respawn it.
+if ! . scripts/scheduled_guard.sh; then
+  log "refusing to start: scripts/scheduled_guard.sh is missing"
+  exit 0
+fi
+scheduled_guard || exit 0
+
+# Single instance: refuse to start while another loop's pid is alive.
+if [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
+  echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) refusing to start: loop already running (pid $(cat "$PIDFILE"))" >>"$LOG"
+  exit 0  # a clean exit, so launchd's KeepAlive (restart on crash only) does not respawn a duplicate
+fi
+echo $$ > "$PIDFILE"
+SLEEP_PID=""
+cleanup() {
+  [ -n "$SLEEP_PID" ] && kill "$SLEEP_PID" 2>/dev/null
+  [ "$(cat "$PIDFILE" 2>/dev/null)" = "$$" ] && rm -f "$PIDFILE"
+  echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) paper loop exiting (pid $$)" >>"$LOG"
+}
+trap cleanup EXIT
+trap 'exit 0' TERM INT
+
+pe() { arch -arm64 uv run pitch-edge "$@" >>"$LOG" 2>&1; }
+
+log "paper loop started (pid $$, interval ${INTERVAL_S}s)"
+last_start=0
+while true; do
+  cycle_start=$(date +%s)
+  if [ "$last_start" -gt 0 ] && [ $((cycle_start - last_start)) -gt $((INTERVAL_S * 3 / 2)) ]; then
+    log "missed $(( (cycle_start - last_start + INTERVAL_S / 2) / INTERVAL_S - 1 )) cycles since $(date -u -r "$last_start" +%Y-%m-%dT%H:%M:%SZ)"
+  fi
+  last_start=$cycle_start
+  pe paper gate; gate_rc=$?
+  if [ "$gate_rc" -eq 10 ]; then
+    log "paused in the ledger; exiting without a cycle (record \`paper resume\` to restart)"
+    exit 0
+  fi
+  if [ "$gate_rc" -ne 0 ]; then
+    log "pause check failed (exit $gate_rc); cycle skipped"
+  else
+    log "cycle start"
+    pe paper collect --sources polymarket,kalshi || log "collect polymarket,kalshi exited non-zero"
+    pe -v paper collect --sources odds_api || log "collect odds_api exited non-zero"
+    pe paper decide || log "decide exited non-zero"
+    pe paper settle || log "settle exited non-zero"
+    log "cycle end"
+  fi
+  now=$(date +%s)
+  # Wall-clock schedule: wait in short steps until the next cycle is due, so after the machine wakes from sleep
+  # (lid closed) an overdue cycle starts within a minute instead of after the remainder of a frozen hour-long sleep.
+  next_due=$((now + INTERVAL_S))
+  while [ "$(date +%s)" -lt "$next_due" ]; do
+    sleep 60 &
+    SLEEP_PID=$!
+    wait "$SLEEP_PID"  # interruptible: a TERM is handled at once
+  done
+done

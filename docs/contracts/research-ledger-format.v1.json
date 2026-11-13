@@ -1,0 +1,127 @@
+{
+  "format": "pitch-edge-research-ledger",
+  "version": 1,
+  "tables": {
+    "registrations": {
+      "columns": {
+        "id": "string",
+        "family": "string",
+        "sha256": "string",
+        "path": "string",
+        "registered_at": "timestamp",
+        "recorded_at": "timestamp"
+      },
+      "time_column": "recorded_at",
+      "row_key": "id"
+    },
+    "trials": {
+      "columns": {
+        "trial_id": "string",
+        "hypothesis_id": "string",
+        "family": "string",
+        "config_json": "string",
+        "config_hash": "string",
+        "git_sha": "string",
+        "data_snapshot": "string",
+        "run_at": "timestamp",
+        "n": "integer",
+        "metric_name": "string",
+        "metric_value": "number|null",
+        "ci_lo": "number|null",
+        "ci_hi": "number|null",
+        "p_value": "number|null",
+        "direction": "string",
+        "extra_json": "string"
+      },
+      "time_column": "run_at",
+      "row_key": "trial_id"
+    },
+    "reviews": {
+      "columns": {
+        "hypothesis_id": "string",
+        "kind": "string",
+        "verdict": "string",
+        "detail_json": "string",
+        "recorded_at": "timestamp"
+      },
+      "time_column": "recorded_at",
+      "row_key": "sha256 hex of row_canonical (reviews have no natural key)"
+    }
+  },
+  "enums": {
+    "direction": [
+      "positive",
+      "negative",
+      "two-sided"
+    ],
+    "review_kind": [
+      "audit",
+      "edgelab",
+      "paper",
+      "amendment"
+    ]
+  },
+  "canonicalisation": {
+    "row_canonical": "json.dumps({column: canonical(value) for column in the table's columns}, sort_keys=True, separators=(',', ':')); only the listed columns are hashed",
+    "timestamp": "naive UTC, Python datetime.isoformat() (microseconds only when non-zero)",
+    "nan": "the string \"NaN\"",
+    "null": "JSON null",
+    "json_text_columns": "config_json, extra_json and detail_json enter the row as strings, unchanged; detail_json is json.dumps(detail, sort_keys=True) with the default separators",
+    "encoding": "UTF-8; json.dumps default ensure_ascii=True"
+  },
+  "chain": {
+    "genesis_prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+    "row_hash": "sha256_hex(f'{prev_hash}|{table}|{row_canonical}')",
+    "order": "write order; each entry's prev_hash is the previous entry's row_hash"
+  },
+  "export_lines": {
+    "chain_entry": [
+      "table",
+      "row_canonical",
+      "prev_hash",
+      "row_hash"
+    ],
+    "unchained_row": [
+      "table",
+      "row_canonical",
+      "chained (false)"
+    ],
+    "registration_yaml": [
+      "table ('registration_yaml')",
+      "hypothesis_id",
+      "sha256",
+      "yaml",
+      "chained?",
+      "mismatch?"
+    ],
+    "summary": [
+      "family",
+      "upto",
+      "n_tests",
+      "n_distinct_hypothesis_config",
+      "n_return_kind",
+      "return_test_keys",
+      "test_keys"
+    ]
+  },
+  "vectors": [
+    {
+      "table": "registrations",
+      "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+      "row_canonical": "{\"family\":\"demo\",\"id\":\"demo-v1\",\"path\":\"research/registry/demo-v1.yaml\",\"recorded_at\":\"2026-10-28T01:02:04.500000\",\"registered_at\":\"2026-10-28T01:02:03\",\"sha256\":\"abababababababababababababababababababababababababababababababab\"}",
+      "row_hash": "13c98f3cdd15afc3fd9573cd933721ee65a81746ae35992fe81d064f361d3894"
+    },
+    {
+      "table": "trials",
+      "prev_hash": "13c98f3cdd15afc3fd9573cd933721ee65a81746ae35992fe81d064f361d3894",
+      "row_canonical": "{\"ci_hi\":null,\"ci_lo\":\"NaN\",\"config_hash\":\"cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd\",\"config_json\":\"{\\\"theta\\\":0.02}\",\"data_snapshot\":\"lake@2026-10-28\",\"direction\":\"positive\",\"extra_json\":\"{}\",\"family\":\"demo\",\"git_sha\":\"0000000000000000000000000000000000000000\",\"hypothesis_id\":\"demo-v1\",\"metric_name\":\"clv_log\",\"metric_value\":0.0123,\"n\":300,\"p_value\":0.01,\"run_at\":\"2026-10-28T02:00:00\",\"trial_id\":\"t1\"}",
+      "row_hash": "1887978452d3a9f6fde6560cf0fafbd63acf36bf81a3b20ae06dd1eb2ad1d623"
+    },
+    {
+      "table": "reviews",
+      "prev_hash": "1887978452d3a9f6fde6560cf0fafbd63acf36bf81a3b20ae06dd1eb2ad1d623",
+      "row_canonical": "{\"detail_json\":\"{\\\"amends_sha256\\\": \\\"abababababababababababababababababababababababababababababababab\\\", \\\"rules\\\": [\\\"a rule\\\"]}\",\"hypothesis_id\":\"demo-v1\",\"kind\":\"amendment\",\"recorded_at\":\"2026-10-28T01:30:00.250000\",\"verdict\":\"RECORDED\"}",
+      "row_hash": "297a6a2f82ae5ea5c8ced6c545e51085a274b03030101d26add9d144e9048bf4"
+    }
+  ]
+}

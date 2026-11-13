@@ -1,0 +1,46 @@
+id: r4-bsky-mention-skew-v1
+family: crowd-attention
+registered_at: 2026-10-21T07:27:37Z
+author: quant-researcher
+question: >
+  Does the skew of pre-kickoff Bluesky attention between the two clubs (home abnormal attention minus away
+  abnormal attention, known before decision hour H) predict the DIRECTION of Polymarket's subsequent move toward
+  kickoff, beyond Polymarket's own recent move and price level?
+hypothesis:
+  h1: >
+    Adding the mention skew abn_L,home - abn_L,away to the baseline lowers the walk-forward OOS MSE of
+    y = (p_end - p_0)_home - (p_end - p_0)_away: Δ OOS R² > 0
+  h0: Δ OOS R² <= 0
+  direction: positive
+  disconfirming: 95% match-day block-bootstrap CI of Δ OOS R² includes 0 or is negative
+decision_time: >
+  H = kickoff - h for h = 24..2 hours; features from Polymarket bars known by H and Bluesky posts indexed before H
+  (asserted in r4-common/panel.py).
+universe: >
+  As r4-bsky-attention-size-v1, but one row per (match, H) and both clubs need an active Bluesky club query and
+  >= 14 days of baseline; prices needed on the home and away markets.
+window:
+  exploratory: [2026-01-05, 2026-02-28]
+  evaluation:  [2026-03-01, 2026-10-19]
+benchmark: Polymarket's own last pre-kickoff bar (the target end point; hindsight, target only)
+primary_metric: delta_oos_r2
+metric_kind: score
+secondary_metrics: []
+costs: none (predictive measurement of Polymarket price dynamics; no position is taken)
+model: >
+  OLS walk-forward as r4-bsky-attention-size-v1 (monthly folds from 2026-03-01, expanding training window).
+  Baseline: intercept, hours-to-kickoff fixed effects, own recent move (p_H - p_H6)_home - (p_H - p_H6)_away, level
+  p_H,home - p_H,away. Full = baseline + skew. Decision = match; value = mean over its hours of (e_base^2 -
+  e_full^2) / OOS target variance. Blocks = kickoff UTC date; 5,000 draws, seed 20261020. The sign of the fitted
+  skew coefficient per fold is reported (no direction registered for it: more attention can be bad or good news).
+grid:
+  lookback_h: [6, 24]
+min_n: 300
+literature_ceiling: >
+  Retail social-media signals rarely explain more than a fraction of a percent of short-horizon price changes in
+  liquid markets; Δ OOS R² above 0.02 is a leakage suspect.
+notes: >
+  Bounce handling, Bluesky backfill caveats and coverage as r4-bsky-attention-size-v1. EXPLORATORY (kickoff
+  2026-01-20 -> 2026-02-28, not counted): 222 matches, 37 days; in-sample skew coefficient +0.0033 [-0.0008,
+  +0.0083] (L6), +0.0032 [-0.0024, +0.0101] (L24); one pseudo-OOS split Δ OOS R² +0.0045 (L6), +0.0010 (L24);
+  baseline OOS R² -0.003.

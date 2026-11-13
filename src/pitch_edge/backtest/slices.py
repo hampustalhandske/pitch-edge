@@ -20,6 +20,7 @@ from scipy.stats import norm
 
 from pitch_edge.backtest.engine import BacktestResult
 from pitch_edge.models.base import OUTCOMES
+from pitch_edge.research.stats import benjamini_hochberg
 
 MIN_SLICE_N = 50
 FDR_ALPHA = 0.05
@@ -152,15 +153,12 @@ def _log_loss_edge(sub: pd.DataFrame) -> dict | None:
 
 
 def _bh_qvalues(p_values: pd.Series) -> pd.Series:
-    """Benjamini-Hochberg adjusted p-values (q-values), same index as `p_values`."""
-    n = len(p_values)
-    if n == 0:
+    """Benjamini-Hochberg adjusted p-values (q-values), same index as `p_values`
+    (see `research.stats.benjamini_hochberg`)."""
+    if len(p_values) == 0:
         return pd.Series([], dtype=float)
-    order = p_values.sort_values().index
-    ranks = np.arange(1, n + 1)
-    raw_q = p_values.loc[order].to_numpy() * n / ranks
-    q = np.clip(np.minimum.accumulate(raw_q[::-1])[::-1], 0, 1)
-    return pd.Series(q, index=order).reindex(p_values.index)
+    _, q = benjamini_hochberg(p_values.to_numpy(dtype=float), q=FDR_ALPHA)
+    return pd.Series(q, index=p_values.index)
 
 
 def slice_evidence(predictions: pd.DataFrame, features: pd.DataFrame, model_name: str) -> pd.DataFrame:

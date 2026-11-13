@@ -1,0 +1,49 @@
+id: r5-xv-agreement-v1
+family: cross-venue
+registered_at: 2026-10-20T21:30:53Z
+author: quant-researcher
+question: >
+  For the same soccer 1X2 outcome in the same hour, how far apart are Kalshi and Polymarket, and how often is
+  the gap larger than the round-trip cost of buying on one venue and selling (buying the complement) on the
+  other?
+hypothesis:
+  h1: >
+    More than 5% of matched outcome-hours have |Kalshi mid - Polymarket last trade| greater than the
+    round-trip cost (Kalshi taker fee + Polymarket taker fee at the average price + Kalshi half-spread +
+    Polymarket half-spread proxy max(0.5c, half the hour's high-low)).
+  h0: the share is 5% or less
+  direction: positive
+  disconfirming: 95% match-day block-bootstrap CI of (share - 0.05) includes 0 or is negative
+decision_time: >
+  each hour H on the hour, kickoff - 48h <= H <= kickoff; Kalshi candle with end_period_ts = H (known at H),
+  Polymarket bar with hour_start = H - 1h (known at H; required, i.e. a trade happened in that hour); book
+  secondary: Polymarket order-book snapshot in force at H (ts <= H, age <= 24h)
+universe: >
+  Kalshi soccer *GAME events mapped to Polymarket 1X2 match groups (research/studies/r5-common/mapping.py:
+  league-learned name/date join, unique best candidate, reversed orientations dropped) with kickoff
+  corroborated by Kalshi occurrence_datetime (= ko + 3h) or close_time (ko + 1.75..3.5h) and by
+  football-data when keyed. Kalshi quote two-sided (0 < bid < ask <= 1).
+window:
+  exploratory: [2025-08-01, 2025-12-31]
+  evaluation:  [2026-01-01, 2026-10-19]
+benchmark: none (venue-vs-venue agreement)
+primary_metric: share_exceeding_roundtrip_cost_minus_5pct
+secondary_metrics:
+  - mean_signed_gap_kalshi_minus_pm
+  - mean_abs_gap
+  - share_exceeding_roundtrip_cost_minus_5pct_book
+costs: >
+  Polymarket taker 0.05 p(1-p) per share; Kalshi taker 0.07 p(1-p) per contract (series fee_type quadratic /
+  quadratic_with_maker_fees, fee_multiplier 1 from Kalshi's public series API; coefficient per Kalshi's
+  General Trading Fees Table, PDF not directly fetchable); half-spreads as above
+grid:
+  hours_to_kickoff: [1-6h, 7-24h, 25-48h]
+min_n: 300
+literature_ceiling: >
+  Cross-venue prediction-market gaps on liquid events are typically within a few cents; a share above ~50%
+  would point to a mapping or timing error.
+notes: >
+  Rows are outcome-hours (dependent within a match); blocks = match-day (UTC date of kickoff), 5,000 draws,
+  seed 20261020. Kalshi writes an hourly candle with quotes even when no trade happens, so Kalshi is never
+  stale in the trade sense; Polymarket rows without a trade in the hour are excluded and their share is
+  reported. Exploratory window (2025-08-01 -> 2025-12-31, 1,680 events, labelled exploratory, not counted): share of outcome-hours exceeding cost 0.4% / 0.6% / 1.2% (1-6h / 7-24h / 25-48h), mean |gap| 0.9c, median 0.5c, 99th pct 3.5c, mean round-trip cost 3.8c; 59% of Kalshi outcome-hours had no Polymarket trade in the hour. The 5% materiality threshold was written before these numbers were seen and is kept unchanged.

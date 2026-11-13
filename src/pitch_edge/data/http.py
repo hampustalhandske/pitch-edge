@@ -16,7 +16,7 @@ import time
 from collections import defaultdict
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 from urllib.robotparser import RobotFileParser
 
 import requests
@@ -32,6 +32,24 @@ class RobotsDisallowedError(RuntimeError):
 
 class HostCircuitOpenError(RuntimeError):
     """Raised once a host has failed repeatedly in this session; we stop asking it."""
+
+
+class LiveHttpError(RuntimeError):
+    """A live (uncached) fetch failed. The message names the URL with secret query values redacted;
+    `status_code` is the HTTP status, or None for a transport failure."""
+
+    def __init__(self, message: str, status_code: int | None = None):
+        super().__init__(message)
+        self.status_code = status_code
+
+
+def redact_url(url: str, names: tuple[str, ...] | list[str]) -> str:
+    """`url` with the values of the query parameters in `names` replaced by `REDACTED`."""
+    if not names:
+        return url
+    parts = urlparse(url)
+    query = [(k, "REDACTED" if k in names else v) for k, v in parse_qsl(parts.query, keep_blank_values=True)]
+    return urlunparse(parts._replace(query=urlencode(query)))
 
 
 class CachedHttpClient:
@@ -144,3 +162,53 @@ class CachedHttpClient:
 
     def get_json(self, url: str, **kwargs: Any) -> Any:
         return json.loads(self.get_bytes(url, **kwargs).decode("utf-8"))
+
+    def get_live(
+        self,
+        url: str,
+        *,
+        params: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
+        redact: tuple[str, ...] | list[str] = (),
+    ) -> requests.Response:
+        """Fetch a live endpoint (current prices, quota headers): never read from or written to the disk cache.
+
+        Same honest User-Agent, per-host throttle and circuit breaker as `get_bytes`. robots.txt is not
+        consulted: this is for published JSON APIs (the-odds-api, Polymarket Gamma/CLOB, Kalshi), which are
+        documented machine endpoints rather than web pages, the same rule `get_bytes` applies by default. 5xx/429 and transport
+        errors are retried with backoff; any other 4xx raises at once. Errors raise `LiveHttpError` whose
+        message carries the URL with the query parameters named in `redact` (e.g. an API key) replaced,
+        and which is raised `from None` so the underlying exception (whose text contains the raw URL)
+        is not chained into tracebacks. Returns the `requests.Response` so callers can read headers.
+        """
+        full_url = requests.Request("GET", url, params=params).prepare().url or url
+        safe_url = redact_url(full_url, redact)
+        host = urlparse(full_url).netloc
+        if self._host_failures[host] >= self.max_consecutive_failures:
+            raise LiveHttpError(f"{host} failed {self._host_failures[host]} times in a row; circuit open")
+        last_status: int | None = None
+        last_kind = ""
+        for attempt in range(self.max_retries):
+            self._throttle(host)
+            try:
+                resp = self.session.get(full_url, timeout=self.timeout_s, headers=headers)
+            except requests.RequestException as exc:
+                last_status, last_kind = None, type(exc).__name__
+                time.sleep(min(2**attempt, 8))
+                continue
+            if resp.status_code >= 500 or resp.status_code == 429:
+                last_status, last_kind = resp.status_code, "retryable status"
+                time.sleep(min(2**attempt, 8))
+                continue
+            if resp.status_code >= 400:
+                self.stats["errors"] += 1
+                raise LiveHttpError(f"HTTP {resp.status_code} from {safe_url}", resp.status_code) from None
+            self.stats["misses"] += 1
+            self._host_failures[host] = 0
+            return resp
+        self.stats["errors"] += 1
+        self._host_failures[host] += 1
+        raise LiveHttpError(
+            f"Failed to fetch {safe_url} after {self.max_retries} attempts ({last_kind} {last_status or ''})".strip(),
+            last_status,
+        ) from None

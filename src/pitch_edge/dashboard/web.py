@@ -1,9 +1,13 @@
 """PITCH-EDGE — the dashboard.
 
-One page: a question box and an answer. Nothing else — no charts, no tables, no approval flow.
-The question goes straight through the same `ask` LangGraph the CLI uses
-(`agents/qa_graph.py`); this module never trains a model, never fetches odds, and never computes
-a number itself.
+One page: a question box and an answer, and under it a compact read-only "Evidence" section — no
+charts, no approval flow. The question goes straight through the same `ask` LangGraph the CLI uses
+(`agents/qa_graph.py`); the Evidence section shows, per research family, the best rung on the
+`research/STANDARDS.md` ladder and its champion, the display floor (the minimum rung for a number to
+be shown as an edge), and the paper ledger's forward record, all read through
+`research/summary.py::load_status` (short-lived read-only connections, cached until either ledger
+file changes). This module never trains a model, never fetches odds, and never computes a number
+itself.
 
 Built with NiceGUI — a Python-native UI framework on top of FastAPI + Vue/Quasar. Chosen over a
 separate JS frontend because the "Python-only" platform value in CLAUDE.md is real: no API
@@ -18,6 +22,7 @@ import os
 from nicegui import run, ui
 
 from pitch_edge.dashboard.theme import INK, SERIES, STATUS, install_template
+from pitch_edge.research.summary import meets_floor, rung_rank
 
 install_template()
 
@@ -46,6 +51,12 @@ def banner(text: str, kind: str = "note") -> None:
         f'<div style="border-left:3px solid {border}; background:{bg}; color:{INK["secondary"]}; '
         f'padding:10px 14px; border-radius:8px; font-size:.88rem; line-height:1.5;">{text}</div>'
     ).classes("w-full")
+
+
+def render_data_notes(notes: list[str]) -> None:
+    """One warning banner line per league whose warehouse data ends well before the as-of date."""
+    for line in notes:
+        banner(line, "warn")
 
 
 def section_title(text: str, caption: str = "") -> None:
@@ -91,19 +102,19 @@ def build_ask() -> None:
             ui.label(f"as of {state.as_of.date()}").style(f"color:{INK['muted']}; font-size:.78rem;")
             if state.message:
                 ui.markdown(state.message.replace("_", "\\_"))
+                render_data_notes(state.data_notes)
                 return
             if state.answer is None:
                 ui.label("No answer produced.").style(f"color:{INK['muted']};")
                 return
             ui.markdown(state.answer.overview.replace("_", "\\_"))
+            render_data_notes(state.data_notes)
             badge = (
                 "all figures matched a source"
                 if state.answer.citations_grounded
                 else f"unmatched figures: {', '.join(state.answer.ungrounded_numbers)}"
             )
-            ui.label(f"backend={state.answer.backend} · {badge}").style(
-                f"color:{INK['muted']}; font-size:.78rem;"
-            )
+            ui.label(f"backend={state.answer.backend} · {badge}").style(f"color:{INK['muted']}; font-size:.78rem;")
             for note in state.answer.notes:
                 with ui.column().classes("gap-0"):
                     ui.label(f"{note.home_team} vs {note.away_team}".strip(" vs")).style(
@@ -118,12 +129,112 @@ def build_ask() -> None:
                             if d["doc_id"] in seen:
                                 continue
                             seen.add(d["doc_id"])
-                            ui.label(f"{d['doc_id']}: {d['text']}").style(
-                                f"color:{INK['muted']}; font-size:.8rem;"
-                            )
+                            ui.label(f"{d['doc_id']}: {d['text']}").style(f"color:{INK['muted']}; font-size:.8rem;")
 
     ask_btn.on_click(on_ask)
     q.on("keydown.enter", on_ask)
+
+
+# ============================================================================= evidence
+def rung_colour(rung: str, floor: str) -> str:
+    """STATUS colour for a rung: good at/above the display floor, warning from L2 up, serious for
+    L0/L1, critical when not even L0 holds."""
+    if meets_floor(rung, floor):
+        return STATUS["good"]
+    if rung_rank(rung) >= rung_rank("L2"):
+        return STATUS["warning"]
+    if rung_rank(rung) >= rung_rank("L0"):
+        return STATUS["serious"]
+    return STATUS["critical"]
+
+
+def _rung_pill(rung: str, floor: str) -> None:
+    colour = rung_colour(rung, floor)
+    ui.label(rung).style(
+        f"border:1px solid {colour}; color:{colour}; border-radius:999px; padding:0 8px; font-size:.75rem;"
+    )
+
+
+def _paper_line(s: dict) -> str:
+    parts = [f"decided {s['n_decided']} · settled {s['n_settled']}"]
+    ci = s.get("clv_ci95")
+    if ci:
+        parts.append(f"mean log-CLV {s['mean_clv']:+.4f}, 95% CI [{ci[0]:+.4f}, {ci[1]:+.4f}]")
+    else:
+        parts.append("not enough settled bets for a CLV CI")
+    if s.get("n_exploratory"):
+        parts.append(f"exploratory {s['n_exploratory']}")
+    if s.get("n_void"):
+        parts.append(f"void {s['n_void']}")
+    return " · ".join(parts)
+
+
+def render_evidence(status: dict) -> None:
+    """Render a `research.summary.StatusSnapshot.to_dict()` payload: the display floor, one row per
+    research family (best rung, champion) and one row per paper strategy (forward record)."""
+    research, paper = status.get("research", {}), status.get("paper", {})
+    floor = research.get("display_floor", "L4")
+    if research.get("validated_edge_exists"):
+        banner(f"Display floor {floor}: only strategies at or above it are shown as edges.")
+    else:
+        banner(
+            f"No validated edge: no strategy holds the display floor {floor}. Anything the ask agent shows "
+            "is a model-vs-market disagreement, not a validated edge.",
+            "warn",
+        )
+    muted = f"color:{INK['muted']}; font-size:.82rem;"
+    with card(title=f"Research ladder · display floor {floor}"):
+        families = research.get("families", [])
+        if not families:
+            ui.label("no hypotheses registered yet").style(muted)
+        for fam in families:
+            with ui.row().classes("items-center gap-2"):
+                _rung_pill(fam["best_rung"], floor)
+                ui.label(fam["family"]).style(f"color:{INK['secondary']}; font-size:.85rem; font-weight:600;")
+                champion = fam.get("champion")
+                ui.label(f"champion {champion['id']}" if champion else "no champion").style(muted)
+                ui.label(f"{len(fam.get('hypotheses', []))} hypotheses").style(muted)
+    with card(title="Paper ledger · forward record (evaluation window, lake closes)"):
+        if not paper.get("available"):
+            ui.label(paper.get("reason") or "paper ledger unavailable").style(muted)
+        elif not paper.get("strategies"):
+            ui.label("no paper decisions yet").style(muted)
+        for s in paper.get("strategies", []):
+            with ui.column().classes("gap-0"):
+                name = (
+                    s["strategy_id"]
+                    if s.get("counts_as_evidence")
+                    else f"{s['strategy_id']} · unregistered, not evidence"
+                )
+                ui.label(name).style(f"color:{INK['secondary']}; font-size:.85rem; font-weight:600;")
+                ui.label(_paper_line(s)).style(muted)
+
+
+def _evidence_status() -> dict:
+    from pitch_edge.research.summary import load_status
+
+    return load_status().to_dict()
+
+
+def build_evidence() -> None:
+    section_title("Evidence", "Read-only: the research evidence ladder and the paper ledger's forward record.")
+    container = ui.column().classes("w-full gap-2")
+    with container:
+        ui.spinner(size="md")
+
+    async def fill() -> None:
+        try:
+            status = await run.io_bound(_evidence_status)
+        except Exception as exc:  # noqa: BLE001 - an unreadable ledger must not break the page
+            container.clear()
+            with container:
+                banner(f"Evidence status unavailable: <code>{type(exc).__name__}</code>", "warn")
+            return
+        container.clear()
+        with container:
+            render_evidence(status or {})
+
+    ui.timer(0.05, fill, once=True)
 
 
 _ASK_CACHE: dict = {}
@@ -198,10 +309,11 @@ def index() -> None:
                 )
 
     with ui.column().classes("w-full gap-3").style("max-width:1000px; margin:0 auto; padding:20px;"):
-        try:
-            build_ask()
-        except Exception as exc:  # noqa: BLE001 - never blank-page the app on a render error
-            banner(f"This view failed to render: <code>{exc}</code>", "warn")
+        for build in (build_ask, build_evidence):
+            try:
+                build()
+            except Exception as exc:  # noqa: BLE001 - never blank-page the app on a render error
+                banner(f"This view failed to render: <code>{exc}</code>", "warn")
 
 
 def main() -> None:

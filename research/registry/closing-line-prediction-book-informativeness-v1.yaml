@@ -1,0 +1,78 @@
+id: closing-line-prediction-book-informativeness-v1
+family: closing-line-prediction
+registered_at: 2026-10-20T22:12:00Z
+author: quant-researcher
+question: >
+  Which bookmakers' opening deviations from Pinnacle's open carry information about Pinnacle's close
+  (Pinnacle moves toward them), and which are merely stale (the book itself moves back toward Pinnacle)?
+  Descriptive, per book, with a registered contrast.
+hypothesis:
+  h1: >
+    Books differ in informativeness: the slope of the Pinnacle open->close logit move on VC's opening deviation
+    exceeds the slope on IW's (slope_contrast = slope_VC - slope_IW > 0), on rows where both are quoted.
+    VC (highest) and IW (lowest) were named from the exploratory marginal slopes.
+  h0: slope_contrast <= 0
+  direction: positive
+  disconfirming: >
+    95% match-day block-bootstrap CI of slope_contrast includes 0 or lies below it, or the sign is negative in 2
+    of 3 chronological thirds.
+decision_time: >
+  The football-data Fri/Tue pre-closing snapshot. Book deviations use only open columns (asserted in code by
+  r6lib.assert_open_only on the evaluation panel). The Pinnacle close and each book's own close are hindsight
+  and used only as the measured outcomes of this descriptive study.
+universe: >
+  (match, outcome) rows of the Pinnacle segment (22 main divisions) in the evaluation window where the book's
+  open 1X2 triple exists and |dev_b| <= 0.5 logit (larger deviations are treated as quote errors; counts
+  reported).
+window:
+  exploratory: [2012-07-01, 2019-06-30]
+  evaluation: [2019-07-01, 2025-06-30]
+benchmark: de-vigged (power) Pinnacle close (target of the move); each book's own de-vigged close for self_share
+primary_metric: slope_contrast
+metric_kind: probability
+secondary_metrics:
+  - slope_B365
+  - slope_BW
+  - slope_IW
+  - slope_WH
+  - slope_VC
+  - slope_1XB
+  - slope_BF
+  - slope_BFE
+  - self_share_B365
+  - self_share_BW
+  - self_share_IW
+  - self_share_WH
+  - self_share_VC
+  - self_share_1XB
+  - self_share_BF
+  - self_share_BFE
+costs: none (descriptive)
+grid:
+  slope_type: [marginal, partial]
+min_n: 300
+literature_ceiling: >
+  Slopes are shares of a deviation closed; values outside [-0.5, 1.5] for a single book, or a contrast outside
+  [-1, 1], are data-error suspects.
+notes: >
+  Code: research/studies/r6-cross-book-close/{h3,r6lib,run}.py. Books chosen by coverage only: the five core
+  books of cross-book-linear-v1 (B365, BW, IW, WH, VC; >= 90% open coverage every season 2012/13-2022/23), over
+  every evaluation row where present; plus the three books whose football-data columns exist only from 2024/25
+  (1XB = 1xBet, BF = Betfair Sportsbook, BFE = Betfair Exchange open), over 2024/25 only (their whole coverage
+  inside the window). Books with < 300 rows are skipped.
+  x = dev_b = logit p_b_open - logit p_pin_open (power de-vig per book); y = logit p_pin_close - logit
+  p_pin_open. slope_type=marginal: OLS slope of y on [1, x] (share of b's deviation Pinnacle closes).
+  slope_type=partial: coefficient of x in OLS y ~ 1 + x + g_avg (information beyond the soft consensus).
+  slope_contrast: both slopes estimated on the rows where VC and IW are both present (VC absent from 2024/25,
+  IW from 2023/24 partly), per-row influence difference. self_share_b (marginal config only): OLS slope of
+  -(logit p_b_close - logit p_b_open) on [1, x], rows with b's own close (football-data book closes exist from
+  2019/20); on the same rows Pinnacle share + self share + persistence = 1.
+  Slopes enter run_trial as per-row influence values (mean = the OLS coefficient exactly); exact match-day
+  block-bootstrap CIs (2,000 draws, seed 20261020) are stored in extra.
+  Multiple testing across books: BH at q = 0.10 over the 8 books x 2 slope types, one-sided > 0, exact-bootstrap
+  p-values. Labels fixed in advance: 'informative' = partial slope rejected by that BH; 'stale' = not informative
+  and self_share - Pinnacle share > 0 with a 95% block CI excluding 0 (the book closes more of its own deviation
+  than Pinnacle does); otherwise 'mixed'.
+  Exploratory (labelled; 2012/13-2018/19, all rows, power): marginal slopes VC 0.281, B365 0.170, WH 0.090,
+  BW 0.084, IW 0.055; partial (given g_avg) VC +0.137, B365 +0.033, IW -0.060, WH -0.060, BW -0.072; soft
+  consensus g_avg marginal 0.417. Book closes do not exist before 2019/20, so self shares were not explored.

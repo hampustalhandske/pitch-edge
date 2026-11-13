@@ -1,0 +1,69 @@
+id: soft-open-vs-betfair-exchange-lag-v1
+family: soft-open-vs-betfair
+registered_at: 2026-10-28T07:56:45Z
+author: quant-researcher
+study_dir: research/studies/soft-open-vs-betfair-exchange-lag
+question: >
+  When Pinnacle shortens an outcome by at least s within the hour before kickoff while the Betfair Exchange back price
+  for that outcome has not moved, does backing it on Betfair at its current price (within the size offered) have
+  positive CLV against the Pinnacle close, i.e. does the exchange lag the sharp book?
+hypothesis:
+  h1: mean clv_log > 0 for the selected (s, b), scored once on the evaluation window.
+  h0: mean clv_log <= 0.
+  direction: positive
+  disconfirming: >
+    95% match-day block-bootstrap CI of mean clv_log includes 0 or is below it; or the sign is negative in 2 of 3
+    chronological thirds; or, with any one tournament removed, the CI includes 0.
+decision_time: >
+  The first OddsPapi path timestamp t, with kickoff - 1h <= t < kickoff, at which Pinnacle's price for an outcome is at
+  least s shorter than its price 60 minutes earlier (relative fall in the decimal price, 1 - p_t / p_{t-60min} >= s)
+  while Betfair Exchange's best back price for that outcome changed by at most b relative to its price 60 minutes
+  earlier. Both prices and the Betfair offered size are those stamped at or before t.
+point_in_time:
+  features: [OddsPapi Pinnacle and Betfair Exchange price and size points with timestamp <= t]
+  forbidden_as_features: [any price stamped after t, the Pinnacle close, results]
+  assertion: code asserts every path point used has timestamp <= t and that the Pinnacle close is read only after the decision is fixed
+universe: >
+  OddsPapi finished matches with both Pinnacle and Betfair Exchange 1X2 paths (loaded by the lake, LK-45; 6,740
+  matches from 2026-01-13 in 26 sampled tournaments at the time of the proposal). bet365 is not in OddsPapi.
+data_snapshot: lake OddsPapi tables after the backfill completes (about 2026-10-30); the build id is recorded in the ledger row
+window:
+  exploratory: [2026-01-13, 2026-05-31]   # train: (s, b) selection here only
+  evaluation:  [2026-06-01, 2026-10-19]   # test: scored once
+  scoring_gate: >
+    Not scored, and the train selection not run, before the lake's OddsPapi backfill is complete (about 2026-10-30), so
+    train and test come from the same final pull. The PE-26 gap (football-data) does not apply: the benchmark is the
+    OddsPapi Pinnacle close.
+strategy:
+  rule: >
+    At the decision time above, bet 1 unit on that outcome at Betfair's best back price at t if the offered size at
+    that price is at least the stake size S = 25 units of the path's currency; otherwise no bet. At most one bet per
+    match (the earliest decision; among outcomes at the same t, the largest Pinnacle shortening).
+  outcome_codes: verified against the football-data Betfair close (proposal note)
+selection:
+  where: exploratory window only (2026-01-13 to 2026-05-31); nothing from the evaluation window is read
+  candidates: {s: [0.02, 0.03, 0.05], b: [0.0, 0.01]}   # 6 candidates, evaluated on train only
+  criterion: highest mean clv_log (after commission) against the de-vigged Pinnacle close on the train window
+  eligibility: at least 100 train bets
+  tie_break: higher s, then lower b
+  fallback: if no candidate has 100 train bets, s = 0.03 and b = 0.0 (the proposal's defaults)
+  scoring: the selected (s, b) is scored once on the evaluation window through run_trial with config {}; the others are never scored there
+  record: candidate train results go to research/studies/soft-open-vs-betfair-exchange-lag/trials.csv (exploratory, not ledger trials)
+benchmark: de-vigged (power) Pinnacle close from OddsPapi
+primary_metric: clv_log = log(effective_odds_taken * p_close_devig[o]), mean per bet, effective_odds = 1 + (odds - 1) * (1 - c)
+metric_kind: return
+secondary_metrics: [clv_log gross of commission, roi (flat stakes, never primary), n_bets, median offered size at the taken price]
+costs: Betfair Exchange commission c = 0.02 on net winnings (the lowest standard rate, so the primary is the favourable case) with c = 0.05 as a secondary sensitivity (a secondary result, not a counted test); no spread beyond taking the best back price
+grid: {}   # one counted test
+min_n: 300
+literature_ceiling: >
+  A lag of a few percent on a liquid exchange after a sharp move is plausible but arbitraged quickly; mean CLV above
+  +2% per bet is a data-error suspect (stale-quote or timestamp-alignment artefact).
+uncertainty: block bootstrap by match-day, 2,000 resamples, percentile 95% CI
+stability: chronological thirds, per tournament, leave-one-tournament-out
+notes: >
+  Expected test bets: not yet counted (the backfill finishes about 2026-10-30); 80% power at +2% CLV needs about 250
+  bets. If the selected configuration has fewer than 300 test bets it cannot clear L2 and is reported as underpowered.
+  Unlike H1-H3 this test window is not reused by earlier rules. The size S and the commission are fixed here and not
+  tuned. Pinnacle is the benchmark because it is the sharp book the exchange is hypothesised to lag; Betfair's own
+  close is not used.

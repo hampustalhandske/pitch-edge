@@ -6,8 +6,7 @@ when a later write carries new columns (sources add odds columns over the
 years), so schema evolution never silently drops data. All writes are
 idempotent upserts keyed on natural keys — re-running ingestion is safe.
 
-Phase 3 mirrors these tables to BigQuery/GCS via `pitch_edge.cloud`; the
-Parquet export here is the hand-off format.
+`export_parquet` writes every table out as Parquet for use outside DuckDB.
 """
 
 from __future__ import annotations
@@ -57,7 +56,6 @@ TABLE_KEYS: dict[str, list[str]] = {
     "api_football_injuries": ["league_code", "season", "fixture_id", "team", "player"],
     "api_football_lineups": ["fixture_id", "team", "player", "slot"],
     "fixture_predictions": ["fixture_key", "model_name", "version"],
-    "dossiers": ["fixture_key", "version"],
     "live_odds": ["match_id", "bookmaker", "market", "side", "snapshot_ts"],
     "dim_soccer_markets": ["condition_id"],
     "pmxt_orderbook": ["condition_id", "asset_id", "timestamp_received", "side", "price", "size"],
@@ -135,14 +133,30 @@ class Warehouse:
         return self.count(table) - before
 
     def replace(self, table: str, df: pd.DataFrame) -> int:
-        """Drop-and-recreate a table (features, summaries) from a frame."""
+        """Replace a whole table (features, summaries) with a frame; an empty frame drops the table.
+
+        The new rows are first written to a staging table, then swapped in by one transaction that drops the old
+        table and renames the staging one. A failure or kill at any point leaves either the old table or the new
+        one, never neither. Returns the number of rows written."""
         df = _clean_frame(df)
-        self._conn.execute(f"DROP TABLE IF EXISTS {table}")
-        if df.empty:
-            return 0
-        self._conn.register("incoming_df", df)
-        self._conn.execute(f"CREATE TABLE {table} AS SELECT * FROM incoming_df")
-        self._conn.unregister("incoming_df")
+        staging = f"{table}__staging"
+        self._conn.execute(f"DROP TABLE IF EXISTS {staging}")
+        if not df.empty:
+            self._conn.register("incoming_df", df)
+            try:
+                self._conn.execute(f"CREATE TABLE {staging} AS SELECT * FROM incoming_df")
+            finally:
+                self._conn.unregister("incoming_df")
+        self._conn.execute("BEGIN TRANSACTION")
+        try:
+            self._conn.execute(f"DROP TABLE IF EXISTS {table}")
+            if not df.empty:
+                self._conn.execute(f"ALTER TABLE {staging} RENAME TO {table}")
+            self._conn.execute("COMMIT")
+        except Exception:
+            self._conn.execute("ROLLBACK")
+            self._conn.execute(f"DROP TABLE IF EXISTS {staging}")
+            raise
         return len(df)
 
     # ------------------------------------------------------------------ reads

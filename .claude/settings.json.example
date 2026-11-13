@@ -1,0 +1,89 @@
+{
+  "enabledMcpjsonServers": ["lakehouse", "edgelab"],
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "arch -arm64 uv sync --extra dev"
+          }
+        ]
+      }
+    ]
+  },
+  "permissions": {
+    "allow": [
+      "Bash(uv run:*)",
+      "Bash(uv sync:*)",
+      "Bash(uv add:*)",
+      "Bash(uv remove:*)",
+      "Bash(uv lock:*)",
+      "Bash(arch -arm64 uv run:*)",
+      "Bash(arch -arm64 uv sync:*)",
+      "Bash(arch -arm64 uv add:*)",
+      "Bash(arch -arm64 uv lock:*)",
+      "Bash(python:*)",
+      "Bash(python3:*)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git show:*)",
+      "Bash(git rm:*)",
+      "Bash(git mv:*)",
+      "Bash(git branch:*)",
+      "Bash(git stash:*)",
+      "Bash(git checkout:*)",
+      "Bash(grep:*)",
+      "Bash(rg:*)",
+      "Bash(find:*)",
+      "Bash(ls:*)",
+      "Bash(cat:*)",
+      "Bash(head:*)",
+      "Bash(tail:*)",
+      "Bash(wc:*)",
+      "Bash(mkdir:*)",
+      "Bash(mv:*)",
+      "Bash(cp:*)",
+      "Bash(rm ./*)",
+      "Bash(touch:*)",
+      "Bash(pwd)",
+      "Bash(cd:*)",
+      "Bash(echo:*)",
+      "Read(./src/**)",
+      "Read(./tests/**)",
+      "Read(./reports/**)",
+      "Read(./scripts/**)",
+      "Read(./data/**)",
+      "Edit(./src/**)",
+      "Edit(./tests/**)",
+      "Edit(./reports/**)",
+      "Edit(./scripts/**)",
+      "Edit(./pyproject.toml)",
+      "Write(./research/**)",
+      "Edit(./research/**)",
+      "Write(./data/research/**)",
+      "mcp__lakehouse__lakehouse_status",
+      "mcp__lakehouse__list_tables",
+      "mcp__lakehouse__describe_table",
+      "mcp__lakehouse__query_sql",
+      "mcp__lakehouse__list_recipes",
+      "mcp__lakehouse__run_recipe",
+      "mcp__lakehouse__ask_lakehouse",
+      "mcp__edgelab__list_strategies",
+      "mcp__edgelab__check_data",
+      "mcp__edgelab__dry_run",
+      "mcp__edgelab__run_status",
+      "mcp__edgelab__get_summary"
+    ],
+    "deny": [
+      "Bash(git push:*)",
+      "Bash(rm -rf:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Read(./.env)",
+      "Read(./.env.*)",
+      "Read(**/secrets/**)"
+    ]
+  }
+}

@@ -19,6 +19,14 @@ from pitch_edge.models.dixon_coles import DixonColesModel
 logger = logging.getLogger(__name__)
 
 _GLOBAL = "__all__"
+FALLBACK_KINDS = (
+    "league_fit_failed",
+    "global_fit",
+    "other_league_model",
+    "independent_poisson",
+    "uniform",
+    "start_parameters",
+)
 
 
 class DixonColesMatchModel(MatchModel):
@@ -39,6 +47,12 @@ class DixonColesMatchModel(MatchModel):
         self.min_league_rows = min_league_rows
         self._models: dict[str, DixonColesModel] = {}
         self._train_rows = 0
+        # Fallbacks over this instance's lifetime (every fit and prediction), reported in `card()`:
+        # `league_fit_failed` per-league fits that raised, `global_fit` fits that used one global model because
+        # no league could be fitted, `other_league_model` predictions for a league with no fitted model of its
+        # own, and the score-matrix fallbacks of the per-league models (`independent_poisson`, `uniform`) and their fits that kept
+        # the starting parameters (`start_parameters`).
+        self._fallbacks = dict.fromkeys(FALLBACK_KINDS, 0)
 
     def _window(self, df: pd.DataFrame) -> pd.DataFrame:
         if self.lookback_days:
@@ -50,9 +64,10 @@ class DixonColesMatchModel(MatchModel):
 
     def fit(self, train: pd.DataFrame) -> DixonColesMatchModel:
         cols = ["home_team", "away_team", "home_goals", "away_goals", "date"]
-        self._models = {}
+        self._retire_models()
         groups: list[tuple[str, pd.DataFrame]]
-        if self.per_league and "league_code" in train.columns:
+        per_league = self.per_league and "league_code" in train.columns
+        if per_league:
             groups = [(str(k), g) for k, g in train.groupby("league_code")]
         else:
             groups = [(_GLOBAL, train)]
@@ -66,19 +81,38 @@ class DixonColesMatchModel(MatchModel):
                 rows += len(g)
             except Exception as exc:  # noqa: BLE001 - a degenerate league must not kill the fold
                 logger.warning("Dixon-Coles fit failed for %s: %s", key, exc)
+                self._fallbacks["league_fit_failed"] += 1
         if not self._models:
             # fall back to one global fit
+            if per_league:
+                self._fallbacks["global_fit"] += 1
             g = self._window(train)
             self._models[_GLOBAL] = DixonColesModel(max_goals=self.max_goals, xi=self.xi).fit(g[cols])
             rows = len(g)
         self._train_rows = rows
         return self
 
+    def _retire_models(self) -> None:
+        """Add the current per-league models' score-matrix fallbacks to the lifetime counts and drop them."""
+        for m in self._models.values():
+            for kind, n in m.fallback_counts().items():
+                self._fallbacks[kind] += n
+        self._models = {}
+
+    def fallback_counts(self) -> dict[str, int]:
+        """Lifetime fallback counts by kind (see `__init__`), including the current models' matrix fallbacks."""
+        out = dict(self._fallbacks)
+        for m in self._models.values():
+            for kind, n in m.fallback_counts().items():
+                out[kind] += n
+        return out
+
     def _model_for(self, league_code: str | None) -> DixonColesModel:
         if league_code is not None and str(league_code) in self._models:
             return self._models[str(league_code)]
         if _GLOBAL in self._models:
             return self._models[_GLOBAL]
+        self._fallbacks["other_league_model"] += 1
         return next(iter(self._models.values()))
 
     def predict_proba(self, X: pd.DataFrame) -> pd.DataFrame:
@@ -104,6 +138,7 @@ class DixonColesMatchModel(MatchModel):
             "lookback_days": self.lookback_days,
             "leagues_fitted": sorted(self._models),
             "train_rows_last_fit": self._train_rows,
+            "fallbacks": self.fallback_counts(),
             "features": ["home_team", "away_team", "home_goals", "away_goals", "date", "league_code"],
             "leakage_checks": ["fit uses matches strictly before the prediction date (enforced by backtester)"],
         }

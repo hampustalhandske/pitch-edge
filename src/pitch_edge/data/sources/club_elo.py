@@ -42,4 +42,3 @@ class ClubEloSource:
             if col in df.columns:
                 df[col] = pd.to_datetime(df[col], errors="coerce")
         return df
-

@@ -1,6 +1,5 @@
 """gather_fixture_context: retrieves news/match/prediction docs, and `as_of` must exclude anything
-dated on or after it — the only thing preventing a replay-eval run from leaking a real future score
-out of a production index into the reviewer's prompt."""
+dated on or after it, so a production index cannot leak a real future score into a historical answer."""
 
 from __future__ import annotations
 

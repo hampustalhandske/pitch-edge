@@ -1,0 +1,70 @@
+id: soft-open-vs-betfair-fav-open-v1
+family: soft-open-vs-betfair
+registered_at: 2026-10-28T07:56:45Z
+author: quant-researcher
+study_dir: research/studies/soft-open-vs-betfair-fav-open
+question: >
+  Soft books are thought to under-shorten strong favourites at their opening snapshot. When the best soft open
+  price (max_*_open) on a strong favourite beats the de-vigged Betfair Exchange open price by more than theta,
+  does backing it have positive CLV against the de-vigged Betfair Exchange close?
+hypothesis:
+  h1: mean clv_log > 0 for the single selected configuration, scored once on the evaluation window.
+  h0: mean clv_log <= 0.
+  direction: positive
+  disconfirming: >
+    95% match-day block-bootstrap CI of mean clv_log includes 0 or is below it; or the sign is negative in 2 of 3
+    chronological thirds of the evaluation window; or, with any one division removed, the CI includes 0.
+decision_time: >
+  The football-data.co.uk pre-closing snapshot (Friday afternoon for weekend games, Tuesday afternoon for midweek
+  games), 1-3 days before kickoff. Fair reference and price are both from that snapshot.
+point_in_time:
+  features: [betfair_ex_*_open, max_*_open]
+  forbidden_as_features: [any *_close column, ft_* results]
+  assertion: code builds the decision from a whitelist of *_open columns and asserts no *_close column is read
+universe: >
+  fd_matches main-league divisions with betfair_ex_*_open, betfair_ex_*_close and max_*_open all present
+  (Betfair columns exist from 2024-08).
+data_snapshot: lake fd_matches pull taken when the study script runs; the build id is recorded in the ledger row
+window:
+  exploratory: [2024-08-01, 2025-06-30]   # train: the selection below is run here only
+  evaluation:  [2025-07-01, 2026-10-19]   # test: the selected configuration is scored once
+  evaluation_exclusion: [2026-04-17, 2026-05-04]   # football-data has no Betfair close there (PE-26); matches dropped
+strategy:
+  rule: >
+    p_bf_open = power de-vig of betfair_ex_{H,D,A}_open. fav = argmax p_bf_open. edge = log(max_fav_open * p_bf_open[fav]).
+    Bet 1 unit on fav at max_fav_open if p_bf_open[fav] >= p_min and edge > theta. At most one bet per match.
+  price_taken: max_*_open
+  data_quality_rule: >
+    A quote with max_fav_open / betfair_ex_fav_open > 1.5 is a data error and the match is not eligible (the R2-Q3
+    rule, fixed before any outcome in this window was examined).
+  upper_bound_warning: >
+    max_*_open is the best quote across many books at one instant, not an achievable price (STANDARDS known traps).
+selection:
+  where: exploratory window only (2024-08-01 to 2025-06-30); nothing from the evaluation window is read to select
+  candidates: {theta: [0.0, 0.01], p_min: [0.65, 0.70, 0.75]}   # 6 candidates, evaluated on train only
+  criterion: highest mean clv_log against the de-vigged Betfair close on the train window
+  eligibility: at least 100 train bets
+  tie_break: lower theta, then lower p_min
+  fallback: if no candidate has 100 train bets, theta = 0.0 and p_min = 0.70 (the proposal's defaults)
+  scoring: the selected (theta, p_min) is scored once on the evaluation window through run_trial with config {} and the
+    selected values stored in the trial's extra; the five other candidates are never scored on the evaluation window
+  record: every candidate's train result is appended to research/studies/soft-open-vs-betfair-fav-open/trials.csv
+    (exploratory, not ledger trials)
+benchmark: de-vigged (power) Betfair Exchange close
+primary_metric: clv_log = log(odds_taken * p_close_devig[o]), mean per bet
+metric_kind: return
+secondary_metrics: [roi (flat stakes, never primary), n_bets, share of eligible matches with a bet]
+costs: the soft book margin is inside the taken price; no commission; no spread beyond the quoted max price
+grid: {}   # one counted test; the selected values are not grid points
+min_n: 300
+literature_ceiling: >
+  Max-odds CLV against a sharp close is positive almost mechanically once a quote above fair exists (R2-Q3 audit
+  placebo); above +2% per bet is a leakage or data-error suspect.
+uncertainty: block bootstrap by match-day, 2,000 resamples, percentile 95% CI
+stability: chronological thirds of the evaluation window, per division, leave-one-division-out
+notes: >
+  Expected test bets from the proposal (research/proposals/2026-10-28-new-hypotheses.md): about 306 at theta = 0 and
+  p_min = 0.70, about 200 at theta = 0.01. If the selected configuration has fewer than 300 test bets it cannot
+  clear L2 (min 300 decisions) and is reported as underpowered. The test window was already used for other rules
+  (R2-Q2, R2-Q3, R3, R6), so a pass is weaker evidence than a fresh window; only the forward paper loop is clean.
+  Family soft-open-vs-betfair has exactly four tests (H1-H4), one per registration.

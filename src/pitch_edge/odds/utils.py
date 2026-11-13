@@ -2,10 +2,10 @@
 
 Standard sports-trading vocabulary: a bookmaker's quoted decimal odds imply
 probabilities that sum to > 1 (the overround / vig). Removing it via simple
-normalization (there are fancier methods — Shin's method, power method — but
-normalization is the standard baseline) gives the market's "fair" implied
-probability, which is what a model's own probability should be compared
-against to claim an edge.
+normalization gives the market's "fair" implied probability, which is what a
+model's own probability should be compared against to claim an edge. The
+normalization itself, and the power / Shin / additive alternatives, live in
+`pitch_edge.research.devig`; this module is the scalar 1X2 convenience layer.
 """
 
 from __future__ import annotations
@@ -25,10 +25,11 @@ def overround(home_odds: float, draw_odds: float, away_odds: float) -> float:
 
 
 def no_vig_probabilities(home_odds: float, draw_odds: float, away_odds: float) -> tuple[float, float, float]:
-    """Normalize implied probabilities to sum to 1 (basic no-vig method)."""
+    """Normalize implied probabilities to sum to 1: the scalar form of `research.devig.multiplicative`
+    (kept in plain Python because it is called once per quote inside loops; a test pins the two equal)."""
     raw = [implied_probability(o) for o in (home_odds, draw_odds, away_odds)]
     total = sum(raw)
-    return tuple(p / total for p in raw)  # type: ignore[return-value]
+    return raw[0] / total, raw[1] / total, raw[2] / total
 
 
 @dataclass(frozen=True)

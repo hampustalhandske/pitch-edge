@@ -1,0 +1,49 @@
+id: bookmaker-line-structure-totals-open-gap-v1
+family: bookmaker-line-structure
+registered_at: 2026-10-20T18:00:00Z
+author: quant-researcher
+study_dir: research/studies/r2-q4-totals-open-gap
+question: >
+  The Q2 question (bookmaker-line-structure-open-consensus-gap-v1) for over/under 2.5 goals, and, as a
+  feasibility check only, for the Asian handicap: is the Pinnacle open->close move predictable from the gap
+  between Pinnacle and the de-vigged soft consensus at the pre-closing snapshot, and does backing the side the
+  consensus rates higher, at the Pinnacle open price, beat the de-vigged Pinnacle close?
+hypothesis:
+  h1_predict: OOS R^2 > 0 of move = logit(p_pin_over_close) - logit(p_pin_over_open) on g = logit(p_avg_over_open) - logit(p_pin_over_open), fit on exploratory
+  h1_strategy: mean CLV > 0
+  h0: OOS R^2 <= 0; mean CLV <= 0
+  direction: positive
+  disconfirming: 95% CI of mean CLV includes 0 or is below it; sign flips in 2 of 3 thirds; carried by one division
+decision_time: football-data.co.uk pre-closing snapshot (Friday/Tuesday afternoon; notes.txt fetched 2026-10-20)
+point_in_time:
+  features: [pinnacle_over25_open, pinnacle_under25_open, avg_over25_open, avg_under25_open, max_over25_open, max_under25_open, ah_line_open, pinnacle_ah_*_open, avg_ah_*_open]
+  forbidden_as_features: [any *_close column, ft_* results]
+universe: fd_matches main-league divisions with Pinnacle O/U 2.5 open and close, average O/U open and a result (Pinnacle O/U starts 2019/20)
+data_snapshot: data/research/r2/fd.parquet (lake fd_matches pulled 2026-10-20T17:56:52Z)
+window:
+  exploratory: [2019-07-01, 2021-06-30]   # 14.4k eligible matches
+  evaluation:  [2021-07-01, 2025-06-30]   # 31.0k eligible matches
+  post_segment: [2025-07-01, 2026-10-19]  # reported separately; Pinnacle close where present (no Betfair O/U close in the lake)
+  window_justification: Pinnacle O/U odds only exist from 2019/20; two seasons exploratory, four evaluation (counts above)
+strategy:
+  rule: >
+    gap = p_avg_over_open - p_pin_over_open (two-way power de-vig). Bet over at pinnacle_over25_open if
+    gap > theta; bet under at pinnacle_under25_open if gap < -theta. One bet per match.
+benchmark: Pinnacle O/U 2.5 close de-vigged by power
+primary_metric: clv_log = log(odds_taken * p_close_devig[side]), mean per bet
+secondary_metrics: [roi (never primary), OLS slope of move on gap]
+costs: Pinnacle margin inside the taken price
+grid:
+  theta: [0.00, 0.01, 0.02, 0.03, 0.05]
+asian_handicap_feasibility:
+  rule: same as O/U with p from pinnacle_ah_home/away_open vs avg_ah_home/away_open at the market line ah_line_open
+  grid: {theta: [0.00, 0.02]}
+  limitation: >
+    The close is quoted at ah_line_close, which differs from ah_line_open in ~38% of matches. CLV can only be
+    computed where the two lines are equal, which selects on a hindsight quantity (the line did not move). AH
+    results are therefore capped at L1 regardless of the numbers and are reported as feasibility only.
+uncertainty: block bootstrap by match-day, 2,000 resamples, percentile 95% CI; one-sided p from bootstrap SE
+stability: chronological thirds of the evaluation window (equal-length date thirds), per division
+graded_with: BH q=0.10 over the family ledger; PSR/DSR; PBO via CSCV (16 blocks) over the theta grid
+min_n: 300
+literature_ceiling: CLV vs Pinnacle close a few tenths of a percent at most; above +2% per bet is a leakage suspect

@@ -77,9 +77,9 @@ def _date_range(wh: Warehouse, table: str, columns: list[str]) -> str:
 def summarize(db_path) -> pd.DataFrame:
     rows = []
     with Warehouse(db_path, read_only=True) as wh:
-        tables = wh.query(
-            "SELECT table_name FROM information_schema.tables WHERE table_schema = 'main' ORDER BY 1"
-        )["table_name"].tolist()
+        tables = wh.query("SELECT table_name FROM information_schema.tables WHERE table_schema = 'main' ORDER BY 1")[
+            "table_name"
+        ].tolist()
         for table in tables:
             n = wh.count(table)
             columns = wh.query(f'SELECT * FROM "{table}" LIMIT 0').columns.tolist()

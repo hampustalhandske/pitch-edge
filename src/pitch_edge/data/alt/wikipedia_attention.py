@@ -167,8 +167,12 @@ TITLE_OVERRIDES: dict[str, str] = {
     "Rizespor": "Çaykur Rizespor",
     "Ankaragucu": "MKE Ankaragücü",
 }
-_BAD_TITLE = re.compile(r"^\d{4}|season|list of|records|history of|stadium|supporters|rivalry|managers|\(footballer", re.I)
-_CLUB_TITLE = re.compile(r"\b(F\.?C\.?|C\.?F\.?|S\.?C\.?|S\.?K\.?|A\.?F\.?C\.?|B\.?K\.?|I\.?F\.?|spor|FK|SV|BSC|SSC|AC|AS|US|CD|UD|RCD)\b")
+_BAD_TITLE = re.compile(
+    r"^\d{4}|season|list of|records|history of|stadium|supporters|rivalry|managers|\(footballer", re.I
+)
+_CLUB_TITLE = re.compile(
+    r"\b(F\.?C\.?|C\.?F\.?|S\.?C\.?|S\.?K\.?|A\.?F\.?C\.?|B\.?K\.?|I\.?F\.?|spor|FK|SV|BSC|SSC|AC|AS|US|CD|UD|RCD)\b"
+)
 
 
 class WikipediaAttentionSource:

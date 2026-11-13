@@ -10,7 +10,6 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 from datetime import UTC, date, datetime, timedelta
-from functools import partial
 from pathlib import Path
 
 import pandas as pd
@@ -19,22 +18,23 @@ from pitch_edge.config import get_settings
 from pitch_edge.data.alt.news import NewsScanner
 from pitch_edge.data.alt.venues import VenueGeocoder
 from pitch_edge.data.alt.weather import OpenMeteoWeather
+from pitch_edge.data.fd_vocab import EXTRA_DIVISION_COUNTRIES, LEAGUE_CODES, odds_wide_to_long
+from pitch_edge.data.quality import find_duplicate_fixtures
 from pitch_edge.data.sources.club_elo import ClubEloSource
-from pitch_edge.data.sources.club_football_match_data import ClubFootballMatchDataSource
-from pitch_edge.data.sources.football_data_co_uk import (
-    EXTRA_DIVISION_COUNTRIES,
-    EXTRA_LEAGUE_FILES,
-    LEAGUE_CODES,
-    FootballDataCoUkSource,
-    odds_wide_to_long,
-    season_label,
-)
 from pitch_edge.data.sources.openfootball import OpenFootballSource
 from pitch_edge.data.sources.statsbomb import StatsBombOpenDataSource
-from pitch_edge.data.storage import Warehouse
+from pitch_edge.data.storage import Warehouse, _clean_frame
 from pitch_edge.data.teams import TeamNameResolver
 
 logger = logging.getLogger(__name__)
+
+
+def latest_season_start(today: date | None = None) -> int:
+    """Start year of the European season under way on `today` (default: today, UTC): seasons start on 1 July,
+    so 2026-10-28 gives 2026 (2026/27) and 2026-05-01 gives 2025 (2025/26)."""
+    today = today or datetime.now(UTC).date()
+    return today.year if today.month >= 7 else today.year - 1
+
 
 MATCH_CORE_COLUMNS = [
     "match_id",
@@ -72,6 +72,9 @@ MATCH_CORE_COLUMNS = [
     "away_form3",
     "away_form5",
 ]
+
+# Tables with rows per `matches.match_id`, removed together with the match.
+MATCH_KEYED_TABLES = ("odds", "weather", "features")
 
 # StatsBomb open competitions with full event data, small enough to ingest end-to-end.
 DEFAULT_STATSBOMB_COMPETITIONS: list[tuple[int, int]] = [
@@ -113,15 +116,25 @@ def _pending_seasons(seasons: list[int], stored_labels: set[str], label_fn: Call
     return [y for y in seasons if y == latest or label_fn(y) not in stored_labels]
 
 
+def prepare_match_tables(wh: Warehouse, df: pd.DataFrame) -> None:
+    """Create `matches` and `odds`, or add the columns `df` would add, so a later `store_matches(wh, df)` alters
+    no table. Callers that store inside a transaction that also deletes from these tables call this first:
+    DuckDB cannot commit a transaction that both modifies and alters one table."""
+    core = df[[c for c in MATCH_CORE_COLUMNS if c in df.columns]]
+    for table, frame in (("matches", core), ("odds", odds_wide_to_long(df))):
+        if not frame.empty:
+            wh._ensure_table(table, _clean_frame(frame))  # noqa: SLF001
+
+
 def store_matches(wh: Warehouse, df: pd.DataFrame) -> int:
     """Persist matches + long odds. football-data.co.uk rows are the preferred spine: if the same
-    fixture (home, away, date) already exists from a secondary source (xgabora), the old row and its
-    odds are replaced and its Elo/form columns carried over — so ingestion order never matters."""
+    fixture (home, away, date) already exists from another source (e.g. openfootball), the old row and
+    its odds are replaced, so ingestion order never matters."""
     if df.empty:
         return 0
     df = df.copy()
     if df["source"].iloc[0] == "football_data_co_uk" and wh.table_exists("matches"):
-        df = _replace_secondary_duplicates(wh, df)
+        _replace_secondary_duplicates(wh, df)
     core = df[[c for c in MATCH_CORE_COLUMNS if c in df.columns]]
     inserted = wh.upsert("matches", core)
     odds = odds_wide_to_long(df)
@@ -130,16 +143,14 @@ def store_matches(wh: Warehouse, df: pd.DataFrame) -> int:
     return inserted
 
 
-def _replace_secondary_duplicates(wh: Warehouse, df: pd.DataFrame) -> pd.DataFrame:
+def _replace_secondary_duplicates(wh: Warehouse, df: pd.DataFrame) -> None:
+    """Delete stored non-football-data rows (and their odds) whose exact (home, away, date) is in `df`."""
     wh._conn.register(
         "incoming_keys", df[["home_team", "away_team", "date"]].assign(d=df["date"].dt.strftime("%Y-%m-%d"))
     )
-    existing_cols = set(wh.columns("matches"))
-    carry_cols = ["home_elo", "away_elo", "home_form5", "away_form5"]
-    select_carry = ", ".join(f"m.{c}" if c in existing_cols else f"NULL AS {c}" for c in carry_cols)
     dupes = wh.query(
-        f"""
-        SELECT m.match_id, m.home_team, m.away_team, strftime(m.date, '%Y-%m-%d') AS d, {select_carry}
+        """
+        SELECT m.match_id
         FROM matches m JOIN incoming_keys k
           ON m.home_team = k.home_team AND m.away_team = k.away_team AND strftime(m.date, '%Y-%m-%d') = k.d
         WHERE m.source <> 'football_data_co_uk'
@@ -147,106 +158,62 @@ def _replace_secondary_duplicates(wh: Warehouse, df: pd.DataFrame) -> pd.DataFra
     )
     wh._conn.unregister("incoming_keys")
     if dupes.empty:
-        return df
+        return
     ids = dupes["match_id"].tolist()
     wh._conn.execute("DELETE FROM matches WHERE match_id IN (SELECT UNNEST(?::VARCHAR[]))", [ids])
     if wh.table_exists("odds"):
         wh._conn.execute("DELETE FROM odds WHERE match_id IN (SELECT UNNEST(?::VARCHAR[]))", [ids])
-    carry = dupes.set_index(["home_team", "away_team", "d"])[["home_elo", "away_elo", "home_form5", "away_form5"]]
-    key = pd.MultiIndex.from_arrays([df["home_team"], df["away_team"], df["date"].dt.strftime("%Y-%m-%d")])
-    for col in carry.columns:
-        carried = carry[col].reindex(key).to_numpy()
-        df[col] = df[col].fillna(pd.Series(carried, index=df.index)) if col in df else carried
     logger.info("replaced %d secondary-source rows with football-data.co.uk rows", len(ids))
-    return df
+
+
+def purge_duplicate_fixtures(wh: Warehouse) -> int:
+    """Delete every non-football-data.co.uk `matches` row that `find_duplicate_fixtures` pairs with a
+    football-data.co.uk row (the same fixture under another spelling), with its rows in the match-keyed
+    tables (`odds`, `weather`, `features`), in one transaction, so a failure leaves every table as it was.
+    Unpaired rows are kept. Returns the number of matches removed; with no such pairs nothing is touched, so
+    running it repeatedly is harmless."""
+    pairs = find_duplicate_fixtures(wh)
+    if pairs.empty:
+        return 0
+    spine = "football_data_co_uk"
+    ids: set[str] = set()
+    for p in pairs.itertuples(index=False):
+        if p.source_a == spine and p.source_b != spine:
+            ids.add(p.match_id_b)
+        elif p.source_b == spine and p.source_a != spine:
+            ids.add(p.match_id_a)
+    if not ids:
+        return 0
+    ordered = sorted(ids)
+    tables = [t for t in ("matches", *MATCH_KEYED_TABLES) if wh.table_exists(t)]
+    wh._conn.execute("BEGIN TRANSACTION")
+    try:
+        for table in tables:
+            wh._conn.execute(f"DELETE FROM {table} WHERE match_id IN (SELECT UNNEST(?::VARCHAR[]))", [ordered])
+        wh._conn.execute("COMMIT")
+    except Exception:
+        wh._conn.execute("ROLLBACK")
+        raise
+    logger.info("purged %d matches that duplicate a football-data.co.uk fixture", len(ordered))
+    return len(ordered)
 
 
 # ---------------------------------------------------------------------- sources
-def ingest_football_data(
-    wh: Warehouse, leagues: list[str] | None = None, seasons: list[int] | None = None, extra_leagues: bool = True
-) -> dict[str, int]:
-    src = FootballDataCoUkSource()
-    leagues = leagues or list(LEAGUE_CODES)
-    seasons = seasons or list(range(2005, 2026))
-    counts: dict[str, int] = {}
-    for league in leagues:
-        counts[league] = _run(
-            wh, f"football_data_co_uk:{league}", partial(_ingest_fd_league, wh, src, league, seasons)
-        )
-    if extra_leagues:
-        for stem in EXTRA_LEAGUE_FILES:
-            counts[stem] = _run(wh, f"football_data_co_uk:new/{stem}", partial(_ingest_fd_extra_league, wh, src, stem))
-    return counts
+def build_football_data_spine(wh: Warehouse, force: bool = False) -> int:
+    """Rebuild the football-data `matches` and `odds` rows from the `lake_fd_matches` mirror (health-logged).
 
-
-def _ingest_fd_extra_league(wh: Warehouse, src: FootballDataCoUkSource, stem: str) -> int:
-    return store_matches(wh, src.fetch_extra_league(stem))
-
-
-def _ingest_fd_league(wh: Warehouse, src: FootballDataCoUkSource, league: str, seasons: list[int]) -> int:
-    """Only re-fetch a season's file if it isn't already stored (from this same source) or is the
-    most recent season, which is still being played and keeps gaining matches."""
-    stored = (
-        set(wh.query("SELECT DISTINCT season FROM matches WHERE league_code = ? AND source = ?", [league, src.name])["season"])
-        if wh.table_exists("matches")
-        else set()
-    )
-    pending = _pending_seasons(seasons, stored, season_label)
-    _log_progress(f"football_data_co_uk:{league}", len(pending), len(seasons), len(seasons) - len(pending))
-    if not pending:
-        return 0
-    return store_matches(wh, src.fetch_matches(league=league, seasons=pending))
-
-
-def ingest_club_football_match_data(wh: Warehouse) -> int:
-    src = ClubFootballMatchDataSource()
+    Takes the warehouse and `force` (rebuild every window, not only those whose mirror rows changed). Returns
+    the matches written; 0 when the mirror has never been synced (run `pitch-edge lake-sync --only fd_matches`).
+    Reads the mirror only: it neither calls the lake nor fetches anything, so it is as fresh as the last sync."""
+    from pitch_edge.lake.spine import MIRROR_TABLE, build_fd_spine
 
     def go() -> int:
-        df = src.fetch_matches()
-        # Only keep divisions/dates that add information (Elo, form, or leagues we don't have).
-        existing = (
-            wh.query("SELECT DISTINCT home_team, away_team, CAST(date AS DATE) AS d FROM matches")
-            if wh.table_exists("matches")
-            else pd.DataFrame()
-        )
-        n_fetched = len(df)
-        if not existing.empty:
-            key_existing = set(
-                zip(existing["home_team"], existing["away_team"], existing["d"].astype(str), strict=True)
-            )
-            key_new = list(zip(df["home_team"], df["away_team"], df["date"].dt.strftime("%Y-%m-%d"), strict=True))
-            dup_mask = pd.Series([k in key_existing for k in key_new], index=df.index)
-            # Attach Elo/form to spine rows instead of inserting duplicates.
-            dupes = df[dup_mask]
-            if not dupes.empty:
-                _attach_elo_to_spine(wh, dupes)
-            df = df[~dup_mask]
-        _log_progress("club_football_match_data", len(df), n_fetched, n_fetched - len(df))
-        return store_matches(wh, df)
+        if not wh.table_exists(MIRROR_TABLE):
+            logger.warning("%s is missing; run `pitch-edge lake-sync --only fd_matches` first", MIRROR_TABLE)
+            return 0
+        return build_fd_spine(wh, force=force)["matches"]
 
-    return _run(wh, "club_football_match_data", go)
-
-
-def _attach_elo_to_spine(wh: Warehouse, dupes: pd.DataFrame) -> None:
-    wh._conn.register(
-        "elo_df",
-        dupes[["home_team", "away_team", "date", "home_elo", "away_elo", "home_form5", "away_form5"]].assign(
-            d=lambda x: x["date"].dt.strftime("%Y-%m-%d")
-        ),
-    )
-    for col in ("home_elo", "away_elo", "home_form5", "away_form5"):
-        if col not in wh.columns("matches"):
-            wh._conn.execute(f'ALTER TABLE matches ADD COLUMN "{col}" DOUBLE')
-    wh._conn.execute(
-        """
-        UPDATE matches SET home_elo = e.home_elo, away_elo = e.away_elo,
-                           home_form5 = e.home_form5, away_form5 = e.away_form5
-        FROM elo_df e
-        WHERE matches.home_team = e.home_team AND matches.away_team = e.away_team
-          AND strftime(matches.date, '%Y-%m-%d') = e.d
-        """
-    )
-    wh._conn.unregister("elo_df")
+    return _run(wh, "football_data_spine", go)
 
 
 def ingest_club_elo(wh: Warehouse, dates: list[str] | None = None) -> int:
@@ -257,7 +224,8 @@ def ingest_club_elo(wh: Warehouse, dates: list[str] | None = None) -> int:
     # that date, so trip the circuit fast instead of waiting for the client's general-purpose
     # default (6 consecutive failures, tuned for sources with occasional per-item blips).
     src.http.max_consecutive_failures = 2
-    dates = dates or [f"{y}-{m:02d}-01" for y in range(2010, 2026) for m in (1, 7)]
+    today = datetime.now(UTC).date()
+    dates = dates or [f"{y}-{m:02d}-01" for y in range(2010, today.year + 1) for m in (1, 7) if date(y, m, 1) <= today]
 
     def go() -> int:
         total = 0
@@ -266,7 +234,11 @@ def ingest_club_elo(wh: Warehouse, dates: list[str] | None = None) -> int:
         )
         resolver = TeamNameResolver(teams)
         already = (
-            set(wh.query("SELECT DISTINCT CAST(date AS DATE) AS d FROM team_ratings WHERE source = 'club_elo'")["d"].astype(str))
+            set(
+                wh.query("SELECT DISTINCT CAST(date AS DATE) AS d FROM team_ratings WHERE source = 'club_elo'")[
+                    "d"
+                ].astype(str)
+            )
             if wh.table_exists("team_ratings")
             else set()
         )
@@ -315,7 +287,7 @@ def ingest_openfootball(wh: Warehouse, leagues: list[str] | None = None, seasons
         "br.1",
         "jp.1",
     ]
-    seasons = seasons or list(range(2015, 2026))
+    seasons = seasons or list(range(2015, latest_season_start() + 1))
 
     def go() -> int:
         total = 0
@@ -720,19 +692,20 @@ def ingest_api_football_context(wh: Warehouse, leagues: list[str] | None = None,
 # ------------------------------------------------------------------------ all
 def ingest_everything(
     wh: Warehouse,
-    leagues: list[str] | None = None,
-    seasons: list[int] | None = None,
     include_statsbomb: bool = True,
     include_weather: bool = True,
     statsbomb_max_matches: int | None = None,
     include_players: bool = True,
 ) -> dict[str, int]:
     report: dict[str, int] = {}
-    report.update(ingest_football_data(wh, leagues, seasons))
-    # `club_football_match_data` (xgabora) and `openfootball`'s cross-check table were removed:
-    # both are derivative of/redundant with the football-data.co.uk spine below (xgabora's only
-    # unique contribution, precomputed Elo, duplicates FeatureBuilder's own from-scratch Elo).
-    # `ingest_sweden` is untouched — a real primary source for Swedish leagues, not a duplicate.
+    # Matches come from football-data (the spine, built from the `lake_fd_matches` mirror that `lake-sync`
+    # keeps current) and openfootball's Swedish schedules. Stored rows of any other source that repeat a
+    # football-data fixture are purged first.
+    purged = purge_duplicate_fixtures(wh)
+    if purged:
+        report["purged_matches"] = purged
+    report["football_data_spine"] = build_football_data_spine(wh)
+    # `ingest_sweden` is a real primary source for Swedish leagues; its rows yield to football-data's.
     if include_statsbomb:
         report["statsbomb"] = ingest_statsbomb(wh, max_matches_per_competition=statsbomb_max_matches)
     if include_weather:
@@ -742,7 +715,7 @@ def ingest_everything(
     # Market-probability data is Polymarket-only now, via the PMXT archive (see
     # `pmxt_archive.py`): the old live-snapshot connectors (`polymarket.py`, `kalshi.py`,
     # `odds_api.py`, all deleted) and football-data.co.uk's own bookmaker-odds columns (no longer
-    # parsed at all — see `store_matches`) were removed as redundant with it / replaced by it.
+    # parsed at all) were removed as redundant with it / replaced by it.
     # Discovery is cheap and safe to run on every ingest; the actual hour-by-hour tick backfill is
     # deliberately NOT run here (a 1-2 year backfill is thousands of ~100MB files) — see
     # `ingest_pmxt_orderbook_range` / the `pitch-edge ingest-pmxt START END` CLI command for that.

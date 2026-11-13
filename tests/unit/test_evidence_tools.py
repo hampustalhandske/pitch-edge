@@ -91,3 +91,41 @@ def test_search_context_truncates_returned_text():
     out = tools["search_context"].invoke({"query": "team news"})
     assert out.startswith("[news:1]")
     assert len(out) < 500
+
+
+# --------------------------------------------------------------------------- ladder / paper status tools
+
+_STATUS = {
+    "research": {
+        "display_floor": "L4",
+        "validated_edge_exists": False,
+        "families": [{"family": "fam-a", "best_rung": "L2", "champion": {"id": "fam-a-x-v1", "rung": "L2"}}],
+    },
+    "paper": {"available": True, "strategies": [{"strategy_id": "soft-vs-sharp-live", "n_settled": 0}]},
+}
+
+
+def _status_tools():
+    from pitch_edge.agents.evidence_tools import make_status_tools
+
+    return {t.name: t for t in make_status_tools(_STATUS)}
+
+
+def test_status_tools_take_no_arguments():
+    tools = _status_tools()
+    assert set(tools) == {"research_status", "paper_status"}
+    assert all(not t.args for t in tools.values())
+
+
+def test_research_status_returns_the_ladder_summary_as_json():
+    import json
+
+    out = _status_tools()["research_status"].invoke({})
+    assert json.loads(out) == _STATUS["research"]
+
+
+def test_paper_status_returns_the_forward_record_as_json():
+    import json
+
+    out = _status_tools()["paper_status"].invoke({})
+    assert json.loads(out) == _STATUS["paper"]

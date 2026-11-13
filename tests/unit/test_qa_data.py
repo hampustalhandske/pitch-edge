@@ -81,3 +81,131 @@ def test_market_edges_computes_no_vig_edge_per_outcome():
     assert home_row["model_probability"] == pytest.approx(0.6)
     assert home_row["decimal_odds"] == pytest.approx(2.0)
     assert home_row["edge"] == pytest.approx(home_row["model_probability"] - home_row["market_probability"])
+
+
+# --------------------------------------------------------------------------- evidence status per candidate
+
+
+def _research(rung: str = "L2", floor: str = "L4") -> dict:
+    return {
+        "display_floor": floor,
+        "validated_edge_exists": False,
+        "families": [{"family": "fam-a", "hypotheses": [{"id": "fam-a-x-v1", "rung": rung}]}],
+    }
+
+
+def test_every_ask_model_maps_to_its_registered_r7_bet_rule_hypothesis():
+    from pathlib import Path
+
+    from pitch_edge.agents.qa_data import ASK_MODEL_HYPOTHESES
+    from pitch_edge.models import default_models
+
+    registry = Path(__file__).resolve().parents[2] / "research" / "registry"
+    names = [m.name for m in default_models()]
+    assert set(ASK_MODEL_HYPOTHESES) == set(names)
+    for name in names:
+        hypothesis_id = ASK_MODEL_HYPOTHESES[name]
+        assert hypothesis_id == f"outcome-models-{name.replace('_', '-')}-bet-rule-v1"
+        assert (registry / f"{hypothesis_id}.yaml").is_file()
+
+
+def test_a_mapped_ask_model_carries_its_hypothesis_rung_and_stays_below_the_floor():
+    from pitch_edge.agents.qa_data import candidate_evidence
+
+    research = {
+        "display_floor": "L4",
+        "families": [
+            {
+                "family": "outcome-models",
+                "hypotheses": [{"id": "outcome-models-stochastic-strength-bet-rule-v1", "rung": "L1"}],
+            }
+        ],
+    }
+    ev = candidate_evidence("stochastic_strength", research)
+    assert ev["hypothesis_id"] == "outcome-models-stochastic-strength-bet-rule-v1"
+    assert ev["rung"] == "L1"
+    assert ev["validated_edge"] is False
+    assert ev["status"] == "L1, below display floor L4"
+    assert ev["label"] == "model-vs-market disagreement, not a validated edge"
+
+
+def test_models_without_a_registered_hypothesis_are_below_the_floor():
+    from pitch_edge.agents.qa_data import candidate_evidence
+
+    for model in ("unregistered_model", None):
+        ev = candidate_evidence(model, _research())
+        assert ev["hypothesis_id"] is None
+        assert ev["rung"] == "unregistered"
+        assert ev["display_floor"] == "L4"
+        assert ev["validated_edge"] is False
+        assert ev["status"] == "no registered evidence / below floor"
+        assert ev["label"] == "model-vs-market disagreement, not a validated edge"
+
+
+@pytest.mark.parametrize(("rung", "floor", "validated"), [("L3", "L4", False), ("L4", "L4", True), ("L4", "L5", False)])
+def test_a_registered_model_is_a_validated_edge_only_at_or_above_the_floor(rung, floor, validated):
+    from pitch_edge.agents.qa_data import candidate_evidence
+
+    ev = candidate_evidence("gbdt", _research(rung, floor), model_hypotheses={"gbdt": "fam-a-x-v1"})
+    assert (ev["hypothesis_id"], ev["rung"], ev["validated_edge"]) == ("fam-a-x-v1", rung, validated)
+    if not validated:
+        assert ev["label"] == "model-vs-market disagreement, not a validated edge"
+
+
+def test_annotate_candidates_adds_evidence_without_changing_the_candidates():
+    from pitch_edge.agents.qa_data import annotate_candidates
+
+    candidates = [{"match_id": "m1", "home_team": "Arsenal"}, {"match_id": "m2", "home_team": "Liverpool"}]
+    out = annotate_candidates(candidates, {"m1": "gbdt", "m2": None}, _research())
+    assert [c["match_id"] for c in out] == ["m1", "m2"]
+    assert out[0]["home_team"] == "Arsenal"
+    assert out[0]["evidence"]["model"] == "gbdt"
+    assert out[1]["evidence"]["model"] is None
+    assert out[1]["evidence"]["validated_edge"] is False
+    assert "evidence" not in candidates[0]  # inputs untouched
+
+
+# --------------------------------------------------------------------------- data freshness
+
+
+def _matches_warehouse(warehouse) -> None:
+    warehouse.upsert(
+        "matches",
+        pd.DataFrame(
+            {
+                "match_id": ["a", "b", "c"],
+                "date": pd.to_datetime(["2026-08-01 15:00", "2026-09-03 19:45", "2026-10-17 12:30"]),
+                "league_code": ["E0", "E0", "D1"],
+                "home_team": ["H1", "H2", "H3"],
+                "away_team": ["A1", "A2", "A3"],
+            }
+        ),
+        keys=["match_id"],
+    )
+
+
+def test_last_match_dates_is_the_latest_day_per_league(warehouse):
+    from pitch_edge.agents.qa_data import last_match_dates
+
+    _matches_warehouse(warehouse)
+    assert last_match_dates(warehouse) == {"E0": pd.Timestamp("2026-09-03"), "D1": pd.Timestamp("2026-10-17")}
+
+
+def test_last_match_dates_is_empty_without_a_matches_table(warehouse):
+    from pitch_edge.agents.qa_data import last_match_dates
+
+    assert last_match_dates(warehouse) == {}
+
+
+def test_data_freshness_notes_only_flag_gaps_over_a_week():
+    from pitch_edge.agents.qa_data import data_freshness_notes
+
+    last = {"E0": pd.Timestamp("2026-09-03"), "D1": pd.Timestamp("2026-10-21"), "I1": pd.Timestamp("2026-10-27")}
+    notes = data_freshness_notes(last, ["E0", "D1", "I1", "XX"], pd.Timestamp("2026-10-28 18:00"))
+    assert notes == ["Data for E0 ends 2026-09-03 (55 days before 2026-10-28)"]  # D1 is exactly 7 days: fresh
+
+
+def test_data_freshness_notes_ignore_data_that_runs_past_the_as_of_date():
+    from pitch_edge.agents.qa_data import data_freshness_notes
+
+    assert data_freshness_notes({"E0": pd.Timestamp("2026-09-03")}, ["E0"], pd.Timestamp("2025-01-01")) == []

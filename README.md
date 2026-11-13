@@ -1,189 +1,190 @@
 # PITCH-EDGE
 
-[![CI](https://github.com/hampusstalhandske/pitch-edge/actions/workflows/ci.yml/badge.svg)](https://github.com/hampusstalhandske/pitch-edge/actions/workflows/ci.yml)
+[![CI](https://github.com/hampustalhandske/pitch-edge/actions/workflows/ci.yml/badge.svg)](https://github.com/hampustalhandske/pitch-edge/actions/workflows/ci.yml)
 
-A Python football (soccer) intelligence & market-edge research platform, narrowed to two layers: a
-deterministic backtest/evidence pipeline, and a LangGraph `ask` agent that answers exactly three
-standardized questions — "top N bets", "team A vs team B", "what's on day X" — grounded in that evidence.
-It **surfaces — never places —** anything: there is no staking or order-placement code anywhere in the
-project.
+A Python research platform for football (soccer) betting markets. It asks one question over and over: does
+any rule built only from information available before kickoff beat the sharp closing price? Each idea is
+pre-registered, run as counted trials, scored against the de-vigged sharp close with block-bootstrap
+uncertainty, graded on an evidence ladder (L0 registered → L5 forward paper-traded), audited, and written up —
+including when it fails, which is most of the time.
 
-> **Hard guardrails.** No automated bet placement under any flag or config. No real-money movement. Every
-> number the `ask` agent states traces back to a walk-forward backtest or a real, vig-inclusive market price.
+Alongside the research layer sit a walk-forward backtest pipeline over the project's own match models and a
+LangGraph `ask` agent that answers three standard questions ("top N bets", "team A vs team B", "what's on day
+X") from that evidence.
+
+> **Hard guardrails.** No code path places a bet or moves money; there is no staking or order-placement code.
+> The forward test is paper only: it reads public market data and logs paper decisions. Every number the `ask`
+> agent states traces back to a walk-forward backtest, the research ledger or a real market price, and is
+> labelled with its evidence rung.
+
+## Current results
+
+Display floor **L4**, **no validated edge**. The findings at the top rung are predictive, not strategies:
+
+- **Cross-book closing-line model (R6, L4):** using every bookmaker's opening quote predicts the de-vigged
+  Pinnacle close better than a consensus-gap baseline — +6.61e-5 bits [5.75e-5, 7.41e-5], n=45,467 — real but
+  only about 2% of the open→close divergence.
+- **Book informativeness (R6, L4):** VC and Betfair opening deviations carry information about where Pinnacle
+  closes; BW, IW and 1xBet quotes are stale.
+- The best *strategy* rung is L2 (best-available "max" opening odds beating Pinnacle's fair open, an upper bound
+  on prices nobody can reliably get). Polymarket, Kalshi, crowd-attention and the other bookmaker-structure
+  studies are null or artefacts.
+
+One line per study, with links: [`reports/CASE_STUDY.md`](reports/CASE_STUDY.md). Live ladder:
+`pitch-edge research status`.
 
 ## Quickstart
 
-```bash
-uv sync --extra dev            # Python 3.11; torch, lightning, langchain, chromadb, langgraph, nicegui …
-uv run pitch-edge refresh      # ingest → features → backtests → RAG index
-uv run pitch-edge serve        # dark-mode dashboard on :8501 — one page, a question box
-uv run pytest                  # unit + integration tests, network mocked
-```
-
-No API keys are required for any of the above. Optional keys (API-Football, The Odds API, Everysport,
-Anthropic) are documented in `API_KEYS.md`; `uv run pitch-edge setup` walks through them interactively and
-writes a git-ignored `.env`. `uv sync --extra cloud` adds the optional GCS/BigQuery mirror.
+On an Apple-silicon Mac whose shell runs under Rosetta, prefix every `uv` command with `arch -arm64`.
 
 ```bash
-uv run pitch-edge ask "top 4 bets"                 # the only Q&A entrypoint (needs `ollama serve` locally)
-uv run pitch-edge ask "Liverpool vs Arsenal"       # --as-of YYYY-MM-DD to answer as of a specific date;
-uv run pitch-edge ask "what's on 2024-03-16"       # default: the most recent real closing-odds date
-uv run pitch-edge ablation | backtest | rag-eval | health | export
-uv run pitch-edge ingest-pmxt <start> <end>   # backfill real Polymarket order-book ticks (PMXT archive)
-uv run pitch-edge map-pmxt                    # join those markets onto our own matches/match_id
-uv run pitch-edge backtest-timing             # does timing entry on model/market disagreement pay off?
+uv sync --extra dev                      # Python 3.11
+uv run pytest                            # unit + integration tests, network mocked
+uv run pitch-edge refresh                # ingest → features → backtests → RAG index
+uv run pitch-edge serve                  # dashboard on :8501
+uv run pitch-edge ask "top 4 bets"       # also "Liverpool vs Arsenal", "what's on 2024-03-16"; --as-of YYYY-MM-DD
 ```
 
-`PITCH_EDGE_LLM_PROVIDER=groq` (with `GROQ_CLOUD_API_KEY` set, see `API_KEYS.md`) swaps every `ask`-agent LLM call from local Ollama to [Groq](https://console.groq.com)'s free tier — a real recurring daily quota (1,000 requests/day, 200k tokens/day on the default `openai/gpt-oss-20b`), confirmed several times faster and equally structured-output-reliable than an 8B local model, with no `ollama serve` needed at all.
+`ask` needs an LLM: a local `ollama serve` (default model `llama3.1:8b`), or `PITCH_EDGE_LLM_PROVIDER=groq`
+with `GROQ_CLOUD_API_KEY` set. The research and paper commands need access to the private lakehouse API (`LAKEHOUSE_API_URL`,
+`LAKEHOUSE_API_TOKEN` in `.env`); the paper loop's bookmaker quotes need `ODDS_API_KEY`. `uv run pitch-edge
+setup` walks through the optional keys; see `API_KEYS.md`.
 
-For results, known limitations and the honest headline numbers, see `CASE_STUDY.md`. Model details are in
-`MODEL_CARDS.md`.
+```bash
+uv run pitch-edge lake-sync [--only fd_matches] [--full-refresh]   # mirror lakehouse tables (resumable); rebuilds the football-data spine
+uv run pitch-edge research status                                  # every hypothesis, its trials and rung
+uv run pitch-edge research grade <hypothesis-id>                   # the ladder, gate by gate
+uv run pitch-edge paper status | report                            # forward paper ledger
+uv run pitch-edge control status | freeze | thaw | gate            # lake freeze: while active nothing reads the lake
+uv run pitch-edge backtest | ablation | rag-eval | health | export
+uv run pitch-edge ingest-pmxt <start> <end> && uv run pitch-edge map-pmxt   # Polymarket order-book archive
+uv run pitch-edge backtest-timing                                  # entry-timing backtest on Polymarket ticks
+```
 
 ## Architecture
 
 ```mermaid
 flowchart LR
-  subgraph Sources["Data Sources"]
-    FD[football-data.co.uk<br/>results + multi-book odds]
-    CF[Club-Football-Match-Data<br/>2000-2025 spine · Elo]
-    TM[Transfermarkt open extract<br/>players · rotation · valuations]
-    OF[openfootball<br/>fixtures · Sweden]
-    SB[StatsBomb Open Data<br/>events]
-    ESPN[ESPN soccer data]
-    ALT[weather · travel · referee<br/>news EN/SV · Wikipedia attention]
-    PMXT[Polymarket order-book archive<br/>PMXT hourly ticks]
+  subgraph Lake["Owner's private lakehouse (HTTP API, not included)"]
+    LK[football-data odds · Polymarket · Kalshi<br/>Understat · Club Elo · Transfermarkt · Bluesky · Reddit]
   end
-  Sources --> HTTP[CachedHttpClient<br/>throttle · disk cache · robots · circuit breaker]
-  HTTP --> WH[(DuckDB warehouse<br/>+ Parquet lake)]
-  PMXT --> MAP[pmxt_match_map<br/>Polymarket condition_id -> match_id]
-  WH --> MAP
-  WH --> FS[Feature store<br/>Elo · form · rotation · referee · weather · travel]
-  FS --> M1[Dixon-Coles per league]
-  FS --> M2[GBDT, no market]
-  FS --> M3[Stochastic strength<br/>Ornstein-Uhlenbeck + Monte Carlo]
-  FS --> M4[Lightning Transformer]
-  FS --> M5[Sentiment-only<br/>news signal isolated]
-  M1 & M2 & M3 --> BT[Walk-forward backtester<br/>no-vig edge · Kelly · CLV · calibration · ablation]
-  M2 & M3 & MAP --> TT[Tick-timing backtest<br/>entry-policy comparison vs real Polymarket ticks]
-  BT --> SL[Circumstance-sliced evidence<br/>league/referee/rest/travel/weather · min-n + FDR · checkpointed]
-  WH & SL --> RAG[LangChain hybrid RAG<br/>Chroma ∪ BM25 → RRF → rerank]
-  RAG & SL & MAP --> ASK[ask LangGraph agent<br/>parse_intent → gather (deterministic) → judge (tool-calling)]
-  ASK --> UI[NiceGUI dashboard · one page · a question box]
+  subgraph Free["Free sources"]
+    SRC[openfootball<br/>StatsBomb · ESPN · weather · travel · news · Wikipedia]
+  end
+  LK --> MIR[lake-sync<br/>lake_* mirrors]
+  LK --> ST[research studies<br/>research/studies/*]
+  ST --> LED[(research ledger<br/>registry · trials · ladder)]
+  AUD[skeptic-auditor audits<br/>edgelab second opinion] --> LED
+  LK --> PAP[paper loop<br/>launchd, hourly]
+  ODDS[the-odds-api · Polymarket · Kalshi<br/>public books] --> PAP
+  PAP --> PL[(paper ledger)]
+  Free --> HTTP[CachedHttpClient]
+  HTTP --> WH[(DuckDB warehouse)]
+  MIR --> WH
+  WH --> FS[feature store] --> MD[match models] --> BT[walk-forward backtest<br/>+ circumstance slices]
+  BT & WH --> RAG[hybrid RAG]
+  BT & RAG & LED & PL --> ASK[ask agent<br/>parse_intent → gather → judge]
+  ASK --> UI[NiceGUI dashboard<br/>question box + Evidence section]
+  LED & PL --> UI
 ```
 
-## Models
+## Research layer
 
-One `MatchModel` interface (`fit`, `predict_proba`, `card`), identical walk-forward folds for all of them.
-Five genuinely different approaches, not variations on one — and **no market-odds feature on any of
-them**: there's no live-odds feed, so a historical bookmaker-odds column would just be bias the live `ask`
-path can never actually see.
+- **Protocol.** A hypothesis is a YAML file in `research/registry/` (direction, primary metric, disconfirming
+  result, window, decision timestamp, family, parameter grid), registered on the ledger before any outcome is
+  scored. Every grid point is a trial; the ledger (`data/research/ledger.duckdb`) is append-only and
+  hash-chained, so dropped ideas still count toward multiple-testing corrections.
+- **Ladder.** `research/STANDARDS.md`: L1 point-in-time and reproducible, L2 out-of-sample CI excluding zero on
+  ≥ 300 decisions, L3 survives search (BH across the family, deflated Sharpe, PBO, effect-size ceiling,
+  sub-period and leave-one-league-out stability), L4 independent (auditor re-derivation, edgelab grade), L5
+  forward paper record. Benchmarks are the de-vigged Pinnacle close (through 2025-09) and the Betfair Exchange
+  close after that.
+- **Code.** `src/pitch_edge/research/` (registry, ledger, trial runner, stats, de-vig, gates, evidence summary)
+  and `pitch-edge research {register|status|grade|ledger|import-trials|review}`. Study code and `REPORT.md` per
+  study under `research/studies/`; audits under `research/audits/`.
+- **Lake bridge.** `src/pitch_edge/lake/` reads the lakehouse API and mirrors ten tables into `lake_*` warehouse
+  tables, each with a known-at column for point-in-time filtering; syncs are checkpointed per window and resume
+  where they stopped. The warehouse spine's football-data matches and odds (`lake/spine.py`) are built from the
+  `lake_fd_matches` mirror, not fetched from football-data.co.uk; `scripts/lake_sync_fd.sh` (launchd template in
+  `scripts/launchd/`) keeps that mirror current and `pitch-edge health` reports how far it lags the lake.
+- **edgelab bridge.** `src/pitch_edge/edgelab/` exports a binary-market dataset and scaffolds a strategy in the
+  layout the owner's private edgelab grading engine reads (not included).
+- **Paper loop.** `src/pitch_edge/paper/` + `scripts/paper_loop.sh` (launchd; see `scripts/README.md`): hourly
+  collection of Polymarket, Kalshi and the-odds-api quotes into `data/paper/paper.duckdb`, immutable paper
+  decisions by each registered strategy on fixtures that have not kicked off, daily settlement against the
+  lake's closing prices.
+
+## Match models and backtests
+
+One `MatchModel` interface (`fit`, `predict_proba`, `card`), identical walk-forward folds, no market-odds
+feature on any model:
 
 | Model | What it is |
 |---|---|
-| `dixon_coles` | bivariate Poisson + τ correction, exponential decay, one bounded MLE fit per league |
-| `gbdt` | histogram GBDT (LightGBM if installed, else scikit-learn HGB) on the agreed feature set (Elo, form, rest/travel/fatigue, referee, weather, news sentiment) |
-| `stochastic_strength` | team strength as a mean-reverting Ornstein-Uhlenbeck process on Elo; Monte Carlo simulates strength realizations and averages the resulting outcome probabilities — the quant-finance stochastic-process family (Vasicek-style), estimated by closed-form method-of-moments, no numerical optimizer |
-| `transformer_sequence` | PyTorch **Lightning** `TransformerEncoder` over each team's recent match sequence |
-| `sentiment_only` | multinomial logistic regression on *only* news sentiment/injury-item features — isolates whether that signal carries real edge on its own, rather than hiding it inside a bigger model; falls back to base rates when no news signal exists yet for a fixture |
+| `dixon_coles` | bivariate Poisson with τ correction and exponential time decay, one bounded MLE fit per league |
+| `gbdt` | histogram GBDT (LightGBM if installed, else scikit-learn HGB) on Elo, form, rest/travel, referee, weather, news features |
+| `stochastic_strength` | team strength as a mean-reverting Ornstein-Uhlenbeck process on Elo, outcome probabilities by Monte Carlo |
+| `transformer_sequence` | PyTorch Lightning `TransformerEncoder` over each team's recent match sequence |
+| `sentiment_only` | multinomial logistic regression on news sentiment/injury features only |
 
-Isotonic calibration is fit per outcome on realised past folds only. Model cards live in
-`data/backtest/main/model_card_*.json` (local; `reports/main/CASE_STUDY.md` is the public write-up).
+`pitch-edge backtest` trains strictly before each fold, prices bets at real quoted odds (Pinnacle early when
+present), measures CLV against the close, runs ¼-Kelly, ½-Kelly and flat staking, and writes a one-page
+`reports/<label>/CASE_STUDY.md` plus CSVs, model cards and circumstance-sliced evidence
+(`slice_evidence.csv`) under `data/backtest/<label>/` (gitignored). `pitch-edge backtest-timing` compares
+entry policies on real Polymarket order-book ticks. Every model so far loses to the closing price.
 
-## Backtesting
+## `ask` agent and dashboard
 
-Walk-forward only — train strictly before each fold, periodic retrain, never shuffled across time. Bets are
-priced at real quoted odds (Pinnacle early when present, otherwise market-average, and the report says
-which). CLV is measured against the closing line. ¼-Kelly, ½-Kelly and flat-stake strategies with hard caps,
-Monte Carlo drawdown, per-bet Sharpe. Every run writes a one-page `reports/<label>/CASE_STUDY.md`
-automatically; the full per-division/per-strategy breakdown, a feature-group ablation, and
-circumstance-sliced evidence (`slice_evidence.csv` — see `backtest/slices.py`) land in
-`data/backtest/<label>/` (local, gitignored). Losing strategies are published as-is.
+`agents/qa_graph.py`, answered as of an explicit historical date (`--as-of`, default: the most recent real
+closing-odds date; the agent reads no live odds):
 
-`pitch-edge backtest-timing` is a second, real-tick backtest over Polymarket's own order-book prices
-(`data/alt/pmxt_archive.py` + `pmxt_match_map` join, `odds/providers.py::PolymarketOddsProvider`) — instead
-of one open/close price pair per match, it compares **entry policies** (bet on the first tick, on the first
-tick where the model and market disagree by ≥`edge_threshold`, or on the last tick before kickoff) ranked
-by Sharpe ratio, the standard risk-adjusted metric for comparing trading strategies rather than raw ROI.
+- **`parse_intent`** — LLM structured output into `top_bets`, `fixture`, `fixtures_on_day` or `unrecognized`.
+- **`gather`** — deterministic: candidate fixtures (a real early Pinnacle quote is required; for "top N bets"
+  also a mapped Polymarket market), a fresh fit of `models.default_models()` (Dixon-Coles, GBDT, stochastic
+  strength) on data strictly before `as_of`, the no-vig market edge, the model to trust per fixture from
+  circumstance-matched backtest evidence, and each candidate's evidence status from the research ledger. No
+  `ask` model has a graded hypothesis yet, so every candidate is a model-vs-market disagreement below the
+  floor.
+- **`judge`** — a bounded tool-calling agent (`agents/evidence_tools.py`: `get_model_predictions`,
+  `get_backtest_evidence`, `get_price_history`, `search_context`, `research_status`, `paper_status`) that
+  narrates the batch with citations checked by `rag/generate.py::verify_citations`. It states the rung behind
+  what it narrates and says plainly when no validated edge exists. It never computes a probability or an edge.
 
-## RAG
+RAG: Chroma + sentence-transformers fused with BM25 by reciprocal-rank fusion, cross-encoder reranked;
+generation tries the configured provider (Ollama or Groq), then Claude if `ANTHROPIC_API_KEY` is set, then a
+deterministic template.
 
-Dense retrieval (`Chroma` + `sentence-transformers`) fused with sparse (`rank_bm25`) via reciprocal-rank
-fusion, then cross-encoder reranked. Generation is **local-first**: an Ollama model is tried before Claude,
-which is used only as a fallback when `ANTHROPIC_API_KEY` is set and local generation fails; a deterministic
-template is the final fallback offline. Every answer is citation-verified (`verify_citations`) — a number
-absent from the retrieved sources fails the check rather than shipping. `pitch-edge rag-eval` scores
-hit@k/MRR against synthetic QA generated from the corpus.
-
-## Agentic layer
-
-One LangGraph `StateGraph` (`agents/qa_graph.py`), answering exactly three standardized questions —
-"top N bets", "team A vs team B", "what's on day X" — as of an explicit point in time (`--as-of`, or the
-most recent real closing-odds date by default; there is no live-odds feed today, so there is no genuine
-"now" to answer as of instead):
-
-- **`parse_intent`** — the only LLM call that classifies the question, into one of the three intents above
-  or `unrecognized` ("I can't understand that" — there is no generic freeform fallback).
-- **`gather`** — deterministic: resolves candidate fixtures (a real, non-synthetic early Pinnacle quote is
-  required), fits every model fresh on data strictly before `as_of` (nothing in this project persists
-  fitted weights, so this is a real refit every time, not a cache lookup), computes each fixture's no-vig
-  market edge, and picks which model to trust per fixture from real backtest evidence matching that
-  fixture's own circumstances (`backtest/slices.py::select_trusted_model`) — never an LLM guess. For "top N
-  bets" specifically, a fixture with no mapped real Polymarket market (`pmxt_match_map`) is dropped
-  outright rather than falling back to a bet recommendation with no real market to time an entry against.
-- **`judge`** — a bounded, tool-calling react agent (`agents/evidence_tools.py`: `get_model_predictions`,
-  `get_backtest_evidence`, `get_price_history` (real Polymarket ticks, if the fixture has one mapped),
-  `search_context`, each argument-validated before touching any data) that narrates the batch `gather`
-  already computed, with one bounded reflection retry if its own citations don't check out
-  (`rag/generate.py::verify_citations`). It never computes a probability or an edge itself.
-
-## Dashboard
-
-`uv run pitch-edge serve` launches a [NiceGUI](https://nicegui.io) app (Python-native, FastAPI + Vue/Quasar)
-— chosen because it's a direct front end for the same `ask` graph the CLI uses, with no API contract or
-separate frontend to maintain. One page: a question box and an answer, nothing else. Dark theme,
-short-lived read-only warehouse connections so the dashboard never blocks the pipeline.
+`pitch-edge serve` runs a NiceGUI page: a question box for the same graph, and a read-only Evidence section
+(best rung and champion per research family, the display floor, and the paper ledger's forward record per
+strategy). It opens short-lived read-only connections only.
 
 ## Layout
 
 ```
 src/pitch_edge/
-  config.py, keys.py     settings (env/.env), optional-key registry behind `pitch-edge setup`
-  data/http.py            cached, throttled, robots-aware HTTP client with circuit breaker
-  data/contracts.py       pandera schemas (fail loudly on drift)
-  data/sources/           football-data.co.uk, Club-Football-Match-Data, Transfermarkt, openfootball,
-                          StatsBomb, ESPN, TheSportsDB, Club Elo, Everysport
-  data/alt/                odds (live + prediction markets), weather, travel, referee, news, Wikipedia attention
-  data/storage.py, ingest.py   DuckDB warehouse + orchestrated ingestion with per-source health logging
-  features/                pre-match feature store, rotation/lineup context, squad value (leakage-safe)
-                          — see `features/README.md` for what's in the warehouse and exactly which
-                          columns feed each model
-  models/                  dixon_coles, gbdt, sequence (Lightning Transformer), calibration
-  backtest/                walk-forward engine, Kelly + Monte Carlo, metrics, circumstance-sliced
-                          evidence (slices.py), point-in-time cutoffs (as_of.py), report writer
-  odds/                    OddsProvider interface, no-vig maths (utils.py, edge.py), steam/divergence detector
-  rag/                     documents (incl. evidence docs), hybrid retrieval, grounded generator
-                          (local LLM / Claude), ask-intent query parser
-  agents/                  the `ask` LangGraph agent (qa_graph.py, qa_data.py, qa_context.py,
-                          evidence_tools.py, llm.py)
-  vendor/                  third-party connectors vendored with a documented fix (see `vendor/NOTICE.md`)
-  ablation.py, artifacts.py, pipeline.py, scheduler.py   feature ablation, dashboard artifacts, single
-                          pipeline entrypoint, APScheduler jobs
-  cloud/sync.py            optional GCS + BigQuery mirror
-  dashboard/                web.py (NiceGUI, one page), theme.py (dark palette)
-  cli.py                   ingest | ingest-pmxt | map-pmxt | features | backtest | backtest-timing |
-                          ablation | ask | rag-eval | artifacts | health | export | refresh | serve |
-                          schedule | setup
-scripts/                  restartable long-run stage scripts (see `scripts/README.md`)
-deploy/                    Dockerfile, Cloud Run / Scheduler commands
-tests/                     pytest unit + integration tests, network mocked
+  cli.py                  the `pitch-edge` command (Typer); research/ and paper/ add sub-apps
+  config.py, keys.py      settings from env/.env; optional-key registry behind `pitch-edge setup`
+  research/               registry, ledger, trial runner, stats, de-vig, ladder gates, evidence summary
+  lake/                   lakehouse API client and lake_* mirrors
+  paper/                  collectors, strategies, store, settlement, report for the paper ledger
+  edgelab/                dataset export and strategy scaffold for edgelab
+  data/                   CachedHttpClient, pandera contracts, sources/, alt/ (odds, weather, travel,
+                          referee, news, Wikipedia, Polymarket archive), DuckDB warehouse, ingestion
+  features/               pre-match feature store (see features/README.md)
+  models/                 dixon_coles, gbdt, stochastic, sequence, sentiment, calibration
+  backtest/               walk-forward engine, staking, metrics, slices.py, as_of.py, tick timing, report
+  odds/                   odds providers, no-vig maths, steam/divergence detection
+  rag/                    documents, hybrid retrieval, grounded generator, ask-intent parser
+  agents/                 the `ask` graph (qa_graph, qa_data, qa_context, evidence_tools, llm)
+  dashboard/              web.py (NiceGUI), theme.py
+  vendor/                 vendored WhoScored scraper (see vendor/NOTICE.md; not wired into ingestion)
+research/                 STANDARDS, registry/, studies/, audits/
+reports/                  CASE_STUDY.md index and per-backtest write-ups
+scripts/                  paper loop, launchd agent, warehouse summary (see scripts/README.md)
+tests/                    pytest unit + integration tests, network mocked
 ```
 
 ## Docs
 
-`CASE_STUDY.md` is an index into `reports/<label>/CASE_STUDY.md` — one honest, one-page write-up per
-test (backtest/ablation/replay-eval), generated by the `case-study` Claude Code skill
-(`.claude/skills/case-study/SKILL.md`); `reports/` holds only those write-ups, never raw data. The
-CSVs/model cards behind them are local, under `data/backtest/` and `data/artifacts/` (gitignored).
-See also `src/pitch_edge/features/README.md` (what's in the warehouse and exactly which columns
-feed each model, generated from the current code rather than hand-maintained), `MODEL_CARDS.md`,
-`API_KEYS.md`, `scripts/README.md`, `src/pitch_edge/vendor/NOTICE.md`.
+`reports/CASE_STUDY.md` (study index), `research/STANDARDS.md` (the ladder), `API_KEYS.md`, `scripts/README.md`,
+`src/pitch_edge/features/README.md`, `src/pitch_edge/vendor/NOTICE.md`.

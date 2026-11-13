@@ -1,9 +1,8 @@
 """Concrete OddsProvider implementations.
 
 `HistoricalClosingOddsProvider` is real: it reads the bookmaker odds columns
-that ship inside football-data.co.uk match rows (see
-`pitch_edge.data.sources.football_data_co_uk`). This is genuine closing-line
-data, free, no key required, and is what the backtest engine uses for CLV.
+that ship inside football-data.co.uk match rows (the warehouse spine built from the lake mirror, see
+`pitch_edge.lake.spine`). This is genuine closing-line data and is what the backtest engine uses for CLV.
 
 `MockLiveOddsProvider` is explicitly synthetic — a stand-in for a paid live
 odds API (The Odds API / SportsGameOdds / a funded Betfair account) that
@@ -33,7 +32,7 @@ from pitch_edge.odds.base import OddsProvider, OddsQuote
 _MIN_PRICE = 0.001
 _MAX_PRICE = 0.999
 
-# Bookmaker column prefixes -> display name, matching football_data_co_uk.py
+# Bookmaker column prefixes -> display name, matching `pitch_edge.data.fd_vocab`
 _BOOKMAKER_NAMES = {
     "B365": "Bet365",
     "BW": "Bet&Win",
@@ -91,9 +90,7 @@ class PolymarketOddsProvider(OddsProvider):
         self._wh = wh
 
     def get_quotes(self, match_id: str) -> list[OddsQuote]:
-        markets = self._wh.query(
-            "SELECT condition_id, outcome_side FROM pmxt_match_map WHERE match_id = ?", [match_id]
-        )
+        markets = self._wh.query("SELECT condition_id, outcome_side FROM pmxt_match_map WHERE match_id = ?", [match_id])
         if markets.empty:
             return []
         side_by_condition = dict(zip(markets["condition_id"], markets["outcome_side"], strict=True))
@@ -117,7 +114,7 @@ class PolymarketOddsProvider(OddsProvider):
             f"""
             SELECT asset_id, timestamp_received, price FROM pmxt_orderbook
             WHERE condition_id IN ({cond_placeholders}) AND asset_id IN ({asset_placeholders})
-            ORDER BY timestamp_received
+            ORDER BY timestamp_received, asset_id, side, price, size
             """,
             list(side_by_condition) + list(asset_to_side),
         )
@@ -127,6 +124,8 @@ class PolymarketOddsProvider(OddsProvider):
         trades["side"] = trades["asset_id"].map(asset_to_side)
         trades["timestamp_received"] = pd.to_datetime(trades["timestamp_received"], utc=True, errors="coerce")
         trades = trades.dropna(subset=["timestamp_received"])
+        # Rows are in the warehouse key's order, so "last" at a shared timestamp is the row with the largest
+        # (side, price, size) whatever order the table returns them in.
         wide = trades.pivot_table(index="timestamp_received", columns="side", values="price", aggfunc="last")
         wide = wide.reindex(columns=["home", "draw", "away"]).ffill().dropna(how="any")
         if wide.empty:

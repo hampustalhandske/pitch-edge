@@ -25,7 +25,9 @@ BASE_URL = "https://api.everysport.com/v1"
 class EverysportSource(MatchDataSource):
     name = "everysport"
 
-    def __init__(self, api_key: str | None = None, cache_dir: str | Path | None = None, http: CachedHttpClient | None = None):
+    def __init__(
+        self, api_key: str | None = None, cache_dir: str | Path | None = None, http: CachedHttpClient | None = None
+    ):
         settings = get_settings()
         self.api_key = api_key or os.environ.get("EVERYSPORT_API_KEY")
         self.cache_dir = Path(cache_dir) if cache_dir else settings.raw_dir / "everysport"
@@ -68,7 +70,9 @@ class EverysportSource(MatchDataSource):
                     "league": f"Sweden - {(ev.get('league') or {}).get('name', league_id)}",
                     "league_code": f"ES{league_id}",
                     "country": "Sweden",
-                    "season": str(pd.to_datetime(ev.get("startDate"), errors="coerce").year) if ev.get("startDate") else "",
+                    "season": str(pd.to_datetime(ev.get("startDate"), errors="coerce").year)
+                    if ev.get("startDate")
+                    else "",
                     "home_team": home.get("name"),
                     "away_team": away.get("name"),
                     "home_goals": pd.to_numeric(ev.get("homeTeamScore"), errors="coerce"),

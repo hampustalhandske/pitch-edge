@@ -1,8 +1,8 @@
 """Central runtime configuration.
 
 Everything is overridable through environment variables so the same code
-runs locally (DuckDB/Parquet/Chroma on disk) and on GCP (Phase 3) without
-code changes. Nothing here ever holds a bookmaker account credential — the
+runs locally (DuckDB/Parquet/Chroma on disk) with the settings overridden
+per environment. Nothing here ever holds a bookmaker account credential — the
 system has no bet-placement capability to configure.
 """
 
@@ -12,12 +12,15 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
-USER_AGENT = "pitch-edge-research/0.2 (+https://github.com/hampusstalhandske/pitch-edge; research, non-commercial)"
+USER_AGENT = "pitch-edge-research/0.2 (+https://github.com/hampustalhandske/pitch-edge; research, non-commercial)"
 
 
-def load_dotenv(path: str | Path = ".env") -> int:
-    """Minimal .env loader (KEY=VALUE lines, # comments); never overrides variables already set."""
-    p = Path(path)
+def load_dotenv(path: str | Path | None = None) -> int:
+    """Minimal .env loader (KEY=VALUE lines, # comments); never overrides variables already set.
+
+    `path` defaults to `$PITCH_EDGE_ENV_FILE`, else `.env` in the working directory (scheduled jobs run from a
+    pinned worktree and point this at the main checkout's `.env`). Returns the number of variables set."""
+    p = Path(path if path is not None else os.environ.get("PITCH_EDGE_ENV_FILE", ".env"))
     if not p.exists():
         return 0
     loaded = 0
@@ -49,23 +52,19 @@ class Settings:
         default_factory=lambda: _env("PITCH_EDGE_EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
     )
     http_min_interval_s: float = field(default_factory=lambda: float(_env("PITCH_EDGE_HTTP_MIN_INTERVAL", "1.0")))
-    gcp_project: str | None = field(default_factory=lambda: os.environ.get("PITCH_EDGE_GCP_PROJECT"))
-    gcs_bucket: str | None = field(default_factory=lambda: os.environ.get("PITCH_EDGE_GCS_BUCKET"))
-    bigquery_dataset: str = field(default_factory=lambda: _env("PITCH_EDGE_BQ_DATASET", "pitch_edge"))
-    fd_archive_dir: str | None = field(default_factory=lambda: os.environ.get("PITCH_EDGE_FD_ARCHIVE_DIR"))
     local_llm_model: str = field(default_factory=lambda: _env("PITCH_EDGE_LOCAL_LLM_MODEL", "llama3.1:8b"))
     local_llm_base_url: str = field(
         default_factory=lambda: _env("PITCH_EDGE_LOCAL_LLM_BASE_URL", "http://localhost:11434")
     )
-    local_llm_timeout_s: float = field(
-        default_factory=lambda: float(_env("PITCH_EDGE_LOCAL_LLM_TIMEOUT_S", "60"))
-    )
+    local_llm_timeout_s: float = field(default_factory=lambda: float(_env("PITCH_EDGE_LOCAL_LLM_TIMEOUT_S", "60")))
     llm_provider: str = field(default_factory=lambda: _env("PITCH_EDGE_LLM_PROVIDER", "ollama"))
     groq_api_key: str | None = field(default_factory=lambda: os.environ.get("GROQ_CLOUD_API_KEY"))
     groq_model: str = field(default_factory=lambda: _env("PITCH_EDGE_GROQ_MODEL", "openai/gpt-oss-20b"))
     # Free-tier Hugging Face Inference API — last-resort fallback behind both Groq models, since HF's
     # current free tier is a small trial credit (not a real recurring quota like Groq's), see agents/llm.py.
-    hf_token: str | None = field(default_factory=lambda: os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_API_KEY"))
+    hf_token: str | None = field(
+        default_factory=lambda: os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_API_KEY")
+    )
     hf_model: str = field(default_factory=lambda: _env("PITCH_EDGE_HF_MODEL", "meta-llama/Llama-3.1-8B-Instruct"))
 
     @property

@@ -12,7 +12,6 @@ table in the warehouse, not just the ones summarized here, with column counts an
 flowchart LR
     subgraph Sources["Free data sources"]
         FD["football-data.co.uk\nresults + multi-book odds"]
-        CF["Club-Football-Match-Data\n2000-2025 spine, Elo"]
         TM["Transfermarkt open extract\nplayers, valuations, lineups"]
         SB["StatsBomb Open Data\nevents"]
         ESPN["ESPN soccer data\nfixtures, stats, lineups"]
@@ -58,9 +57,9 @@ flowchart LR
 | TheSportsDB (Sweden lower divisions) | `tsdb_events`, `tsdb_teams` | 55, 45 |
 | Player graph (research, not fed to a match model) | `player_embeddings`, `player_similarity` | 1.8k, 750 |
 | In-play (research, not fed to a match model) | `inplay_paths` | 3.5k |
-| Dashboard/report artifacts | `feature_importance`, `fixture_predictions`, `team_strength` | 58, 6, 261 |
+| Dashboard/report artifacts | `fixture_predictions` | 6 |
 | Pipeline health | `pipeline_runs` | one row per ingest/backtest run |
-| Legacy, no longer written | `dossiers`, `paper_trades` | 10, 4 — leftover from the removed `intel/` dossier module and signals pipeline; harmless, not part of the current architecture |
+| Legacy, no longer written | `paper_trades`, `feature_importance`, `team_strength` | 4, 58, 261 — left in existing warehouses by modules that no longer exist; harmless, not part of the current architecture |
 
 `uv run python scripts/data_summary.py` lists every one of these (54 tables as of the last check) with
 exact current counts, column counts, and date ranges — the table above groups them for readability,

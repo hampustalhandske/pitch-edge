@@ -58,6 +58,50 @@ def test_replace_and_read_where(warehouse):
     assert out["match_id"].tolist() == ["b"]
 
 
+class _FailOn:
+    """A connection wrapper that raises on the first statement containing `needle`, else delegates."""
+
+    def __init__(self, conn, needle: str):
+        self._conn, self._needle, self.fired = conn, needle, False
+
+    def execute(self, sql, *args):
+        if not self.fired and self._needle in sql:
+            self.fired = True
+            raise RuntimeError(f"killed at: {sql}")
+        return self._conn.execute(sql, *args)
+
+    def __getattr__(self, name):
+        return getattr(self._conn, name)
+
+
+@pytest.mark.parametrize("needle", ["CREATE TABLE features__staging", "ALTER TABLE", "COMMIT"])
+def test_a_failed_replace_leaves_the_old_table_whole_and_no_staging_table(warehouse, needle):
+    warehouse.replace("features", pd.DataFrame({"match_id": ["a", "b"], "x": [1.0, 2.0]}))
+    real = warehouse._conn
+    warehouse._conn = _FailOn(real, needle)
+    with pytest.raises(RuntimeError, match="killed at"):
+        warehouse.replace("features", pd.DataFrame({"match_id": ["c"], "x": [3.0]}))
+    warehouse._conn = real
+    assert warehouse.read("features")["match_id"].tolist() == ["a", "b"]
+    assert not warehouse.table_exists("features__staging")
+
+
+def test_replace_swaps_in_the_new_rows_and_an_empty_frame_drops_the_table(warehouse):
+    warehouse.replace("features", pd.DataFrame({"match_id": ["a", "b"], "x": [1.0, 2.0]}))
+    assert warehouse.replace("features", pd.DataFrame({"match_id": ["c"], "y": ["z"]})) == 1
+    assert warehouse.read("features").to_dict("records") == [{"match_id": "c", "y": "z"}]
+    assert not warehouse.table_exists("features__staging")
+    assert warehouse.replace("features", pd.DataFrame()) == 0
+    assert not warehouse.table_exists("features")
+
+
+def test_a_staging_table_left_by_a_killed_run_is_cleared_by_the_next_replace(warehouse):
+    warehouse._conn.execute("CREATE TABLE features__staging AS SELECT 'stale' AS match_id")
+    warehouse.replace("features", pd.DataFrame({"match_id": ["a"]}))
+    assert warehouse.read("features")["match_id"].tolist() == ["a"]
+    assert not warehouse.table_exists("features__staging")
+
+
 def test_odds_long_join_produces_wide_columns(warehouse):
     warehouse.upsert("matches", _matches(1))
     odds = pd.DataFrame(

@@ -202,8 +202,14 @@ class OpenFootballSource(MatchDataSource):
         df = df.dropna(subset=["date", "home_team", "away_team"])
         slug = lambda s: re.sub(r"[^A-Za-z0-9]+", "", str(s))  # noqa: E731
         df["match_id"] = (
-            "of_" + league.replace(".", "") + "_" + df["date"].dt.strftime("%Y%m%d") + "_"
-            + df["home_team"].map(slug) + "_" + df["away_team"].map(slug)
+            "of_"
+            + league.replace(".", "")
+            + "_"
+            + df["date"].dt.strftime("%Y%m%d")
+            + "_"
+            + df["home_team"].map(slug)
+            + "_"
+            + df["away_team"].map(slug)
         )
         return df.drop_duplicates(subset="match_id").reset_index(drop=True)
 
@@ -225,14 +231,18 @@ class OpenFootballSource(MatchDataSource):
             return df
         return self.validate(df)
 
-    def fetch_sweden(self, seasons: tuple[int, ...] = (2023, 2024, 2025), include_unplayed: bool = False) -> pd.DataFrame:
+    def fetch_sweden(
+        self, seasons: tuple[int, ...] = (2023, 2024, 2025), include_unplayed: bool = False
+    ) -> pd.DataFrame:
         frames = []
         tiers = ((1, "SWE1", "Sweden - Allsvenskan"), (2, "SWE2", "Sweden - Superettan"), (3, "SWE3", "Sweden - Ettan"))
         for year in seasons:
             for tier, code, name in tiers:
                 for suffix in [f"{year}_se{tier}.txt"] if tier < 3 else [f"{year}_se3s.txt", f"{year}_se3n.txt"]:
                     try:
-                        frames.append(self.fetch_europe_txt("sweden", suffix, code, name, include_unplayed=include_unplayed))
+                        frames.append(
+                            self.fetch_europe_txt("sweden", suffix, code, name, include_unplayed=include_unplayed)
+                        )
                     except Exception as exc:  # noqa: BLE001 - file may not exist for that season
                         logger.info("openfootball sweden %s: %s", suffix, exc)
         frames = [f for f in frames if not f.empty]
